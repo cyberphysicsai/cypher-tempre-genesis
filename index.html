@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cypher Tempre Timechain Dashboard</title>
+    <link rel="stylesheet" href="styles.css?v=20260605-accountfix">
+  </head>
+  <body>
+    <canvas id="motifCanvas" aria-hidden="true"></canvas>
+    <main class="shell">
+      <section id="bridgeGate" class="gate hidden">
+        <div class="gate-copy">
+          <p class="eyebrow">Local Bridge</p>
+          <h1>Pair Agent Files</h1>
+          <p class="lede">Connect this browser to the Cypher Tempre bridge running on this machine. The bridge reads local Timechain files without uploading them.</p>
+          <div class="gate-grid">
+            <div>
+              <span>Source</span>
+              <strong>Localhost</strong>
+            </div>
+            <div>
+              <span>Scope</span>
+              <strong>Timechain</strong>
+            </div>
+            <div>
+              <span>Storage</span>
+              <strong>Local only</strong>
+            </div>
+          </div>
+        </div>
+        <div class="gate-panel">
+          <div id="bridgeState" class="status">Bridge disconnected</div>
+          <label class="field">
+            <span>Bridge URL</span>
+            <input id="bridgeUrl" spellcheck="false" value="http://127.0.0.1:8788">
+          </label>
+          <button id="checkBridge" class="secondary">Check Bridge</button>
+          <label class="field">
+            <span>Pairing code</span>
+            <input id="pairCode" spellcheck="false" placeholder="XXXX-XXXX">
+          </label>
+          <button id="pairBridge" class="primary">Pair Bridge</button>
+          <p id="bridgeMessage" class="message"></p>
+        </div>
+      </section>
+
+      <section id="gate" class="gate hidden">
+        <div class="gate-copy">
+          <p class="eyebrow">Local Timechain Access</p>
+          <h1>Cypher Tempre Dashboard</h1>
+          <p class="lede">Unlock local audit views with a verified Base payment, then inspect the Timechain files on this machine.</p>
+          <div class="gate-grid">
+            <div>
+              <span>Token</span>
+              <strong id="tokenLabel">Loading…</strong>
+            </div>
+            <div>
+              <span>Recipient</span>
+              <strong id="recipientLabel">cyberphysics.base.eth</strong>
+            </div>
+            <div>
+              <span>Network</span>
+              <strong>Base</strong>
+            </div>
+          </div>
+        </div>
+        <div class="gate-panel">
+          <div id="walletState" class="status">Wallet disconnected</div>
+          <button id="connectWallet" class="secondary">Connect Browser Wallet</button>
+          <button id="payToken" class="secondary" disabled>Pay With Browser Wallet</button>
+          <label class="field">
+            <span>Transaction hash</span>
+            <input id="txHash" spellcheck="false" placeholder="0x…">
+          </label>
+          <button id="verifyPayment" class="primary" disabled>Verify Hash & Unlock</button>
+          <p id="gateMessage" class="message"></p>
+        </div>
+      </section>
+
+      <section id="dashboard" class="dashboard hidden">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Personal Chain Agent</p>
+            <h1>Timechain Audit</h1>
+          </div>
+          <div class="root-pill" id="rootPath"></div>
+        </header>
+
+        <section class="stats-grid" id="statsGrid"></section>
+
+        <section class="band split">
+          <div>
+            <div class="section-head">
+              <h2>Domain Context</h2>
+              <span id="domainMeta"></span>
+            </div>
+            <div id="domainList" class="domain-list"></div>
+          </div>
+          <div>
+            <div class="section-head">
+              <h2>Faculty Surface</h2>
+              <span id="facultyMeta"></span>
+            </div>
+            <div class="faculty-bars">
+              <div>
+                <h3>Modalities</h3>
+                <div id="modalityBars"></div>
+              </div>
+              <div>
+                <h3>Senses</h3>
+                <div id="senseBars"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band">
+          <div class="section-head">
+            <h2>Rings</h2>
+            <div class="filters">
+              <input id="ringSearch" placeholder="Search rings">
+              <select id="ringType">
+                <option value="">All types</option>
+              </select>
+            </div>
+          </div>
+          <div class="ring-layout">
+            <div id="ringList" class="ring-list"></div>
+            <article id="ringDetail" class="detail-panel">
+              <h3>Select a ring</h3>
+              <pre></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="band">
+          <div class="section-head">
+            <h2>Blockspace</h2>
+            <span id="blockspaceMeta"></span>
+          </div>
+          <div id="blockspaceList" class="blob-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="blobDialog">
+      <div class="dialog-head">
+        <h2>Blockspace Blob</h2>
+        <button id="closeBlob" class="ghost">Close</button>
+      </div>
+      <pre id="blobPreview"></pre>
+    </dialog>
+
+    <script src="config.js?v=20260605-accountfix"></script>
+    <script type="module" src="app.js?v=20260605-accountfix"></script>
+  </body>
+</html>
