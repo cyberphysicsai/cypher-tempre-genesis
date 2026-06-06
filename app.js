@@ -18,7 +18,7 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 const LOCAL_PAGE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
-const ASSET_VERSION = '20260605-accountfix';
+const ASSET_VERSION = '20260606-signedgate';
 
 window.addEventListener('eip6963:announceProvider', (event) => {
   const detail = event.detail;
@@ -278,7 +278,7 @@ async function init() {
     $('bridgeGate').classList.add('hidden');
     $('gate').classList.remove('hidden');
     bindGate();
-    setText('gateMessage', `Send ${state.config.token.requiredAmount} ${state.config.token.symbol} on Base to ${state.config.recipient.name}, then paste the transaction hash. Browser wallet connect is optional.`);
+    setText('gateMessage', `Connect the payer wallet, send ${state.config.token.requiredAmount} ${state.config.token.symbol} on Base to ${state.config.recipient.name}, then sign this session challenge to unlock.`);
   }
 }
 
@@ -422,24 +422,63 @@ function walletProvider() {
   return state.walletProvider;
 }
 
+async function connectWalletProvider() {
+  setText('gateMessage', walletConnectProjectId() ? 'Opening WalletConnect…' : 'Looking for browser wallet provider…');
+  let provider = null;
+  try {
+    provider = await connectWalletConnect();
+  } catch (error) {
+    if (!window.ethereum && !state.walletProviders.length) throw error;
+    setText('gateMessage', `WalletConnect did not finish: ${error.message}. Trying browser wallet…`);
+  }
+  if (!provider) {
+    provider = await connectInjectedWallet();
+  }
+  await ensureBase();
+  setText('walletState', `${state.account.slice(0, 6)}…${state.account.slice(-4)} on Base`);
+  $('payToken').disabled = false;
+  $('verifyPayment').disabled = !$('txHash').value.trim();
+  return provider;
+}
+
+function normalizeAccount(value) {
+  const text = String(value || '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(text)) {
+    throw new Error('Wallet did not return a valid EVM account.');
+  }
+  return text;
+}
+
+async function activeWalletAccount() {
+  const provider = walletProvider();
+  try {
+    const accounts = await provider.request({ method: 'eth_accounts' });
+    if (accounts?.[0]) state.account = normalizeAccount(accounts[0]);
+  } catch {
+    state.account = normalizeAccount(state.account);
+  }
+  return normalizeAccount(state.account);
+}
+
+async function signPersonalMessage(provider, account, message) {
+  try {
+    return await provider.request({
+      method: 'personal_sign',
+      params: [message, account],
+    });
+  } catch (error) {
+    if (error.code === 4001) throw error;
+    return provider.request({
+      method: 'personal_sign',
+      params: [account, message],
+    });
+  }
+}
+
 async function connectWallet() {
   try {
-    setText('gateMessage', walletConnectProjectId() ? 'Opening WalletConnect…' : 'Looking for browser wallet provider…');
-    let provider = null;
-    try {
-      provider = await connectWalletConnect();
-    } catch (error) {
-      if (!window.ethereum && !state.walletProviders.length) throw error;
-      setText('gateMessage', `WalletConnect did not finish: ${error.message}. Trying browser wallet…`);
-    }
-    if (!provider) {
-      provider = await connectInjectedWallet();
-    }
-    await ensureBase();
-    setText('walletState', `${state.account.slice(0, 6)}…${state.account.slice(-4)} on Base`);
-    setText('gateMessage', 'Wallet connected. You can pay here, or paste a transaction hash from any wallet.');
-    $('payToken').disabled = false;
-    $('verifyPayment').disabled = !$('txHash').value.trim();
+    await connectWalletProvider();
+    setText('gateMessage', 'Wallet connected. Pay here, or paste a transaction hash from this same payer wallet and sign to unlock.');
   } catch (error) {
     setText('gateMessage', error.message);
   }
@@ -505,10 +544,19 @@ async function verifyPayment() {
   try {
     const txHash = $('txHash').value.trim();
     if (!txHash) throw new Error('Paste a Base transaction hash first.');
-    setText('gateMessage', 'Verifying transaction hash on Base…');
+    if (!state.walletProvider || !state.account) {
+      await connectWalletProvider();
+    }
+    await ensureBase();
+    state.config = await api('/api/gate/config');
+    const account = await activeWalletAccount();
+    const message = accessMessage(account, txHash);
+    setText('gateMessage', 'Sign this session challenge with the payer wallet…');
+    const signature = await signPersonalMessage(walletProvider(), account, message);
+    setText('gateMessage', 'Verifying signed payment on Base…');
     await api('/api/gate/verify', {
       method: 'POST',
-      body: JSON.stringify({ txHash }),
+      body: JSON.stringify({ txHash, account, signature }),
     });
     await unlockDashboard();
   } catch (error) {
