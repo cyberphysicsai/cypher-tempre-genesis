@@ -498,3 +498,21 @@ dialog::backdrop {
     flex-direction: column;
   }
 }
+
+
+/* P1 — learning membrane panels */
+.triptych { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.integrity-card { border: 1px solid var(--line, #2a2f3a); border-radius: 10px; padding: 12px 14px; }
+.integrity-card h3 { margin: 0 0 6px; font-size: 12px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.06em; }
+.integrity-card strong { display: block; font-size: 18px; margin-bottom: 4px; }
+.integrity-card.ok strong { color: #4ade80; }
+.integrity-card.fail strong { color: #f87171; }
+.integrity-card.na strong { color: #9ca3af; }
+.learning-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
+.learning-grid h3 { margin: 0 0 8px; font-size: 14px; }
+.spark-wrap { border: 1px solid var(--line, #2a2f3a); border-radius: 10px; padding: 6px; }
+.sparkline { width: 100%; height: auto; display: block; }
+.sparkline polyline { fill: none; stroke: #60a5fa; stroke-width: 2; }
+.sparkline text { fill: #9ca3af; font-size: 10px; }
+.economics { margin-bottom: 10px; }
+@media (max-width: 860px) { .triptych, .learning-grid { grid-template-columns: 1fr; } }

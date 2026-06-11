@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cypher Tempre Timechain Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=20260606-signedgate">
+    <link rel="stylesheet" href="styles.css?v=20260610-freeaudit">
   </head>
   <body>
     <canvas id="motifCanvas" aria-hidden="true"></canvas>
@@ -45,39 +45,6 @@
         </div>
       </section>
 
-      <section id="gate" class="gate hidden">
-        <div class="gate-copy">
-          <p class="eyebrow">Local Timechain Access</p>
-          <h1>Cypher Tempre Dashboard</h1>
-          <p class="lede">Unlock local audit views with a verified Base payment, then inspect the Timechain files on this machine.</p>
-          <div class="gate-grid">
-            <div>
-              <span>Token</span>
-              <strong id="tokenLabel">Loading…</strong>
-            </div>
-            <div>
-              <span>Recipient</span>
-              <strong id="recipientLabel">cyberphysics.base.eth</strong>
-            </div>
-            <div>
-              <span>Network</span>
-              <strong>Base</strong>
-            </div>
-          </div>
-        </div>
-        <div class="gate-panel">
-          <div id="walletState" class="status">Wallet disconnected</div>
-          <button id="connectWallet" class="secondary">Connect Browser Wallet</button>
-          <button id="payToken" class="secondary" disabled>Pay With Browser Wallet</button>
-          <label class="field">
-            <span>Transaction hash</span>
-            <input id="txHash" spellcheck="false" placeholder="0x…">
-          </label>
-          <button id="verifyPayment" class="primary" disabled>Verify Hash & Unlock</button>
-          <p id="gateMessage" class="message"></p>
-        </div>
-      </section>
-
       <section id="dashboard" class="dashboard hidden">
         <header class="topbar">
           <div>
@@ -88,6 +55,39 @@
         </header>
 
         <section class="stats-grid" id="statsGrid"></section>
+
+        <section class="band" id="learningBand">
+          <div class="section-head">
+            <h2>Learning Membrane</h2>
+            <span id="learningMeta"></span>
+          </div>
+          <div class="triptych">
+            <article class="integrity-card" id="intChain"><h3>Hash Chain</h3><strong>—</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="intQuorum"><h3>Witness Quorum</h3><strong>—</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="intDigests"><h3>Telemetry Digests</h3><strong>—</strong><span class="meta"></span></article>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Economics</h3>
+              <div id="economicsStats" class="economics"></div>
+              <div id="tokensSpark" class="spark-wrap"></div>
+            </div>
+            <div>
+              <h3>Seal Quality <span class="meta">(brightness over chain height)</span></h3>
+              <div id="qualitySpark" class="spark-wrap"></div>
+            </div>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Operators <span class="meta">(adoptions &amp; rollbacks — sealed, falsifiable)</span></h3>
+              <div id="operatorList" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Dream Cycles</h3>
+              <div id="dreamList" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
 
         <section class="band split">
           <div>
@@ -152,7 +152,7 @@
       <pre id="blobPreview"></pre>
     </dialog>
 
-    <script src="config.js?v=20260606-signedgate"></script>
-    <script type="module" src="app.js?v=20260606-signedgate"></script>
+    <script src="config.js?v=20260610-freeaudit"></script>
+    <script type="module" src="app.js?v=20260610-freeaudit"></script>
   </body>
 </html>

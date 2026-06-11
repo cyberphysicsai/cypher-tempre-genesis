@@ -1,32 +1,18 @@
 const state = {
-  config: null,
-  account: null,
   summary: null,
+  learning: null,
   rings: [],
   selectedRing: null,
   hostedMode: false,
   bridgeBase: '',
   bridgeToken: '',
   bridgeBound: false,
-  gateBound: false,
   dashboardBound: false,
-  walletProvider: null,
-  walletProviders: [],
-  walletConnect: null,
-  walletConnectLoad: null,
 };
 
 const $ = (id) => document.getElementById(id);
 const LOCAL_PAGE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
-const ASSET_VERSION = '20260606-signedgate';
-
-window.addEventListener('eip6963:announceProvider', (event) => {
-  const detail = event.detail;
-  if (!detail?.provider) return;
-  const key = detail.info?.uuid || detail.info?.rdns || detail.info?.name || String(state.walletProviders.length);
-  if (state.walletProviders.some((item) => item.key === key)) return;
-  state.walletProviders.push({ key, ...detail });
-});
+const ASSET_VERSION = '20260610-freeaudit';
 
 function isLocalPage() {
   return LOCAL_PAGE_HOSTS.has(window.location.hostname);
@@ -34,14 +20,6 @@ function isLocalPage() {
 
 function cleanBridgeBase(value) {
   return String(value || '').trim().replace(/\/$/, '');
-}
-
-function publicConfig() {
-  return window.CYPHER_TEMPRE_PUBLIC_CONFIG || {};
-}
-
-function walletConnectProjectId() {
-  return String(state.config?.walletConnect?.projectId || publicConfig().walletConnectProjectId || '').trim();
 }
 
 function setupBridgeState() {
@@ -265,21 +243,9 @@ async function api(path, options = {}) {
 
 async function init() {
   setupBridgeState();
-  $('gate').classList.add('hidden');
   $('dashboard').classList.add('hidden');
   if (state.hostedMode && !(await ensureBridgePaired())) return;
-
-  state.config = await api('/api/gate/config');
-  setText('tokenLabel', `${state.config.token.requiredAmount} ${state.config.token.symbol}`);
-    setText('recipientLabel', `${state.config.recipient.name}`);
-  if (!state.config.locked) {
-    await unlockDashboard();
-  } else {
-    $('bridgeGate').classList.add('hidden');
-    $('gate').classList.remove('hidden');
-    bindGate();
-    setText('gateMessage', `Connect the payer wallet, send ${state.config.token.requiredAmount} ${state.config.token.symbol} on Base to ${state.config.recipient.name}, then sign this session challenge to unlock.`);
-  }
+  await unlockDashboard();
 }
 
 async function ensureBridgePaired() {
@@ -340,233 +306,8 @@ async function pairBridge() {
   }
 }
 
-function bindGate() {
-  if (state.gateBound) return;
-  state.gateBound = true;
-  if (walletConnectProjectId()) {
-    $('connectWallet').textContent = 'Connect WalletConnect';
-  }
-  $('connectWallet').addEventListener('click', connectWallet);
-  $('payToken').addEventListener('click', payToken);
-  $('verifyPayment').addEventListener('click', verifyPayment);
-  $('txHash').addEventListener('input', () => {
-    $('verifyPayment').disabled = !$('txHash').value.trim();
-  });
-}
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function detectWalletProvider() {
-  window.dispatchEvent(new Event('eip6963:requestProvider'));
-  await wait(500);
-  if (window.ethereum) {
-    state.walletProvider = window.ethereum;
-    return state.walletProvider;
-  }
-  const preferred = state.walletProviders.find((item) => /metamask|coinbase|rabby/i.test(`${item.info?.name || ''} ${item.info?.rdns || ''}`));
-  const selected = preferred || state.walletProviders[0];
-  state.walletProvider = selected?.provider || null;
-  return state.walletProvider;
-}
-
-async function loadWalletConnect() {
-  const projectId = walletConnectProjectId();
-  if (!projectId) return null;
-  if (!state.walletConnectLoad) {
-    state.walletConnectLoad = import(`./reown-wallet.js?v=${ASSET_VERSION}`).then((module) => {
-      state.walletConnect = module.createCypherTempreWalletConnect({
-        projectId,
-        metadata: {
-          name: 'Cypher Tempre Timechain Dashboard',
-          description: 'Local-first Timechain audit dashboard with Base token-gated access.',
-          url: window.location.origin,
-          icons: [`${window.location.origin}/favicon.ico`],
-        },
-      });
-      return state.walletConnect;
-    });
-  }
-  return state.walletConnectLoad;
-}
-
-async function connectWalletConnect() {
-  const connector = await loadWalletConnect();
-  if (!connector) return null;
-  setText('gateMessage', 'Opening WalletConnect…');
-  const { provider, account } = await connector.connect();
-  if (!provider?.request || !account) {
-    throw new Error('WalletConnect did not return an EVM account.');
-  }
-  state.walletProvider = provider;
-  state.account = account;
-  return provider;
-}
-
-async function connectInjectedWallet() {
-  const provider = await detectWalletProvider();
-  if (!provider?.request) {
-    throw new Error('No browser wallet detected. Install MetaMask, Coinbase Wallet, Rabby, or configure WalletConnect in dashboard/public/config.js.');
-  }
-  const accounts = await provider.request({ method: 'eth_requestAccounts' });
-  if (!accounts?.[0]) throw new Error('Wallet did not return an account.');
-  state.account = accounts[0];
-  return provider;
-}
-
-function walletProvider() {
-  if (!state.walletProvider) {
-    throw new Error('Wallet disconnected. Connect a wallet first.');
-  }
-  return state.walletProvider;
-}
-
-async function connectWalletProvider() {
-  setText('gateMessage', walletConnectProjectId() ? 'Opening WalletConnect…' : 'Looking for browser wallet provider…');
-  let provider = null;
-  try {
-    provider = await connectWalletConnect();
-  } catch (error) {
-    if (!window.ethereum && !state.walletProviders.length) throw error;
-    setText('gateMessage', `WalletConnect did not finish: ${error.message}. Trying browser wallet…`);
-  }
-  if (!provider) {
-    provider = await connectInjectedWallet();
-  }
-  await ensureBase();
-  setText('walletState', `${state.account.slice(0, 6)}…${state.account.slice(-4)} on Base`);
-  $('payToken').disabled = false;
-  $('verifyPayment').disabled = !$('txHash').value.trim();
-  return provider;
-}
-
-function normalizeAccount(value) {
-  const text = String(value || '').trim();
-  if (!/^0x[0-9a-fA-F]{40}$/.test(text)) {
-    throw new Error('Wallet did not return a valid EVM account.');
-  }
-  return text;
-}
-
-async function activeWalletAccount() {
-  const provider = walletProvider();
-  try {
-    const accounts = await provider.request({ method: 'eth_accounts' });
-    if (accounts?.[0]) state.account = normalizeAccount(accounts[0]);
-  } catch {
-    state.account = normalizeAccount(state.account);
-  }
-  return normalizeAccount(state.account);
-}
-
-async function signPersonalMessage(provider, account, message) {
-  try {
-    return await provider.request({
-      method: 'personal_sign',
-      params: [message, account],
-    });
-  } catch (error) {
-    if (error.code === 4001) throw error;
-    return provider.request({
-      method: 'personal_sign',
-      params: [account, message],
-    });
-  }
-}
-
-async function connectWallet() {
-  try {
-    await connectWalletProvider();
-    setText('gateMessage', 'Wallet connected. Pay here, or paste a transaction hash from this same payer wallet and sign to unlock.');
-  } catch (error) {
-    setText('gateMessage', error.message);
-  }
-}
-
-async function ensureBase() {
-  const provider = walletProvider();
-  const current = await provider.request({ method: 'eth_chainId' });
-  if (current === state.config.chain.idHex) return;
-  try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: state.config.chain.idHex }],
-    });
-  } catch (error) {
-    if (error.code !== 4902) throw error;
-    await provider.request({
-      method: 'wallet_addEthereumChain',
-      params: [{
-        chainId: state.config.chain.idHex,
-        chainName: 'Base',
-        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-        rpcUrls: ['https://mainnet.base.org'],
-        blockExplorerUrls: ['https://basescan.org'],
-      }],
-    });
-  }
-}
-
-function transferData(recipient, amountRaw) {
-  const addressWord = recipient.toLowerCase().replace(/^0x/, '').padStart(64, '0');
-  const valueWord = BigInt(amountRaw).toString(16).padStart(64, '0');
-  return `0xa9059cbb${addressWord}${valueWord}`;
-}
-
-async function payToken() {
-  try {
-    await ensureBase();
-    const txHash = await walletProvider().request({
-      method: 'eth_sendTransaction',
-      params: [{
-        from: state.account,
-        to: state.config.token.address,
-        value: '0x0',
-        data: transferData(state.config.recipient.address, state.config.token.requiredAmountRaw),
-      }],
-    });
-    $('txHash').value = txHash;
-    $('verifyPayment').disabled = false;
-    setText('gateMessage', `Submitted ${shortHash(txHash)}. Waiting for confirmation.`);
-  } catch (error) {
-    setText('gateMessage', error.message);
-  }
-}
-
-function accessMessage(account, txHash) {
-  return state.config.accessMessageTemplate
-    .replace('{account}', account.toLowerCase())
-    .replace('{txHash}', txHash.toLowerCase());
-}
-
-async function verifyPayment() {
-  try {
-    const txHash = $('txHash').value.trim();
-    if (!txHash) throw new Error('Paste a Base transaction hash first.');
-    if (!state.walletProvider || !state.account) {
-      await connectWalletProvider();
-    }
-    await ensureBase();
-    state.config = await api('/api/gate/config');
-    const account = await activeWalletAccount();
-    const message = accessMessage(account, txHash);
-    setText('gateMessage', 'Sign this session challenge with the payer wallet…');
-    const signature = await signPersonalMessage(walletProvider(), account, message);
-    setText('gateMessage', 'Verifying signed payment on Base…');
-    await api('/api/gate/verify', {
-      method: 'POST',
-      body: JSON.stringify({ txHash, account, signature }),
-    });
-    await unlockDashboard();
-  } catch (error) {
-    setText('gateMessage', error.message);
-  }
-}
-
 async function unlockDashboard() {
   $('bridgeGate').classList.add('hidden');
-  $('gate').classList.add('hidden');
   $('dashboard').classList.remove('hidden');
   await loadDashboard();
 }
@@ -574,6 +315,7 @@ async function unlockDashboard() {
 async function loadDashboard() {
   state.summary = await api('/api/timechain/summary');
   renderSummary();
+  loadLearning();
   await loadRings();
   await loadBlockspace();
   if (state.dashboardBound) return;
@@ -781,3 +523,149 @@ init().catch((error) => {
     setText('gateMessage', error.message);
   }
 });
+
+
+// --------------------------------------------------------------------------- //
+// P1 — the learning membrane panels: integrity triptych, operators, dreams,
+// economics. Dependency-free; charts are inline SVG.
+// --------------------------------------------------------------------------- //
+
+async function loadLearning() {
+  try {
+    state.learning = await api('/api/learning/overview');
+  } catch {
+    state.learning = null;
+  }
+  renderLearning();
+}
+
+function setIntegrityCard(id, status, strongText, metaText) {
+  const card = $(id);
+  card.classList.remove('ok', 'fail', 'na');
+  card.classList.add(status === true ? 'ok' : status === false ? 'fail' : 'na');
+  card.querySelector('strong').textContent = strongText;
+  card.querySelector('.meta').textContent = metaText;
+}
+
+function sparkline(points, { width = 520, height = 96 } = {}) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.classList.add('sparkline');
+  if (!points || points.length < 2) {
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', 8);
+    t.setAttribute('y', height / 2);
+    t.textContent = points && points.length ? 'one data point — keep operating' : 'no data yet — keep operating';
+    svg.append(t);
+    return svg;
+  }
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+  const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+  const sx = (x) => (x1 === x0 ? width / 2 : 8 + ((x - x0) / (x1 - x0)) * (width - 16));
+  const sy = (y) => (y1 === y0 ? height / 2 : height - 14 - ((y - y0) / (y1 - y0)) * (height - 28));
+  const poly = document.createElementNS(ns, 'polyline');
+  poly.setAttribute('points', points.map((p) => `${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(' '));
+  svg.append(poly);
+  const lo = document.createElementNS(ns, 'text');
+  lo.setAttribute('x', 8);
+  lo.setAttribute('y', height - 2);
+  lo.textContent = `${y0}`;
+  const hi = document.createElementNS(ns, 'text');
+  hi.setAttribute('x', 8);
+  hi.setAttribute('y', 12);
+  hi.textContent = `${y1}`;
+  svg.append(lo, hi);
+  return svg;
+}
+
+function learningRow(title, metaText, tagsText) {
+  const row = document.createElement('article');
+  row.className = 'domain-row';
+  const top = document.createElement('div');
+  top.className = 'domain-top';
+  const name = document.createElement('strong');
+  name.textContent = title;
+  const meta = document.createElement('span');
+  meta.className = 'meta';
+  meta.textContent = metaText;
+  top.append(name, meta);
+  row.append(top);
+  if (tagsText) {
+    const tags = document.createElement('div');
+    tags.className = 'tags';
+    tags.textContent = tagsText;
+    row.append(tags);
+  }
+  return row;
+}
+
+function renderLearning() {
+  const data = state.learning;
+  if (!data) {
+    setText('learningMeta', 'learning overview unavailable');
+    return;
+  }
+  const { chain, consensus, digests } = data.integrity;
+
+  setIntegrityCard('intChain', chain.ok,
+    chain.ok === true ? 'VERIFIED' : chain.ok === false ? 'TAMPERED' : 'UNKNOWN',
+    chain.rings == null ? (chain.report?.[0] || '') : `${chain.rings} rings hash-linked`);
+  setIntegrityCard('intQuorum',
+    consensus.configured ? consensus.ok : null,
+    !consensus.configured ? 'NOT CONFIGURED' : consensus.ok === true ? 'ATTESTED' : consensus.ok === false ? 'BROKEN' : 'UNKNOWN',
+    consensus.configured
+      ? `${consensus.validWitnesses ?? '—'}/${consensus.witnesses ?? '—'} witnesses valid (quorum ${consensus.quorum ?? '—'})`
+      : 'run consensus.py init to add witnesses');
+  setIntegrityCard('intDigests',
+    digests.present ? digests.ok : null,
+    !digests.present ? 'NO TELEMETRY' : digests.ok === true ? 'NOTARIZED' : digests.ok === false ? 'EDITED AFTER SEAL' : 'NOT DIGESTED YET',
+    digests.present ? `${digests.digests} digest ring(s) · ${digests.notarized}/${digests.bytes} bytes covered` : '');
+
+  const tele = data.telemetry;
+  const econ = $('economicsStats');
+  econ.replaceChildren(
+    learningRow(`${formatNumber(tele.tokensSavedTotal)} tokens saved`,
+      `${data.replay.accepts || 0} replay accept(s)`,
+      `replay ledger: ${data.replay.rings || 0} ring(s) cached · ${data.replay.rederiveDue || 0} re-derivation(s) due`),
+    learningRow(`${formatNumber(tele.total)} telemetry events`,
+      tele.lastTs ? `last ${tele.lastTs.slice(0, 19)}` : 'none yet',
+      Object.entries(tele.counts).map(([k, v]) => `${k} ×${v}`).join(' · ') || '—'),
+  );
+  $('tokensSpark').replaceChildren(sparkline(tele.tokensSavedSeries));
+  $('qualitySpark').replaceChildren(sparkline(data.quality.brightness));
+
+  const ops = $('operatorList');
+  if (!data.operators.length) {
+    ops.textContent = 'No operator rings yet — the learners are gathering telemetry. Run dream.py when ready.';
+  } else {
+    ops.replaceChildren(...data.operators.slice(-12).reverse().map((op) => {
+      const evalText = op.eval
+        ? Object.entries(op.eval).filter(([, v]) => typeof v === 'number')
+            .map(([k, v]) => `${k}=${v}`).join(' · ')
+        : '';
+      return learningRow(
+        `#${op.index} ${op.operator || '?'} · ${op.action || '?'}${op.version ? ` → ${op.version}` : ''}${op.revertedTo ? ` → ${op.revertedTo}` : ''}`,
+        op.ts ? op.ts.slice(0, 19) : '',
+        evalText);
+    }));
+  }
+
+  const dreams = $('dreamList');
+  if (!data.dreams.length) {
+    dreams.textContent = 'No dream rings yet — the offline cadence has not run. python3 dream.py run';
+  } else {
+    dreams.replaceChildren(...data.dreams.slice(-8).reverse().map((d) => {
+      const trainingText = Object.entries(d.training).map(([k, v]) => `${k}: ${v}`).join(' · ');
+      return learningRow(
+        `#${d.index} dream · ${d.missedPositives ?? 0} missed-positive(s) · ${d.growthProposals} growth proposal(s)`,
+        `${d.ts ? d.ts.slice(0, 19) : ''}${d.durationS != null ? ` · ${d.durationS}s` : ''}`,
+        trainingText || '—');
+    }));
+  }
+
+  setText('learningMeta',
+    `${data.operators.length} operator ring(s) · ${data.dreams.length} dream(s) · ${formatNumber(tele.tokensSavedTotal)} tokens saved`);
+}

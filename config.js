@@ -1,5 +1,3 @@
-window.CYPHER_TEMPRE_PUBLIC_CONFIG = {
-  // Get a project ID from https://cloud.reown.com and paste it here before
-  // uploading to Hostinger if you want WalletConnect/Reown AppKit enabled.
-  walletConnectProjectId: '0ed4cfeb570dd6c05abc60f17c5aa4ca',
-};
+// Public static-site config. The dashboard is free: there is no payment gate,
+// no wallet, and the local bridge makes no outbound network calls.
+window.CYPHER_TEMPRE_PUBLIC_CONFIG = {};
