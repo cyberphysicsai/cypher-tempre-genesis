@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cypher Tempre Timechain Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=20260610-freeaudit">
+    <link rel="stylesheet" href="styles.css?v=20260611-atomicage">
   </head>
   <body>
     <canvas id="motifCanvas" aria-hidden="true"></canvas>
@@ -12,22 +12,25 @@
       <section id="bridgeGate" class="gate hidden">
         <div class="gate-copy">
           <p class="eyebrow">Local Bridge</p>
-          <h1>Pair Agent Files</h1>
-          <p class="lede">Connect this browser to the Cypher Tempre bridge running on this machine. The bridge reads local Timechain files without uploading them.</p>
-          <div class="gate-grid">
-            <div>
-              <span>Source</span>
-              <strong>Localhost</strong>
-            </div>
-            <div>
-              <span>Scope</span>
-              <strong>Timechain</strong>
-            </div>
-            <div>
-              <span>Storage</span>
-              <strong>Local only</strong>
-            </div>
-          </div>
+          <h1>Audit Your Agent&rsquo;s Timechain</h1>
+          <p class="lede">Free and private. This page is only a shell &mdash; your agent&rsquo;s memory is read by a bridge on <em>your</em> machine and never leaves it.</p>
+          <ol class="pair-steps">
+            <li>
+              <span>Run the bridge on this machine</span>
+              <pre><code>git clone https://github.com/cyberphysicsai/cypher-tempre-genesis
+cd cypher-tempre-genesis/dashboard
+npm install
+npm run bridge</code></pre>
+            </li>
+            <li>
+              <span>Copy the pairing code from the terminal</span>
+              <p class="step-note">It looks like <code>1A2B-3C4D-5E</code> and changes each run.</p>
+            </li>
+            <li>
+              <span>Enter it in the panel &mdash; the dashboard loads instantly</span>
+              <p class="step-note">No account, no payment, no outbound calls. This page talks only to <code>127.0.0.1:8788</code>.</p>
+            </li>
+          </ol>
         </div>
         <div class="gate-panel">
           <div id="bridgeState" class="status">Bridge disconnected</div>
@@ -152,7 +155,7 @@
       <pre id="blobPreview"></pre>
     </dialog>
 
-    <script src="config.js?v=20260610-freeaudit"></script>
-    <script type="module" src="app.js?v=20260610-freeaudit"></script>
+    <script src="config.js?v=20260611-atomicage"></script>
+    <script type="module" src="app.js?v=20260611-atomicage"></script>
   </body>
 </html>

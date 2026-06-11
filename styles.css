@@ -516,3 +516,26 @@ dialog::backdrop {
 .sparkline text { fill: #9ca3af; font-size: 10px; }
 .economics { margin-bottom: 10px; }
 @media (max-width: 860px) { .triptych, .learning-grid { grid-template-columns: 1fr; } }
+
+
+/* Pairing directions — mid-century numbered steps */
+:root { --brass: #d6a860; --teal: #7cb5a9; }
+.pair-steps { list-style: none; counter-reset: pair; margin: 18px 0 0; padding: 0; display: grid; gap: 14px; }
+.pair-steps li { counter-increment: pair; position: relative; padding-left: 40px; }
+.pair-steps li::before {
+  content: counter(pair, decimal-leading-zero);
+  position: absolute; left: 0; top: 1px;
+  font-size: 13px; letter-spacing: 0.08em; color: var(--brass);
+  border: 1px solid color-mix(in srgb, var(--brass) 45%, transparent);
+  border-radius: 50%; width: 26px; height: 26px;
+  display: grid; place-items: center;
+}
+.pair-steps li > span { font-weight: 600; letter-spacing: 0.01em; }
+.pair-steps pre {
+  margin: 8px 0 0; padding: 10px 12px; overflow-x: auto;
+  background: var(--panel-3); border: 1px solid var(--line); border-radius: var(--radius);
+  font-size: 12.5px; line-height: 1.55;
+}
+.pair-steps code { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; color: var(--text); }
+.step-note { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.step-note code { color: var(--teal); font-size: 12px; }

@@ -12,7 +12,7 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 const LOCAL_PAGE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
-const ASSET_VERSION = '20260610-freeaudit';
+const ASSET_VERSION = '20260611-atomicage';
 
 function isLocalPage() {
   return LOCAL_PAGE_HOSTS.has(window.location.hostname);
@@ -37,6 +37,26 @@ function initMotifs() {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Mid-century Atomic Age palette: cream linework with brass and dusty-teal
+  // accents, every alpha kept low — the dashboard is the subject, this is the
+  // wallpaper of a 1950s physics department.
+  const CREAM = '238, 232, 213';
+  const BRASS = '214, 168, 96';
+  const TEAL = '124, 181, 169';
+  const stroke = (rgb, alpha, w = 1) => {
+    ctx.strokeStyle = `rgba(${rgb}, ${alpha})`;
+    ctx.lineWidth = w;
+  };
+  const fill = (rgb, alpha) => {
+    ctx.fillStyle = `rgba(${rgb}, ${alpha})`;
+  };
+  const dot = (x, y, r) => {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
   let width = 0;
   let height = 0;
   let dpr = 1;
@@ -53,144 +73,159 @@ function initMotifs() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  function setStroke(alpha, lineWidth = 1) {
-    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
-    ctx.lineWidth = lineWidth;
-  }
-
-  function setFill(alpha) {
-    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-  }
-
+  // --- Bohr atom: precessing elliptical shells, ball electrons with comet tails ---
   function drawAtom(cx, cy, radius, phase) {
     ctx.save();
     ctx.translate(cx, cy);
-    setStroke(0.36, 1.45);
-    for (const rotation of [0, Math.PI / 3, -Math.PI / 3]) {
+    [0, Math.PI / 3, -Math.PI / 3].forEach((rotation, i) => {
       ctx.save();
-      ctx.rotate(rotation + phase * 0.22);
+      ctx.rotate(rotation + Math.sin(phase * 0.35 + i * 1.4) * 0.07);
+      stroke(CREAM, 0.15, 1);
       ctx.beginPath();
-      ctx.ellipse(0, 0, radius * 1.24, radius * 0.34, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, radius * 1.22, radius * 0.36, 0, 0, Math.PI * 2);
       ctx.stroke();
+      const accent = i === 1 ? TEAL : BRASS;
+      const t = phase * (0.7 + i * 0.23) + i * 2.1;
+      stroke(accent, 0.2, 1.2);
+      ctx.beginPath();
+      for (let k = 8; k >= 1; k -= 1) {
+        const tt = t - k * 0.055;
+        const xx = Math.cos(tt) * radius * 1.22;
+        const yy = Math.sin(tt) * radius * 0.36;
+        if (k === 8) ctx.moveTo(xx, yy);
+        else ctx.lineTo(xx, yy);
+      }
+      ctx.stroke();
+      fill(accent, 0.55);
+      dot(Math.cos(t) * radius * 1.22, Math.sin(t) * radius * 0.36, 2.6);
       ctx.restore();
-    }
-    setStroke(0.52, 1.25);
-    ctx.rotate(Math.PI / 4);
-    ctx.strokeRect(-4, -4, 8, 8);
-    setFill(0.5);
+    });
+    fill(CREAM, 0.5);
     for (let i = 0; i < 3; i += 1) {
-      const angle = phase + i * ((Math.PI * 2) / 3);
-      const x = Math.cos(angle) * radius * 1.05;
-      const y = Math.sin(angle) * radius * 0.32;
-      ctx.fillRect(x - 2, y - 2, 4, 4);
+      const a = phase * 0.5 + (i * Math.PI * 2) / 3;
+      dot(Math.cos(a) * 3.4, Math.sin(a) * 3.4, 2.1);
     }
     ctx.restore();
   }
 
-  function drawDna(x, y, heightPx, amplitude, phase) {
-    const period = 82;
-    const steps = Math.max(28, Math.floor(heightPx / 10));
-    setStroke(0.34, 1.35);
-    ctx.beginPath();
-    for (let i = 0; i <= steps; i += 1) {
-      const yy = y + (heightPx * i) / steps;
-      const xx = x + Math.sin((yy + phase * 26) / period) * amplitude;
-      if (i === 0) ctx.moveTo(xx, yy);
-      else ctx.lineTo(xx, yy);
-    }
-    ctx.stroke();
-    ctx.beginPath();
-    for (let i = 0; i <= steps; i += 1) {
-      const yy = y + (heightPx * i) / steps;
-      const xx = x - Math.sin((yy + phase * 26) / period) * amplitude;
-      if (i === 0) ctx.moveTo(xx, yy);
-      else ctx.lineTo(xx, yy);
-    }
-    ctx.stroke();
-
-    setStroke(0.3, 1.1);
-    for (let yy = y + 18; yy < y + heightPx; yy += 34) {
-      const left = x + Math.sin((yy + phase * 26) / period) * amplitude;
-      const right = x - Math.sin((yy + phase * 26) / period) * amplitude;
+  // --- Sputnik starburst: the 1950s atomic spark, drifting in slow rotation ---
+  function drawStarburst(cx, cy, radius, phase) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(phase * 0.12);
+    for (let i = 0; i < 12; i += 1) {
+      const a = (i * Math.PI * 2) / 12;
+      const r = radius * (i % 2 ? 0.6 : 1);
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r;
+      stroke(CREAM, 0.13, 1);
       ctx.beginPath();
-      ctx.moveTo(left, yy);
-      ctx.lineTo(right, yy);
+      ctx.moveTo(Math.cos(a) * 4, Math.sin(a) * 4);
+      ctx.lineTo(x, y);
       ctx.stroke();
-      setFill(0.44);
-      ctx.fillRect(left - 2, yy - 2, 4, 4);
-      ctx.fillRect(right - 2, yy - 2, 4, 4);
+      fill(CREAM, i % 3 === 0 ? 0.32 : 0.18);
+      dot(x, y, i % 2 ? 1.3 : 2);
+    }
+    ctx.restore();
+  }
+
+  // --- Double helix: scrolling ribbon, alternating brass/teal base pairs,
+  //     near strand drawn brighter than the far one for quiet depth ---
+  function drawDna(x, y, heightPx, amplitude, phase) {
+    const period = 92;
+    const scroll = phase * 16;
+    const steps = Math.max(30, Math.floor(heightPx / 9));
+    for (const dir of [1, -1]) {
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i += 1) {
+        const yy = y + (heightPx * i) / steps;
+        const xx = x + dir * Math.sin((yy + scroll) / period) * amplitude;
+        if (i === 0) ctx.moveTo(xx, yy);
+        else ctx.lineTo(xx, yy);
+      }
+      stroke(CREAM, dir === 1 ? 0.24 : 0.13, 1.25);
+      ctx.stroke();
+    }
+    let rung = 0;
+    for (let yy = y + 14; yy < y + heightPx; yy += 26, rung += 1) {
+      const s = Math.sin((yy + scroll) / period) * amplitude;
+      if (Math.abs(s) < amplitude * 0.22) continue;       // skip the crossover knots
+      stroke(CREAM, 0.12, 1);
+      ctx.beginPath();
+      ctx.moveTo(x + s, yy);
+      ctx.lineTo(x - s, yy);
+      ctx.stroke();
+      const accent = rung % 2 ? TEAL : BRASS;
+      fill(accent, 0.42);
+      dot(x + s, yy, 1.9);
+      fill(accent, 0.26);
+      dot(x - s, yy, 1.6);
     }
   }
 
-  function drawBlockLattice(x, y, cols, rows, step, phase) {
-    const cells = [];
-    for (let row = 0; row < rows; row += 1) {
-      for (let col = 0; col < cols; col += 1) {
-        const jitter = Math.sin(phase + row * 1.7 + col * 0.9) * 2;
-        cells.push({
-          x: x + col * step + jitter,
-          y: y + row * step + Math.cos(phase + col) * 2,
-        });
-      }
-    }
-    setStroke(0.28, 1);
-    for (let i = 0; i < cells.length; i += 1) {
-      const current = cells[i];
-      const right = cells[i + 1];
-      const down = cells[i + cols];
-      if (right && (i + 1) % cols !== 0) {
-        ctx.beginPath();
-        ctx.moveTo(current.x + 8, current.y + 8);
-        ctx.lineTo(right.x + 8, right.y + 8);
-        ctx.stroke();
-      }
-      if (down) {
-        ctx.beginPath();
-        ctx.moveTo(current.x + 8, current.y + 8);
-        ctx.lineTo(down.x + 8, down.y + 8);
-        ctx.stroke();
-      }
-    }
-    setStroke(0.42, 1.1);
-    for (const cell of cells) {
-      ctx.strokeRect(cell.x, cell.y, 16, 16);
-      setFill(0.16);
-      ctx.fillRect(cell.x + 6, cell.y + 6, 4, 4);
-    }
-  }
-
-  function drawHashChain(x, y, length, phase) {
-    setStroke(0.34, 1.25);
+  // --- Timechain: sealed blocks on a slow conveyor along a shallow arc;
+  //     the head block periodically seals with a soft expanding ring ---
+  function drawTimechain(x, y, count, spacing, phase, dir = 1) {
+    const offset = ((phase * 12) % spacing) * dir;
     let previous = null;
-    for (let i = 0; i < length; i += 1) {
-      const cell = {
-        x: x + i * 46,
-        y: y + Math.sin(phase + i * 0.9) * 10,
-      };
+    for (let i = 0; i < count; i += 1) {
+      const px = x + i * spacing - offset;
+      const py = y + Math.sin((px / 110) + phase * 0.4) * 8;
       if (previous) {
+        stroke(CREAM, 0.16, 1);
         ctx.beginPath();
-        ctx.moveTo(previous.x + 22, previous.y + 11);
-        ctx.lineTo(cell.x, cell.y + 11);
+        ctx.moveTo(previous.x + 18, previous.y + 9);
+        ctx.lineTo(px, py + 9);
         ctx.stroke();
+        fill(CREAM, 0.3);
+        dot((previous.x + 18 + px) / 2, (previous.y + py) / 2 + 9, 1.1);
       }
-      ctx.strokeRect(cell.x, cell.y, 22, 22);
-      setFill(0.22);
-      ctx.fillRect(cell.x + 8, cell.y + 8, 6, 6);
-      previous = cell;
+      stroke(CREAM, 0.26, 1.1);
+      ctx.strokeRect(px, py, 18, 18);
+      fill(BRASS, 0.22);
+      ctx.fillRect(px + 6.5, py + 6.5, 5, 5);
+      previous = { x: px, y: py };
     }
+    // the newest block seals: a quiet ring pulse, like an oscilloscope ping
+    const pulse = (phase * 0.45) % 1;
+    if (previous && pulse < 0.7) {
+      stroke(BRASS, 0.28 * (1 - pulse / 0.7), 1.2);
+      ctx.beginPath();
+      ctx.arc(previous.x + 9, previous.y + 9, 12 + pulse * 26, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // --- Lissajous: oscilloscope trace with a slowly drifting phase ratio ---
+  function drawLissajous(cx, cy, w, h, phase) {
+    stroke(TEAL, 0.15, 1.1);
+    ctx.beginPath();
+    const delta = phase * 0.22;
+    for (let i = 0; i <= 220; i += 1) {
+      const t = (i / 220) * Math.PI * 2;
+      const xx = cx + Math.sin(3 * t + delta) * w;
+      const yy = cy + Math.sin(2 * t) * h;
+      if (i === 0) ctx.moveTo(xx, yy);
+      else ctx.lineTo(xx, yy);
+    }
+    ctx.stroke();
+    const t0 = (phase * 0.8) % (Math.PI * 2);
+    fill(BRASS, 0.45);
+    dot(cx + Math.sin(3 * t0 + delta) * w, cy + Math.sin(2 * t0) * h, 2);
   }
 
   function render(time = 0) {
-    const phase = time * 0.00055;
+    const phase = time * 0.00045;
     ctx.clearRect(0, 0, width, height);
-    drawAtom(width * 0.16, height * 0.2, Math.min(116, width * 0.12), phase);
-    drawAtom(width * 0.84, height * 0.78, Math.min(98, width * 0.09), -phase * 0.8);
-    drawDna(width * 0.78, Math.max(-40, height * 0.05), height * 0.72, Math.min(46, width * 0.045), phase);
-    drawDna(width * 0.12, height * 0.5, height * 0.52, Math.min(34, width * 0.035), -phase * 0.65);
-    drawBlockLattice(width * 0.56, height * 0.13, 4, 3, 42, phase);
-    drawBlockLattice(width * 0.68, height * 0.88, 5, 2, 38, -phase);
-    drawHashChain(width * 0.31, height * 0.07, 6, phase);
-    drawHashChain(width * 0.58, height * 0.5, 5, -phase);
+    drawAtom(width * 0.14, height * 0.18, Math.min(110, width * 0.11), phase);
+    drawAtom(width * 0.87, height * 0.8, Math.min(86, width * 0.08), -phase * 0.8);
+    drawStarburst(width * 0.92, height * 0.12, Math.min(46, width * 0.045), phase);
+    drawStarburst(width * 0.07, height * 0.86, Math.min(36, width * 0.04), -phase * 0.7);
+    drawDna(width * 0.8, Math.max(-30, height * 0.06), height * 0.66, Math.min(42, width * 0.04), phase);
+    drawDna(width * 0.1, height * 0.46, height * 0.5, Math.min(32, width * 0.032), -phase * 0.65);
+    drawTimechain(width * 0.3, height * 0.06, 6, 44, phase);
+    drawTimechain(width * 0.55, height * 0.93, 5, 48, phase * 0.8, -1);
+    drawLissajous(width * 0.4, height * 0.78, Math.min(70, width * 0.06), Math.min(34, width * 0.028), phase);
     if (!reducedMotion) animationId = window.requestAnimationFrame(render);
   }
 
