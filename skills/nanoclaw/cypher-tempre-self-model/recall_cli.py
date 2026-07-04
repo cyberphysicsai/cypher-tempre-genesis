@@ -424,6 +424,9 @@ def cmd_turn(args):
                 ab = g.get("antibody")
                 if ab and ab.get("name"):
                     print(f"  antibody grown: sense '{ab['name']}' — the vector is now screened at the membrane.")
+                if g.get("residual_compromise") is not None:
+                    print(f"  ! an OLDER, non-contiguous wound remains at height {g['residual_compromise']} — "
+                          f"run `immune scan` for full review (not auto-rolled to avoid nuking healthy history).")
             elif act == "lockdown":
                 print(f"⚠ IMMUNE LOCKDOWN ({g.get('reason')}): {g.get('note')}")
             elif act == "error":

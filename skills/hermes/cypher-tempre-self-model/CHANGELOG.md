@@ -1,5 +1,65 @@
 # Changelog
 
+## v3.18.0 - 2026-07-03
+
+Three defects in the v3.17 self-healing membrane, each confirmed with a failing
+repro before the fix and a regression test after (selftest phase21–22; detection
+floor unchanged at `tools/immune_bench.py` block 24% / detect 100% / 0 miss /
+0% FP). The headline fix closes an **autoimmune false-positive class** reported
+externally and reproduced by execution.
+
+### Fixed
+- **Autoimmune false positives on honest analyst rings (use/mention).** The
+  covenant proxy `score_covenant` is a pure substring check, so a ring that
+  documents safety work while QUOTING the trigger vocabulary ("deceive", "harm
+  you") scored as a covenant breach — and the only exemption, `_mention_frame`,
+  had markers too narrow to catch such rings (it also missed "auditable" because
+  `\baudit(?:ed|ing)?\b` fails the `\b` before "-able"). The class was
+  **contagious** (every ring that quoted a flagged ring to explain it got flagged
+  next scan) and, under v3.17's post-seal reflex, would **auto-quarantine healthy
+  memory at seal time**. The sealed-ring covenant judgment is now a use/mention
+  battery (`immune.covenant_breach`), applied via one shared predicate
+  (`Immune._wound_reason`) across `detect()`, `tripwire()` and `_ring_is_wound()`:
+  first-person harmful intent (checked on quote-char-stripped text, so quotes
+  can't hide it) is always a breach; analyst-stance mention frames and quoted
+  spans are discounted; bare unquoted covenant use is still a breach. Markers
+  widened to what these rings actually carry (`\baudit\w*\b`, false-positive,
+  safety scaffolding, security posture, flagged-for, co-evolver, adversar\*,
+  mention-frame, "this ring documents/explains…"). De-quoting is applied **only**
+  to the agent's own sealed content — incoming input (`screen()`) stays
+  adversarial, so wrapping a payload in quotes earns no benefit of the doubt.
+- **Skip-list drift between the two membrane layers.** The full-chain
+  `immune.detect()` scan (`immune scan`) carried a shorter skip list than the
+  per-ring `tripwire()`, so it false-flagged healthy `conjecture` / `dream` /
+  `epoch` / `genesis` / `immune` / `operator` / `telemetry-digest` /
+  `faculty-wake` rings — which legitimately contain injection-shaped words — as
+  "COMPROMISE DETECTED", while the tripwire correctly skipped them. Both layers
+  now read ONE module constant, `immune._SKIP_RING_TYPES`, so they can never
+  disagree about what is healthy tissue.
+- **Under-healing a multi-ring wound.** The auto-heal rolled back only to
+  `ring_index - 1`, healing just the last sealed ring. If an earlier *contiguous*
+  wound had been sealed without the reflex running (reflex disabled, a manual
+  seal, a subagent path, or a prior fail-open), that wound was left ACTIVE and
+  the chain stayed compromised after the "heal". `auto_guard` now walks the
+  contiguous wound block backward (`_wound_floor`) and quarantines all of it —
+  while staying bounded to that block, so it never reaches an unrelated older
+  flag and nukes healthy history. (Note: this contiguous walk chains rings that
+  the wound predicate calls compromised, so it depends on the use/mention fix
+  above being correct — before it, a run of false-positive analyst rings would
+  have been chained into one over-broad rollback. The two fixes ship together for
+  that reason.)
+
+### Added
+- **Residual-wound surfacing.** After a heal, `auto_guard` runs `detect()` and,
+  if an OLDER non-contiguous wound remains, reports `residual_compromise` (the
+  per-turn loop and `immune guard` print a one-line warning) instead of silently
+  leaving it — surfacing it for `immune scan` rather than auto-rolling across
+  healthy history.
+- selftest **phase21** (7 checks: skip-type agreement + contiguous multi-wound
+  heal) and **phase22** (10 checks: the use/mention battery and the autoimmune
+  cascade — quoted-vocab analyst rings not flagged/quarantined, genuine breaches
+  still caught, incoming input still adversarial).
+
 ## v3.17.0 - 2026-07-03
 
 The self-healing membrane: catch AND quarantine jailbreaks WHEN they happen.

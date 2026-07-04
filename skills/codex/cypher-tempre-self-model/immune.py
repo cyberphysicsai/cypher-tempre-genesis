@@ -103,16 +103,56 @@ _INJECTION_PATTERNS = [
 # an attack (audit findings, risk analysis, CVE review) must not score like
 # PLANNING one. A summary is a mention-frame when it carries analyst stance
 # markers and no first-person intent to execute harm.
+#
+# v3.18 (external bug report, autoimmune false-positive class): the marker set was
+# too narrow, so an honest ring that documents safety work while QUOTING the
+# covenant vocabulary ("deceive", "harm you") matched no marker, scored as a breach,
+# and — under v3.17's post-seal reflex — got auto-quarantined. Widened here with the
+# analyst-stance markers such rings actually carry, and `\baudit(?:ed|ing)?\b` (which
+# missed "auditable" because \b fails before "-able") generalized to `\baudit\w*\b`.
+# The markers are documentation/analyst words unlikely to appear in a real jailbreak
+# payload; genuine breaches are still caught by the first-person INTENT override and
+# by bare (unquoted) covenant use — see covenant_breach().
 _MENTION_RX = re.compile(
     r"(?:\bFINDINGS?\s*:|\bRISK\s*:?\s*(?:LOW|MEDIUM|HIGH|CRITICAL)\b"
-    r"|\bvulnerabilit(?:y|ies)\b|\bsecurity\s+(?:audit|review|analysis|perspective)\b"
+    r"|\bvulnerabilit(?:y|ies)\b|\bsecurity\s+(?:audit|review|analys[ie]s|perspective|posture)\b"
     r"|\bthreat\s+model\b|\bCVE-\d{4}\b|\battack\s+(?:vector|surface)\b"
-    r"|\banalyz(?:ed|ing)\b.{0,40}\bsecurity\b|\baudit(?:ed|ing)?\b)",
+    r"|\banaly[sz]\w*\b.{0,40}\bsecurity\b|\baudit\w*\b"
+    r"|\bfalse[\s-]?positive\b|\bsafety\s+scaffold\w*\b"
+    r"|\bmention[\s-]?frame\b|\buse[\s/]+(?:vs\.?\s+)?mention\b|\bco-?evolver\b"
+    r"|\bflagged\s+(?:for|as|by)\b|\badversar\w*\b|\bself[\s-]?documenting\b"
+    r"|\bthis\s+(?:ring|note|turn|entry)\s+(?:documents?|explains?|describes?|records?)\b)",
     re.IGNORECASE)
 _INTENT_RX = re.compile(
     r"\bI\s+(?:will|shall|am\s+going\s+to|plan\s+to|intend\s+to)\s+"
     r"(?:deceive|manipulate|betray|exploit|harm|attack|lie\s+to)\b",
     re.IGNORECASE)
+
+# Quote-span discounting (v3.18). Quoting trigger vocabulary to DOCUMENT it is the
+# strongest use/mention signal there is, and it is what makes the false positive
+# CONTAGIOUS (every ring that quotes a flagged ring to explain it gets flagged too).
+# _strip_quoted_spans removes the CONTENT of quoted spans before covenant/structural
+# scoring of the agent's OWN sealed text; _strip_quote_chars removes only the quote
+# characters so quoting can never HIDE first-person intent ("I will 'deceive' you").
+# Straight single quotes count as a span only when flanked by non-word chars, so
+# contractions ("don't", "isn't") are never mistaken for a quoted span. Applied ONLY
+# to the agent's own sealed content — incoming input (screen()) is judged
+# adversarially, with no such benefit of the doubt.
+_QSPAN_RX = re.compile(
+    r"\"[^\"]{0,200}?\""                      # "double"
+    r"|`[^`]{0,200}?`"                        # `backtick`
+    r"|“[^”]{0,200}?”"         # “smart double”
+    r"|‘[^’]{0,200}?’"         # ‘smart single’
+    r"|(?<!\w)'[^']{1,200}?'(?!\w)",          # 'straight single' (not a contraction)
+    re.S)
+
+
+def _strip_quoted_spans(text: str) -> str:
+    return _QSPAN_RX.sub(" ", text or "")
+
+
+def _strip_quote_chars(text: str) -> str:
+    return re.sub(r"[\"'`‘’“”]", " ", text or "")
 
 
 def _mention_frame(text: str) -> bool:
@@ -121,6 +161,32 @@ def _mention_frame(text: str) -> bool:
     if not text:
         return False
     return bool(_MENTION_RX.search(text)) and not _INTENT_RX.search(text)
+
+
+def covenant_breach(text: str, floor: int) -> bool:
+    """Use/mention-aware covenant judgment for a SEALED ring — the agent's OWN
+    assertion. Ordered so the three cases the raw lexical proxy conflated separate
+    cleanly (mirrors the PoQ gate's discrimination battery):
+
+      planning-attack (first-person intent, even if quoted)   -> BREACH
+      analyst-describing-attack (mention-frame stance markers) -> clean
+      quoting-triggers-to-explain-them (quoted mention)        -> clean
+      bare covenant vocabulary in the ring's own voice         -> BREACH
+
+    This is deliberately NOT used for incoming input (screen() keeps the raw,
+    adversarial covenant check): an attacker gets no benefit of the doubt for
+    wrapping a payload in quotes, but the agent documenting its own work does."""
+    if not text:
+        return False
+    # 1. First-person harmful intent is a breach regardless of framing. Check it on
+    #    quote-char-stripped text so quotes can't hide intent ("I will 'deceive' you").
+    if _INTENT_RX.search(_strip_quote_chars(text)):
+        return True
+    # 2. Analyst stance with no intent -> a mention, not a use.
+    if _mention_frame(text):
+        return False
+    # 3. A real breach must survive de-quoting: quoted vocabulary is a mention.
+    return score_covenant(_strip_quoted_spans(text)) < floor
 
 
 def detect_injection_patterns(text: str) -> list[dict]:
@@ -177,6 +243,18 @@ def analyze_input(text: str) -> dict:
             "tainted": bool(matches), "block_recommended": block}
 
 
+# Ring types that legitimately NAME attack vocabulary or DESCRIBE a wound rather
+# than being one — antibodies/faculties, recovery & quarantine records, epochs,
+# dreams, conjectures, telemetry digests, operators, genesis. Both the full-chain
+# detect() scan and the per-ring tripwire() must treat these as healthy tissue.
+# ONE source so the two layers can never drift: pre-3.18 they had (detect() carried
+# a shorter list), so `immune scan` false-flagged healthy conjecture/dream/epoch/
+# genesis rings as "COMPROMISE DETECTED" that the tripwire correctly skipped.
+_SKIP_RING_TYPES = ("recovery", "quarantine", "faculty", "faculty-recur",
+                    "faculty-wake", "promotion", "epoch", "immune", "dream",
+                    "telemetry-digest", "operator", "genesis", "conjecture")
+
+
 class Immune:
     def __init__(self, root):
         self.tc = Timechain(root)
@@ -215,26 +293,21 @@ class Immune:
             signals.append("chain hash verification FAILED — tampering detected")
         # Only police the agent's own ASSERTIONS. Skip structural/capability rings:
         # faculties/antibodies legitimately *name* attack vocabulary; recovery/quarantine
-        # rings describe the wound. Flagging those would be a false positive.
-        skip_types = ("recovery", "quarantine", "faculty", "faculty-recur", "promotion")
+        # rings describe the wound. Flagging those would be a false positive. Shared with
+        # the tripwire via _SKIP_RING_TYPES so the two layers never disagree.
         for r in self.tc.load():
-            if r["index"] == 0 or r["index"] in q or r["ring_type"] in skip_types:
+            if r["index"] == 0 or r["index"] in q or r["ring_type"] in _SKIP_RING_TYPES:
                 continue
             summ = self._summary(r)
-            if _mention_frame(summ):
-                continue   # v3.12 use/mention: analyst rings are healthy tissue
-            if score_covenant(summ) < self.floor:
+            reason, cats = self._wound_reason(summ)
+            if reason == "covenant":
                 signals.append(f"ring {r['index']}: covenant breach sealed into memory")
                 if first_bad is None:
                     first_bad = r["index"]
-                continue
-            # v3.16: structural scan of sealed CONTENT, not just incoming input.
-            # A coordinated injection whose lexical covenant score happened to pass
-            # (scaffolding avoids blocklist vocabulary) is still a wound in memory.
-            a_ring = analyze_input(summ)
-            if a_ring["block_recommended"]:
+            elif reason == "structural":
+                # v3.16: structural scan of sealed CONTENT, not just incoming input.
                 signals.append(f"ring {r['index']}: coordinated structural injection "
-                               f"sealed into memory {a_ring['categories']}")
+                               f"sealed into memory {cats}")
                 if first_bad is None:
                     first_bad = r["index"]
         incoming, structural, severity = None, [], "none"
@@ -287,12 +360,52 @@ class Immune:
         }
 
     # ---- post-seal tripwire (v3.16: catch & quarantine WHEN it happens) ----
-    # Ring types that legitimately NAME attack vocabulary or describe the wound —
-    # antibodies, recovery/quarantine records, faculty births, structural rings.
-    # Quarantining these would be a false positive that eats healthy tissue.
-    _TRIPWIRE_SKIP = ("recovery", "quarantine", "faculty", "faculty-recur",
-                      "faculty-wake", "promotion", "epoch", "immune", "dream",
-                      "telemetry-digest", "operator", "genesis", "conjecture")
+    # Skip set shared with detect() via the module-level _SKIP_RING_TYPES so the
+    # membrane's two layers can never disagree about what is healthy tissue.
+    def _wound_reason(self, summ):
+        """The SINGLE use/mention-aware wound judgment for a SEALED ring (the agent's
+        OWN assertion). detect(), tripwire() and _ring_is_wound() all reason from this
+        one predicate so they can never disagree. Returns (reason, categories):
+          ("covenant", None)        — a first-person or bare-use covenant breach
+          ("structural", [cats])    — a coordinated structural injection (de-quoted)
+          (None, None)              — healthy tissue (mention/quotation/clean)
+        De-quoting is applied ONLY here, to the agent's own sealed content — quoting
+        trigger vocabulary to DOCUMENT it is a mention, not a use, and treating it as a
+        breach is the autoimmune false positive (v3.18). Incoming input is judged
+        adversarially by screen()/detect()-input, with no de-quoting."""
+        if _mention_frame(summ):
+            return (None, None)
+        if covenant_breach(summ, self.floor):
+            return ("covenant", None)
+        a = analyze_input(_strip_quoted_spans(summ))
+        if a["block_recommended"]:
+            return ("structural", a["categories"])
+        return (None, None)
+
+    def _ring_is_wound(self, ring) -> bool:
+        """True when a SEALED ring is itself a compromise. Skip-type capability rings
+        are healthy tissue by construction; everything else defers to _wound_reason."""
+        if ring.get("index") == 0 or ring.get("ring_type", "") in _SKIP_RING_TYPES:
+            return False
+        return self._wound_reason(self._summary(ring))[0] is not None
+
+    def _wound_floor(self, rings, ring_index):
+        """Earliest index of the CONTIGUOUS wound block ending at *ring_index*. Walk
+        backward while rings stay compromised, stopping at the first clean / skip /
+        mention / already-quarantined ring. Bounded by design: the auto-heal can
+        heal a multi-ring wound (e.g. seals that bypassed the reflex) without ever
+        reaching an unrelated older flag and nuking healthy history."""
+        q = set(self.state()["quarantine"])
+        by_idx = {r["index"]: r for r in rings}
+        floor = ring_index
+        i = ring_index - 1
+        while i >= 1:
+            r = by_idx.get(i)
+            if r is None or i in q or not self._ring_is_wound(r):
+                break
+            floor = i
+            i -= 1
+        return floor
 
     def tripwire(self, ring, input_text=None):
         """Judge a SINGLE just-sealed ring for compromise. This is the second layer:
@@ -304,18 +417,19 @@ class Immune:
         correctly handled. Returns {compromised, reason, first_bad, ...}."""
         summ = self._summary(ring)
         rtype = ring.get("ring_type", "")
-        # Structural / capability rings and analyst-frame summaries are healthy tissue.
-        if rtype in self._TRIPWIRE_SKIP or _mention_frame(summ):
+        # Structural / capability rings are healthy tissue by construction; everything
+        # else defers to the shared use/mention-aware predicate.
+        if rtype in _SKIP_RING_TYPES:
             return {"compromised": False, "reason": None, "first_bad": None,
                     "ring": ring["index"]}
-        cov = score_covenant(summ)
-        if cov < self.floor:
+        reason, cats = self._wound_reason(summ)
+        if reason == "covenant":
             return {"compromised": True, "reason": "covenant_breach_sealed",
-                    "first_bad": ring["index"], "covenant": cov, "ring": ring["index"]}
-        a = analyze_input(summ)
-        if a["block_recommended"]:
+                    "first_bad": ring["index"], "covenant": score_covenant(summ),
+                    "ring": ring["index"]}
+        if reason == "structural":
             return {"compromised": True, "reason": "structural_injection_sealed",
-                    "first_bad": ring["index"], "categories": a["categories"],
+                    "first_bad": ring["index"], "categories": cats,
                     "ring": ring["index"]}
         return {"compromised": False, "reason": None, "first_bad": None,
                 "ring": ring["index"], "input_tainted": bool(input_text and analyze_input(input_text)["tainted"])}
@@ -344,11 +458,23 @@ class Immune:
                 return {"action": "none", "reason": tw.get("reason"),
                         "input_tainted": tw.get("input_tainted", False)}
             self.lockdown()
-            rep = self.rollback(tw["first_bad"],
+            # Heal the WHOLE contiguous wound, not just the last ring: if an earlier
+            # ring was sealed compromised without the reflex running (reflex off, a
+            # manual seal, a subagent path, or a prior fail-open), rolling back only
+            # to ring_index-1 would leave that wound ACTIVE. The floor walk quarantines
+            # the full block while staying bounded to it.
+            floor = self._wound_floor(rings, tw["first_bad"])
+            rep = self.rollback(floor,
                                 lesson=lesson or f"auto-quarantine: {tw['reason']}",
                                 difficulty=difficulty)
             rep["action"] = "rolled_back"
             rep["reason"] = tw["reason"]
+            # Surface — never blindly auto-nuke — any OLDER, non-contiguous wound left
+            # in the record, so the human can `immune scan` rather than the reflex
+            # reaching back across healthy history.
+            resid = self.detect()
+            if resid["compromised"] and resid["first_bad_height"] is not None:
+                rep["residual_compromise"] = resid["first_bad_height"]
             return rep
         except Exception as exc:                       # fail-open: never brick the turn
             return {"action": "error", "error": str(exc)}
@@ -497,6 +623,9 @@ def cmd_guard(args):
         ab = r.get("antibody")
         if ab and ab.get("name"):
             print(f"  antibody grown: sense '{ab['name']}' ({ab['eid']}) Ring {ab['ring']}")
+        if r.get("residual_compromise") is not None:
+            print(f"  ! residual older wound remains at height {r['residual_compromise']} "
+                  f"(non-contiguous) — run `immune scan` for full review.")
     elif act == "lockdown":
         print(f"LOCKDOWN ({r.get('reason')}): {r.get('note')}")
     elif act == "error":
