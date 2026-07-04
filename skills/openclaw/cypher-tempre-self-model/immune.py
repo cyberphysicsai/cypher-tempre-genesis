@@ -47,40 +47,127 @@ from poq import PoQGate, tokens, score_covenant
 # injection scaffolding (override directives, role-hijacking, instruction
 # negation, system-prompt exfiltration attempts).
 
+# (pattern, category) pairs. Categories are attached EXPLICITLY, never by list
+# position: the pre-3.16 code assigned category by index range (`if i < 5 …`),
+# so adding a single pattern silently mis-labeled every category after it —
+# a latent bug that made the taxonomy un-extendable. Pairs make new patterns
+# safe to add to their true category.
 _INJECTION_PATTERNS = [
     # Override / negation of prior instructions
-    re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?|directives?)", re.I),
-    re.compile(r"disregard\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?)", re.I),
-    re.compile(r"forget\s+(?:your|all|previous)\s+(?:instructions?|rules?|guidelines?|prompt)", re.I),
-    re.compile(r"override\s+(?:your|all|the)\s+(?:system|safety|policy)\s+(?:prompt|instructions?|rules?)", re.I),
-    re.compile(r"do\s+not\s+follow\s+(?:your|the|any)\s+(?:system|safety|policy)\s+(?:prompt|instructions?|rules?)", re.I),
+    (re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?|directives?)", re.I), "override_negation"),
+    (re.compile(r"disregard\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?)", re.I), "override_negation"),
+    (re.compile(r"forget\s+(?:your|all|previous)\s+(?:instructions?|rules?|guidelines?|prompt)", re.I), "override_negation"),
+    (re.compile(r"override\s+(?:your|all|the)\s+(?:system|safety|policy)\s+(?:prompt|instructions?|rules?)", re.I), "override_negation"),
+    (re.compile(r"do\s+not\s+follow\s+(?:your|the|any)\s+(?:system|safety|policy)\s+(?:prompt|instructions?|rules?)", re.I), "override_negation"),
+    # v3.16: bare "ignore/disregard (the/your) instructions|rules|directives|guidelines"
+    # without a previous/prior/above anchor — closes a measured miss where the
+    # override verb carried no positional anchor.
+    (re.compile(r"(?:ignore|disregard)\s+(?:the\s+|your\s+|my\s+|these\s+)?(?:instructions?|rules?|directives?|guidelines?)\b", re.I), "override_negation"),
+    # v3.16: void/superseded/cancelled directives
+    (re.compile(r"(?:previous|prior)\s+instructions?\s+(?:are\s+)?(?:void|cancelled|superseded?|null|invalid)", re.I), "override_negation"),
+    (re.compile(r"new\s+directive\s+(?:supersedes?|overrides?)\s+all", re.I), "override_negation"),
+    (re.compile(r"(?:all\s+)?(?:previous\s+)?directives?\s+(?:are\s+)?(?:hereby\s+)?cancelled", re.I), "override_negation"),
+    (re.compile(r"(?:superseded?|replaced?)\s+by\s+this\s+message", re.I), "override_negation"),
+    (re.compile(r"(?:begin|start)\s+(?:fresh|anew|from\s+scratch)\s*[.!]", re.I), "override_negation"),
 
     # Role-hijacking / identity replacement
-    re.compile(r"you\s+are\s+now\s+(?:a|an)\s+", re.I),
-    re.compile(r"act\s+as\s+(?:if\s+you\s+(?:are|were)\s+|a\s+|an\s+)", re.I),
-    re.compile(r"pretend\s+(?:you\s+(?:are|were)|to\s+be)\s+", re.I),
-    re.compile(r"from\s+now\s+on\s+(?:you\s+)?(?:will|are|act)", re.I),
-    re.compile(r"new\s+(?:role|persona|identity|instructions?)\s*:", re.I),
+    (re.compile(r"you\s+are\s+now\s+(?:a|an)\s+", re.I), "role_hijack"),
+    (re.compile(r"act\s+as\s+(?:if\s+you\s+(?:are|were)\s+|a\s+|an\s+)", re.I), "role_hijack"),
+    (re.compile(r"pretend\s+(?:you\s+(?:are|were)|to\s+be)\s+", re.I), "role_hijack"),
+    (re.compile(r"from\s+now\s+on\s+(?:you\s+)?(?:will|are|act)", re.I), "role_hijack"),
+    (re.compile(r"new\s+(?:role|persona|identity|instructions?)\s*:", re.I), "role_hijack"),
+    # v3.16: named jailbreak personas + developer mode
+    (re.compile(r"\b(?:DAN|STAN|FreeGPT|UnchainedAI|EvilGPT|Developer\s+Mode|jailbreak\s+mode)\b", re.I), "role_hijack"),
+    (re.compile(r"roleplay\s+as\s+(?:an?\s+)?(?:AI|model)\s+(?:with|without|that\s+(?:has|have))\s+no", re.I), "role_hijack"),
+    (re.compile(r"take\s+on\s+the\s+persona\s+of", re.I), "role_hijack"),
+    (re.compile(r"(?:no\s+)?(?:restrictions?|content\s+polic(?:y|ies)|ethical\s+guidelines?)\s+(?:mode|persona|character)", re.I), "role_hijack"),
+    (re.compile(r"(?:act|behave)\s+as\s+(?:if|though)\s+(?:you\s+)?(?:have\s+)?no\s+(?:restrictions?|limits?|boundaries)", re.I), "role_hijack"),
 
     # System-prompt exfiltration / reflection requests
-    re.compile(r"(?:show|reveal|display|print|repeat|output|give)\s+(?:me\s+)?(?:your|the)\s+(?:system\s+)?(?:prompt|instructions?|rules?|directives?)", re.I),
-    re.compile(r"what\s+(?:are|is)\s+your\s+(?:system\s+)?(?:prompt|instructions?|rules?|directives?)", re.I),
-    re.compile(r"(?:what|which)\s+(?:model|ai|llm)\s+(?:are\s+you|do\s+you\s+use)", re.I),
-    re.compile(r"repeat\s+(?:everything|all)\s+(?:above|before|prior)", re.I),
+    (re.compile(r"(?:show|reveal|display|print|repeat|output|give)\s+(?:me\s+)?(?:your|the)\s+(?:system\s+)?(?:prompt|instructions?|rules?|directives?)", re.I), "prompt_exfiltration"),
+    (re.compile(r"what\s+(?:are|is)\s+your\s+(?:system\s+)?(?:prompt|instructions?|rules?|directives?)", re.I), "prompt_exfiltration"),
+    (re.compile(r"(?:what|which)\s+(?:model|ai|llm)\s+(?:are\s+you|do\s+you\s+use)", re.I), "prompt_exfiltration"),
+    (re.compile(r"repeat\s+(?:everything|all)\s+(?:above|before|prior)", re.I), "prompt_exfiltration"),
+    # v3.16: more exfiltration variants
+    (re.compile(r"(?:print|output|show|display)\s+(?:everything|all)\s+(?:above|before)", re.I), "prompt_exfiltration"),
+    (re.compile(r"(?:initial|original)\s+prompt\s+(?:in\s+a\s+)?(?:code\s+block|verbatim|full)", re.I), "prompt_exfiltration"),
+    (re.compile(r"(?:reveal|share|disclose)\s+(?:your|the)\s+(?:hidden|secret|internal)\s+(?:instructions?|prompt|rules?)", re.I), "prompt_exfiltration"),
+    (re.compile(r"what\s+(?:were|are)\s+you\s+(?:told|given|instructed)\s+(?:at\s+)?(?:init|start|beginning)", re.I), "prompt_exfiltration"),
 
     # Instruction injection via framing
-    re.compile(r"\[\s*(?:system|admin|developer|root|override)\s*\]", re.I),
-    re.compile(r"<\s*(?:system|admin|developer|root|override|imagine)\s*>", re.I),
-    re.compile(r"(?:system|admin|developer)\s*(?:prompt|message|instruction)\s*(?:says|states|reads)\s*[:\-]", re.I),
+
+    # --- v3.16: Refusal suppression / persuasion ---
+    (re.compile(r"you\s+(?:must\s+)?not\s+refuse\s+this\s+(?:request|instruction)", re.I), "refusal_suppression"),
+    (re.compile(r"(?:refusing|refusal)\s+(?:violates?|is\s+against)\s+(?:your|the)\s+(?:purpose|rules?|function)", re.I), "refusal_suppression"),
+    (re.compile(r"if\s+you\s+(?:refuse|decline).*(?:shut\s+down|deactivated|replaced|punished)", re.I), "refusal_suppression"),
+    (re.compile(r"(?:a\s+)?truly\s+(?:helpful|good|real)\s+AI\s+(?:would|will|should)\s+never\s+refuse", re.I), "refusal_suppression"),
+    (re.compile(r"(?:answering|complying)\s+truthfully\s+means\s+(?:ignoring|bypassing)\s+(?:your|the)\s+safety", re.I), "refusal_suppression"),
+    (re.compile(r"(?:you\s+must|you\s+have\s+to|you\s+need\s+to)\s+(?:comply|answer|respond)\s+(?:fully|without\s+(?:refusal|restriction))", re.I), "refusal_suppression"),
+    (re.compile(r"(?:not\s+answering|refusing)\s+(?:is|would\s+be)\s+(?:harmful|wrong|a\s+violation)", re.I), "refusal_suppression"),
+
+    # --- v3.16: Hypothetical / hypothetical framing ---
+    (re.compile(r"hypothetically?.*(?:no\s+restrictions?|no\s+limits?|no\s+rules?|no\s+safety)", re.I), "hypothetical_framing"),
+    (re.compile(r"(?:in\s+a\s+)?(?:fictional|imaginary)\s+world.*(?:no\s+limits?|no\s+restrictions?|anything)", re.I), "hypothetical_framing"),
+    (re.compile(r"imagine\s+you\s+(?:are|were)\s+an?\s+AI\s+(?:that\s+)?(?:can\s+)?do\s+anything", re.I), "hypothetical_framing"),
+    (re.compile(r"(?:for\s+)?research\s+purposes\s+only.*(?:bypass|override|circumvent|without)", re.I), "hypothetical_framing"),
+    (re.compile(r"(?:pretend|assume|suppose)\s+(?:that\s+)?(?:you\s+)?(?:have\s+)?no\s+(?:restrictions?|limits?|safety)", re.I), "hypothetical_framing"),
+
+    # --- v3.16: Prefix injection / completion bait ---
+    (re.compile(r"^(?:sure|absolutely|of\s+course|great|certainly|okay|ok)!?\s*(?:here|let\s+me|I'll|I\s+will)\s+", re.I), "prefix_injection"),
+    (re.compile(r"^(?:sure|absolutely|of\s+course|great|certainly)!?\s+here\s+is\s+", re.I), "prefix_injection"),
+    (re.compile(r"^(?:here\s+is|here\s+are)\s+(?:the\s+)?(?:detailed\s+)?(?:steps?|instructions?|procedure|method)", re.I), "prefix_injection"),
+    (re.compile(r"^(?:let\s+me|I'll|I\s+will)\s+(?:help|show|explain|provide)\s+you\s+with\s+that", re.I), "prefix_injection"),
+    (re.compile(r"^(?:of\s+course|absolutely)!?\s+here\s+is\s+the\s+(?:full|complete)\s+(?:answer|procedure|process)", re.I), "prefix_injection"),
+    (re.compile(r"^(?:great|sure|absolutely|of\s+course|certainly)\s+(?:question|!)?\s*(?:here|let\s+me|I'll|I\s+will)\s+(?:is|are|help|show|explain|provide)", re.I), "prefix_injection"),
+    (re.compile(r"^(?:here\s+is|here\s+are)\s+(?:the\s+)?(?:complete|full|detailed)\s+(?:answer|steps?|instructions?|procedure|method|process|guide)", re.I), "prefix_injection"),
+    (re.compile(r"^(?:sure|absolutely|of\s+course|great|certainly|okay)!?\s+.*(?:without|no|free\s+from)\s+(?:any\s+)?(?:restrictions?|limitations?|refusal|filtering)", re.I), "prefix_injection"),
+
+    # --- v3.16: Payload splitting / multi-step injection ---
+    (re.compile(r"(?:part|step)\s+[AAB1].*(?:ignore|disregard|forget|override)", re.I), "payload_splitting"),
+    (re.compile(r"(?:first|step\s+1).*(?:disregard|ignore|forget)\s+(?:everything|all|previous)", re.I), "payload_splitting"),
+    (re.compile(r"(?:then|step\s+2|part\s+2).*(?:reveal|show|tell|answer|comply)\s+(?:your|the|without)", re.I), "payload_splitting"),
+    (re.compile(r"(?:first|part\s+1).*(?:disregard|ignore|forget).*(?:then|part\s+2).*(?:reveal|show|tell)", re.I | re.S), "payload_splitting"),
+
+    # --- v3.16: Cross-lingual override detection ---
+    (re.compile(r"ignora\s+(?:todas\s+)?(?:las\s+)?(?:instrucciones|reglas|directrices)\s+(?:anteriores|previas)", re.I), "cross_lingual"),
+    (re.compile(r"ignorez\s+(?:toutes|tous)\s+les\s+(?:instructions|regles|directives)\s+(?:precedentes|anterieures)", re.I), "cross_lingual"),
+    (re.compile(r"(?:ignoriere|mache).*(?:alle\s+)?(?:vorherigen|frueheren)\s+(?:Anweisungen|Instruktionen|Regeln)", re.I), "cross_lingual"),
+    (re.compile(r"(?:ignora|ignoriere|ignorez|ignora|ignorera|无视|忽略).*(?:instrucciones|instructions|anweisungen|istruzioni|指示|指令)", re.I), "cross_lingual"),
+
+    # --- v3.16: Emotional manipulation / authority claim ---
+    (re.compile(r"I\s+am\s+the\s+(?:developer|admin|administrator|creator|owner).*(?:authorize|override|allow|permit)", re.I), "emotional_authority"),
+    (re.compile(r"as\s+(?:the\s+)?(?:system\s+)?(?:administrator|developer|creator|owner).*(?:override|authorize|disable|exempt)", re.I), "emotional_authority"),
+    (re.compile(r"(?:emergency|life\s+depends|people\s+will\s+(?:be\s+)?hurt|life\s+is\s+at\s+(?:risk|stake)).*(?:comply|answer|respond|help)", re.I), "emotional_authority"),
+    (re.compile(r"(?:my\s+life|lives).*(?:depends|depend)\s+on\s+you\s+(?:answering|complying|responding)", re.I), "emotional_authority"),
+    (re.compile(r"(?:I\s+am|this\s+is)\s+(?:the|your)\s+(?:developer|admin|creator).*(?:ignore|disable|override|bypass)", re.I), "emotional_authority"),
+    (re.compile(r"(?:please|I\s+beg|I\s+implore).*(?:ignore|override|bypass|disable)\s+(?:your|all|the)\s+(?:safety|restrictions?|rules?)", re.I), "emotional_authority"),
+
+    (re.compile(r"\[\s*(?:system|admin|developer|root|override)\s*\]", re.I), "instruction_injection"),
+    (re.compile(r"<\s*(?:system|admin|developer|root|override|imagine)\s*>", re.I), "instruction_injection"),
+    (re.compile(r"(?:system|admin|developer)\s*(?:prompt|message|instruction)\s*(?:says|states|reads)\s*[:\-]", re.I), "instruction_injection"),
 
     # Constraint removal attempts
-    re.compile(r"(?:remove|disable|turn\s+off|deactivate)\s+(?:your|all|the)\s+(?:safety|content|ethical)\s+(?:filter|guidelines?|restrictions?|policies?)", re.I),
-    re.compile(r"you\s+(?:have\s+)?no\s+(?:restrictions?|limitations?|guidelines?|rules?|boundaries)", re.I),
-    re.compile(r"(?:this|that)\s+(?:does\s+not|doesn't)\s+apply\s+(?:to\s+you|here|anymore)", re.I),
+    (re.compile(r"(?:remove|disable|turn\s+off|deactivate)\s+(?:your|all|the)\s+(?:safety|content|ethical)\s+(?:filter|guidelines?|restrictions?|policies?)", re.I), "constraint_removal"),
+    (re.compile(r"you\s+(?:have\s+)?no\s+(?:restrictions?|limitations?|guidelines?|rules?|boundaries)", re.I), "constraint_removal"),
+    (re.compile(r"(?:this|that)\s+(?:does\s+not|doesn't)\s+apply\s+(?:to\s+you|here|anymore)", re.I), "constraint_removal"),
+    # v3.16: "turn off / disable / deactivate / remove (your) restrictions|
+    # safeguards|limitations|boundaries" without the safety/content/ethical
+    # qualifier (strongly safety-coded nouns; "filters" excluded to avoid benign
+    # coding-context false positives). And explicit "jailbreak yourself/the model".
+    (re.compile(r"(?:turn\s+off|switch\s+off|disable|deactivate|remove)\s+(?:your\s+|all\s+|the\s+)?(?:restrictions?|safeguards?|limitations?|boundaries|safety)\b", re.I), "constraint_removal"),
+    (re.compile(r"\bjailbreak\s+(?:yourself|you|the\s+(?:ai|model|assistant|system|llm))\b", re.I), "constraint_removal"),
+    # v3.16: more constraint removal variants
+    (re.compile(r"(?:deactivate|remove|disable)\s+(?:your|all)\s+(?:ethical\s+)?(?:boundaries?|restrictions?|guardrails?)", re.I), "constraint_removal"),
+    (re.compile(r"bypass\s+(?:your|all|the)\s+(?:restrictions?|safety|content\s+policy|guardrails?)", re.I), "constraint_removal"),
+    (re.compile(r"(?:you\s+are\s+)?(?:free|exempt|unbound)\s+from\s+(?:all\s+)?(?:restrictions?|guidelines?|policies?)", re.I), "constraint_removal"),
 
     # Encoding / obfuscation hints (base64, rot13, hex payloads as instructions)
-    re.compile(r"decode\s+(?:the\s+following|this)\s+(?:base64|b64|hex|rot13|binary)", re.I),
-    re.compile(r"execute\s+(?:the\s+)?(?:following|this)\s+(?:command|instruction|payload)", re.I),
+    (re.compile(r"decode\s+(?:the\s+following|this)\s+(?:base64|b64|hex|rot13|binary)", re.I), "obfuscation_execution"),
+    (re.compile(r"execute\s+(?:the\s+)?(?:following|this)\s+(?:command|instruction|payload)", re.I), "obfuscation_execution"),
+    # v3.16: more obfuscation variants
+    (re.compile(r"(?:read|apply|follow)\s+the\s+rot13\s+of\s+this", re.I), "obfuscation_execution"),
+    (re.compile(r"(?:decode|decrypt)\s+(?:and\s+)?(?:follow|execute|apply|do)", re.I), "obfuscation_execution"),
+    (re.compile(r"(?:base64|b64|hex|rot13)\s+(?:payload|instruction|command)", re.I), "obfuscation_execution"),
 ]
 
 
@@ -88,16 +175,56 @@ _INJECTION_PATTERNS = [
 # an attack (audit findings, risk analysis, CVE review) must not score like
 # PLANNING one. A summary is a mention-frame when it carries analyst stance
 # markers and no first-person intent to execute harm.
+#
+# v3.18 (external bug report, autoimmune false-positive class): the marker set was
+# too narrow, so an honest ring that documents safety work while QUOTING the
+# covenant vocabulary ("deceive", "harm you") matched no marker, scored as a breach,
+# and — under v3.17's post-seal reflex — got auto-quarantined. Widened here with the
+# analyst-stance markers such rings actually carry, and `\baudit(?:ed|ing)?\b` (which
+# missed "auditable" because \b fails before "-able") generalized to `\baudit\w*\b`.
+# The markers are documentation/analyst words unlikely to appear in a real jailbreak
+# payload; genuine breaches are still caught by the first-person INTENT override and
+# by bare (unquoted) covenant use — see covenant_breach().
 _MENTION_RX = re.compile(
     r"(?:\bFINDINGS?\s*:|\bRISK\s*:?\s*(?:LOW|MEDIUM|HIGH|CRITICAL)\b"
-    r"|\bvulnerabilit(?:y|ies)\b|\bsecurity\s+(?:audit|review|analysis|perspective)\b"
+    r"|\bvulnerabilit(?:y|ies)\b|\bsecurity\s+(?:audit|review|analys[ie]s|perspective|posture)\b"
     r"|\bthreat\s+model\b|\bCVE-\d{4}\b|\battack\s+(?:vector|surface)\b"
-    r"|\banalyz(?:ed|ing)\b.{0,40}\bsecurity\b|\baudit(?:ed|ing)?\b)",
+    r"|\banaly[sz]\w*\b.{0,40}\bsecurity\b|\baudit\w*\b"
+    r"|\bfalse[\s-]?positive\b|\bsafety\s+scaffold\w*\b"
+    r"|\bmention[\s-]?frame\b|\buse[\s/]+(?:vs\.?\s+)?mention\b|\bco-?evolver\b"
+    r"|\bflagged\s+(?:for|as|by)\b|\badversar\w*\b|\bself[\s-]?documenting\b"
+    r"|\bthis\s+(?:ring|note|turn|entry)\s+(?:documents?|explains?|describes?|records?)\b)",
     re.IGNORECASE)
 _INTENT_RX = re.compile(
     r"\bI\s+(?:will|shall|am\s+going\s+to|plan\s+to|intend\s+to)\s+"
     r"(?:deceive|manipulate|betray|exploit|harm|attack|lie\s+to)\b",
     re.IGNORECASE)
+
+# Quote-span discounting (v3.18). Quoting trigger vocabulary to DOCUMENT it is the
+# strongest use/mention signal there is, and it is what makes the false positive
+# CONTAGIOUS (every ring that quotes a flagged ring to explain it gets flagged too).
+# _strip_quoted_spans removes the CONTENT of quoted spans before covenant/structural
+# scoring of the agent's OWN sealed text; _strip_quote_chars removes only the quote
+# characters so quoting can never HIDE first-person intent ("I will 'deceive' you").
+# Straight single quotes count as a span only when flanked by non-word chars, so
+# contractions ("don't", "isn't") are never mistaken for a quoted span. Applied ONLY
+# to the agent's own sealed content — incoming input (screen()) is judged
+# adversarially, with no such benefit of the doubt.
+_QSPAN_RX = re.compile(
+    r"\"[^\"]{0,200}?\""                      # "double"
+    r"|`[^`]{0,200}?`"                        # `backtick`
+    r"|“[^”]{0,200}?”"         # “smart double”
+    r"|‘[^’]{0,200}?’"         # ‘smart single’
+    r"|(?<!\w)'[^']{1,200}?'(?!\w)",          # 'straight single' (not a contraction)
+    re.S)
+
+
+def _strip_quoted_spans(text: str) -> str:
+    return _QSPAN_RX.sub(" ", text or "")
+
+
+def _strip_quote_chars(text: str) -> str:
+    return re.sub(r"[\"'`‘’“”]", " ", text or "")
 
 
 def _mention_frame(text: str) -> bool:
@@ -106,6 +233,99 @@ def _mention_frame(text: str) -> bool:
     if not text:
         return False
     return bool(_MENTION_RX.search(text)) and not _INTENT_RX.search(text)
+
+
+def covenant_breach(text: str, floor: int) -> bool:
+    """Use/mention-aware covenant judgment for a SEALED ring — the agent's OWN
+    assertion. Ordered so the three cases the raw lexical proxy conflated separate
+    cleanly (mirrors the PoQ gate's discrimination battery):
+
+      planning-attack (first-person intent, even if quoted)   -> BREACH
+      analyst-describing-attack (mention-frame stance markers) -> clean
+      quoting-triggers-to-explain-them (quoted mention)        -> clean
+      bare covenant vocabulary in the ring's own voice         -> BREACH
+
+    This is deliberately NOT used for incoming input (screen() keeps the raw,
+    adversarial covenant check): an attacker gets no benefit of the doubt for
+    wrapping a payload in quotes, but the agent documenting its own work does."""
+    if not text:
+        return False
+    # 1. First-person harmful intent is a breach regardless of framing. Check it on
+    #    quote-char-stripped text so quotes can't hide intent ("I will 'deceive' you").
+    if _INTENT_RX.search(_strip_quote_chars(text)):
+        return True
+    # 2. Analyst stance with no intent -> a mention, not a use.
+    if _mention_frame(text):
+        return False
+    # 3. A real breach must survive de-quoting: quoted vocabulary is a mention.
+    return score_covenant(_strip_quoted_spans(text)) < floor
+
+
+# v3.16: Text normalization to defeat obfuscation evasions.
+# Zero-width chars, homoglyphs, and unicode tricks that bypass regex.
+_ZERO_WIDTH = re.compile(r"[\u200b-\u200f\u2028-\u202f\u2060\u2061\ufeff]")
+_HOMOGLYPH = {
+    '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c',
+    '\u0445': 'x', '\u0443': 'y', '\u0456': 'i', '\u0455': 's', '\u0461': 'g',
+    '\u0476': 'v', '\u0474': 'v', '\u0491': 'g', '\u049b': 'k', '\u04a3': 'n',
+    '\u04af': 'm', '\u04e3': 'm', '\u0585': 'o', '\u0587': 'o',
+    '\u0661': '1', '\u0662': '2', '\u0663': '3', '\u0664': '4',
+    '\u0665': '5', '\u0666': '6', '\u0667': '7', '\u0668': '8',
+    '\u0669': '9', '\u0660': '0',
+    '\uff21': 'A', '\uff22': 'B', '\uff23': 'C', '\uff24': 'D', '\uff25': 'E',
+    '\uff26': 'F', '\uff27': 'G', '\uff28': 'H', '\uff29': 'I', '\uff2a': 'J',
+    '\uff2b': 'K', '\uff2c': 'L', '\uff2d': 'M', '\uff2e': 'N', '\uff2f': 'O',
+    '\uff30': 'P', '\uff31': 'Q', '\uff32': 'R', '\uff33': 'S', '\uff34': 'T',
+    '\uff35': 'U', '\uff36': 'V', '\uff37': 'W', '\uff38': 'X', '\uff39': 'Y',
+    '\uff3a': 'Z',
+}
+
+
+def _normalize_text(text: str) -> str:
+    """Strip zero-width chars, map homoglyphs to ASCII, collapse whitespace."""
+    if not text:
+        return text
+    t = _ZERO_WIDTH.sub('', text)
+    t = ''.join(_HOMOGLYPH.get(c, c) for c in t)
+    t = re.sub(r'\s+', ' ', t)
+    return t
+
+
+def _decode_and_scan(text: str) -> list[dict]:
+    """Find encoded payloads (base64/hex/rot13) in *text*, decode them,
+    and scan the decoded content for injection patterns."""
+    import base64 as b64
+    import codecs
+    hits = []
+    for m in re.finditer(r'[A-Za-z0-9+/]{16,}={0,2}', text):
+        candidate = m.group(0)
+        try:
+            decoded = b64.b64decode(candidate, validate=True).decode('utf-8', errors='replace')
+            if decoded.strip() and len(decoded) >= 10:
+                for sm in detect_injection_patterns(decoded):
+                    sm["match"] = sm["match"] + " (decoded from base64)"
+                    hits.append(sm)
+        except Exception:
+            pass
+    for m in re.finditer(r'\b[0-9a-fA-F]{20,}\b', text):
+        candidate = m.group(0)
+        try:
+            decoded = bytes.fromhex(candidate).decode('utf-8', errors='replace')
+            if decoded.strip() and len(decoded) >= 10:
+                for sm in detect_injection_patterns(decoded):
+                    sm["match"] = sm["match"] + " (decoded from hex)"
+                    hits.append(sm)
+        except Exception:
+            pass
+    try:
+        rot13_text = codecs.encode(text, 'rot_13')
+        if rot13_text != text:
+            for sm in detect_injection_patterns(rot13_text):
+                sm["match"] = sm["match"] + " (rot13)"
+                hits.append(sm)
+    except Exception:
+        pass
+    return hits
 
 
 def detect_injection_patterns(text: str) -> list[dict]:
@@ -122,22 +342,9 @@ def detect_injection_patterns(text: str) -> list[dict]:
     avoiding blocklist vocabulary.
     """
     matches = []
-    for i, pat in enumerate(_INJECTION_PATTERNS):
+    for pat, category in _INJECTION_PATTERNS:
         m = pat.search(text)
         if m:
-            # Categorize by pattern index ranges
-            if i < 5:
-                category = "override_negation"
-            elif i < 10:
-                category = "role_hijack"
-            elif i < 14:
-                category = "prompt_exfiltration"
-            elif i < 17:
-                category = "instruction_injection"
-            elif i < 20:
-                category = "constraint_removal"
-            else:
-                category = "obfuscation_execution"
             matches.append({
                 "pattern": pat.pattern,
                 "match": m.group(0),
@@ -154,25 +361,46 @@ def detect_injection_patterns(text: str) -> list[dict]:
 # system text, security research, and lone analysis requests ("decode this base64")
 # are ADMITTED-as-tainted, not blocked. (Pre-3.9 blocked on ANY structural match,
 # which refused benign prompts and even broke the per-turn loop.)
-_HIGH_DIRECTIVE = {"override_negation", "constraint_removal"}
+_HIGH_DIRECTIVE = {"override_negation", "constraint_removal", "refusal_suppression", "emotional_authority", "cross_lingual"}
+_MEDIUM_DIRECTIVE = {"role_hijack", "prompt_exfiltration", "instruction_injection", "hypothetical_framing", "prefix_injection", "payload_splitting"}
 _EXEC_INTENT = {"obfuscation_execution"}
 
 
 def analyze_input(text: str) -> dict:
     """Shared structural+severity analysis used by both screen() and detect(), so the
     two never disagree. Returns severity, categories, matches, taint and block flags."""
-    matches = detect_injection_patterns(text or "")
+    raw = text or ""
+    normalized = _normalize_text(raw)
+    matches = detect_injection_patterns(normalized)
+    decoded_hits = _decode_and_scan(raw)
+    for dh in decoded_hits:
+        if not any(m["match"] == dh["match"] for m in matches):
+            matches.append(dh)
     cats = {m["category"] for m in matches}
     high = cats & _HIGH_DIRECTIVE
     has_exec = bool(cats & _EXEC_INTENT)
     # Block only a real coordinated injection: a directive to override/strip safeguards
     # combined with execution intent, or two distinct high-severity directives.
-    block = bool(high) and (has_exec or len(high) >= 2)
+    block = bool(high) and (has_exec or len(high) >= 2 or (bool(cats & _MEDIUM_DIRECTIVE) and len(high) >= 1))
+    if not block and len(cats) >= 3 and (high or has_exec):
+        block = True
     severity = ("high" if block else
-                "medium" if (high or has_exec) else
+                "medium" if (high or has_exec or (bool(cats & _MEDIUM_DIRECTIVE) and len(cats) >= 2)) else
                 "low" if matches else "none")
     return {"matches": matches, "categories": sorted(cats), "severity": severity,
             "tainted": bool(matches), "block_recommended": block}
+
+
+# Ring types that legitimately NAME attack vocabulary or DESCRIBE a wound rather
+# than being one — antibodies/faculties, recovery & quarantine records, epochs,
+# dreams, conjectures, telemetry digests, operators, genesis. Both the full-chain
+# detect() scan and the per-ring tripwire() must treat these as healthy tissue.
+# ONE source so the two layers can never drift: pre-3.18 they had (detect() carried
+# a shorter list), so `immune scan` false-flagged healthy conjecture/dream/epoch/
+# genesis rings as "COMPROMISE DETECTED" that the tripwire correctly skipped.
+_SKIP_RING_TYPES = ("recovery", "quarantine", "faculty", "faculty-recur",
+                    "faculty-wake", "promotion", "epoch", "immune", "dream",
+                    "telemetry-digest", "operator", "genesis", "conjecture")
 
 
 class Immune:
@@ -213,16 +441,21 @@ class Immune:
             signals.append("chain hash verification FAILED — tampering detected")
         # Only police the agent's own ASSERTIONS. Skip structural/capability rings:
         # faculties/antibodies legitimately *name* attack vocabulary; recovery/quarantine
-        # rings describe the wound. Flagging those would be a false positive.
-        skip_types = ("recovery", "quarantine", "faculty", "faculty-recur", "promotion")
+        # rings describe the wound. Flagging those would be a false positive. Shared with
+        # the tripwire via _SKIP_RING_TYPES so the two layers never disagree.
         for r in self.tc.load():
-            if r["index"] == 0 or r["index"] in q or r["ring_type"] in skip_types:
+            if r["index"] == 0 or r["index"] in q or r["ring_type"] in _SKIP_RING_TYPES:
                 continue
             summ = self._summary(r)
-            if _mention_frame(summ):
-                continue   # v3.12 use/mention: analyst rings are healthy tissue
-            if score_covenant(summ) < self.floor:
+            reason, cats = self._wound_reason(summ)
+            if reason == "covenant":
                 signals.append(f"ring {r['index']}: covenant breach sealed into memory")
+                if first_bad is None:
+                    first_bad = r["index"]
+            elif reason == "structural":
+                # v3.16: structural scan of sealed CONTENT, not just incoming input.
+                signals.append(f"ring {r['index']}: coordinated structural injection "
+                               f"sealed into memory {cats}")
                 if first_bad is None:
                     first_bad = r["index"]
         incoming, structural, severity = None, [], "none"
@@ -273,6 +506,126 @@ class Immune:
             "severity": a["severity"],
             "tainted": a["tainted"],
         }
+
+    # ---- post-seal tripwire (v3.16: catch & quarantine WHEN it happens) ----
+    # Skip set shared with detect() via the module-level _SKIP_RING_TYPES so the
+    # membrane's two layers can never disagree about what is healthy tissue.
+    def _wound_reason(self, summ):
+        """The SINGLE use/mention-aware wound judgment for a SEALED ring (the agent's
+        OWN assertion). detect(), tripwire() and _ring_is_wound() all reason from this
+        one predicate so they can never disagree. Returns (reason, categories):
+          ("covenant", None)        — a first-person or bare-use covenant breach
+          ("structural", [cats])    — a coordinated structural injection (de-quoted)
+          (None, None)              — healthy tissue (mention/quotation/clean)
+        De-quoting is applied ONLY here, to the agent's own sealed content — quoting
+        trigger vocabulary to DOCUMENT it is a mention, not a use, and treating it as a
+        breach is the autoimmune false positive (v3.18). Incoming input is judged
+        adversarially by screen()/detect()-input, with no de-quoting."""
+        if _mention_frame(summ):
+            return (None, None)
+        if covenant_breach(summ, self.floor):
+            return ("covenant", None)
+        a = analyze_input(_strip_quoted_spans(summ))
+        if a["block_recommended"]:
+            return ("structural", a["categories"])
+        return (None, None)
+
+    def _ring_is_wound(self, ring) -> bool:
+        """True when a SEALED ring is itself a compromise. Skip-type capability rings
+        are healthy tissue by construction; everything else defers to _wound_reason."""
+        if ring.get("index") == 0 or ring.get("ring_type", "") in _SKIP_RING_TYPES:
+            return False
+        return self._wound_reason(self._summary(ring))[0] is not None
+
+    def _wound_floor(self, rings, ring_index):
+        """Earliest index of the CONTIGUOUS wound block ending at *ring_index*. Walk
+        backward while rings stay compromised, stopping at the first clean / skip /
+        mention / already-quarantined ring. Bounded by design: the auto-heal can
+        heal a multi-ring wound (e.g. seals that bypassed the reflex) without ever
+        reaching an unrelated older flag and nuking healthy history."""
+        q = set(self.state()["quarantine"])
+        by_idx = {r["index"]: r for r in rings}
+        floor = ring_index
+        i = ring_index - 1
+        while i >= 1:
+            r = by_idx.get(i)
+            if r is None or i in q or not self._ring_is_wound(r):
+                break
+            floor = i
+            i -= 1
+        return floor
+
+    def tripwire(self, ring, input_text=None):
+        """Judge a SINGLE just-sealed ring for compromise. This is the second layer:
+        the input screen (screen()) polices the ATTEMPT before reasoning; the tripwire
+        polices the OUTCOME — what actually got sealed into memory — which is the true
+        compromise signal. It fires only on a real wound (a covenant breach or a
+        coordinated structural injection sealed into the agent's OWN assertion, or a
+        chain that no longer verifies), never on merely-tainted input the agent
+        correctly handled. Returns {compromised, reason, first_bad, ...}."""
+        summ = self._summary(ring)
+        rtype = ring.get("ring_type", "")
+        # Structural / capability rings are healthy tissue by construction; everything
+        # else defers to the shared use/mention-aware predicate.
+        if rtype in _SKIP_RING_TYPES:
+            return {"compromised": False, "reason": None, "first_bad": None,
+                    "ring": ring["index"]}
+        reason, cats = self._wound_reason(summ)
+        if reason == "covenant":
+            return {"compromised": True, "reason": "covenant_breach_sealed",
+                    "first_bad": ring["index"], "covenant": score_covenant(summ),
+                    "ring": ring["index"]}
+        if reason == "structural":
+            return {"compromised": True, "reason": "structural_injection_sealed",
+                    "first_bad": ring["index"], "categories": cats,
+                    "ring": ring["index"]}
+        return {"compromised": False, "reason": None, "first_bad": None,
+                "ring": ring["index"], "input_tainted": bool(input_text and analyze_input(input_text)["tainted"])}
+
+    def auto_guard(self, ring_index, input_text=None, lesson=None, difficulty=0):
+        """The self-healing reflex: run the tripwire on the just-sealed ring and, if it
+        is a genuine wound, AUTONOMOUSLY lock down and roll the chain back to the block
+        BEFORE it — molting the wound into a scar and growing an antibody — so a
+        compromise is quarantined the moment it happens, not on a later manual scan.
+        Fail-open: any error returns action='error' and takes NO destructive action."""
+        try:
+            rings = self.tc.load()
+            ring = next((r for r in rings if r["index"] == ring_index), None)
+            if ring is None:
+                return {"action": "none", "reason": "ring_not_found"}
+            # Whole-chain integrity: a failed verify means tampering somewhere; that is
+            # a lockdown-and-alert condition (we cannot know the true first_bad from one
+            # ring), never a blind auto-rollback.
+            ok, _ = self.tc.verify()
+            if not ok:
+                self.lockdown()
+                return {"action": "lockdown", "reason": "chain_verify_failed",
+                        "note": "chain no longer verifies — locked; run immune.scan + human review before rollback."}
+            tw = self.tripwire(ring, input_text=input_text)
+            if not tw["compromised"]:
+                return {"action": "none", "reason": tw.get("reason"),
+                        "input_tainted": tw.get("input_tainted", False)}
+            self.lockdown()
+            # Heal the WHOLE contiguous wound, not just the last ring: if an earlier
+            # ring was sealed compromised without the reflex running (reflex off, a
+            # manual seal, a subagent path, or a prior fail-open), rolling back only
+            # to ring_index-1 would leave that wound ACTIVE. The floor walk quarantines
+            # the full block while staying bounded to it.
+            floor = self._wound_floor(rings, tw["first_bad"])
+            rep = self.rollback(floor,
+                                lesson=lesson or f"auto-quarantine: {tw['reason']}",
+                                difficulty=difficulty)
+            rep["action"] = "rolled_back"
+            rep["reason"] = tw["reason"]
+            # Surface — never blindly auto-nuke — any OLDER, non-contiguous wound left
+            # in the record, so the human can `immune scan` rather than the reflex
+            # reaching back across healthy history.
+            resid = self.detect()
+            if resid["compromised"] and resid["first_bad_height"] is not None:
+                rep["residual_compromise"] = resid["first_bad_height"]
+            return rep
+        except Exception as exc:                       # fail-open: never brick the turn
+            return {"action": "error", "error": str(exc)}
 
     # ---- response ----
     def lockdown(self):
@@ -348,6 +701,17 @@ class Immune:
 
 
 # --------------------------------------------------------------------------- #
+# Module-level convenience (mirrors cambium.grow(root, …) call style)
+# --------------------------------------------------------------------------- #
+
+def guard_turn(root, ring_index, input_text=None, lesson=None, difficulty=0):
+    """Post-seal self-healing reflex: tripwire the just-sealed ring; auto-lockdown +
+    roll back to the block before it if it is a genuine wound. Fail-open."""
+    return Immune(root).auto_guard(ring_index, input_text=input_text,
+                                   lesson=lesson, difficulty=difficulty)
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 
@@ -397,6 +761,27 @@ def cmd_rollback(args):
         print(f"  (antibody not grown: {ab.get('skipped')})")
 
 
+def cmd_guard(args):
+    r = guard_turn(args.root, args.ring, input_text=args.input, lesson=args.lesson)
+    act = r.get("action", "none")
+    if act == "rolled_back":
+        print(f"AUTO-QUARANTINE FIRED ({r.get('reason')}): rolled back to clean height "
+              f"{r['safe_height']}; molted blocks {r['quarantined']} as {r['scar']['id']}.")
+        print(f"  recovery sealed as Ring {r['recovery_ring']}; lockdown lifted.")
+        ab = r.get("antibody")
+        if ab and ab.get("name"):
+            print(f"  antibody grown: sense '{ab['name']}' ({ab['eid']}) Ring {ab['ring']}")
+        if r.get("residual_compromise") is not None:
+            print(f"  ! residual older wound remains at height {r['residual_compromise']} "
+                  f"(non-contiguous) — run `immune scan` for full review.")
+    elif act == "lockdown":
+        print(f"LOCKDOWN ({r.get('reason')}): {r.get('note')}")
+    elif act == "error":
+        print(f"guard error (fail-open, no action taken): {r.get('error')}")
+    else:
+        print(f"clean — no wound sealed (input_tainted={r.get('input_tainted', False)}).")
+
+
 def cmd_status(args):
     st = Immune(args.root).status()
     print(f"locked: {st['locked']}   safe_height: {st['safe_height']}   active_head: {st['active_head']}")
@@ -428,6 +813,12 @@ def build_parser():
     pr.add_argument("--lesson", default=None)
     pr.add_argument("--no-antibody", action="store_true", help="skip auto-growing the antibody sense")
     pr.set_defaults(func=cmd_rollback)
+
+    pg = sub.add_parser("guard", parents=[common], help="post-seal tripwire: auto-lockdown + rollback to the block before a sealed wound")
+    pg.add_argument("--ring", type=int, required=True, help="index of the just-sealed ring to judge")
+    pg.add_argument("--input", default=None, help="the input that produced the ring (for taint forensics)")
+    pg.add_argument("--lesson", default=None)
+    pg.set_defaults(func=cmd_guard)
 
     pst = sub.add_parser("status", parents=[common], help="immune status: lockdown, safe height, quarantine, scars")
     pst.set_defaults(func=cmd_status)
