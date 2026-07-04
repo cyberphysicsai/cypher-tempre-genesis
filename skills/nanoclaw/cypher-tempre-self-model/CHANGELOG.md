@@ -1,5 +1,47 @@
 # Changelog
 
+## v3.19.0 - 2026-07-04
+
+The topological membrane. v3.18 fixed the autoimmune false-positive class at the
+immune layer with a lexical use/mention battery. This makes the fix *structural*
+and *shared*: the covenant judgment now reasons about the REGION content sits in
+— the agent's own first-person assertion vs an analyst/quoted mention vs external
+input — and one frame-aware function is read by BOTH the conscience (the PoQ gate)
+and the membrane (immune), so they can never drift. This closes the two follow-ups
+left open in v3.18.
+
+### Changed
+- **Frame-aware covenant, one source of truth.** The use/mention machinery and a new
+  `covenant_breach` / `score_covenant_framed` moved into `poq.py` (the home of the
+  covenant blocklist). `immune` imports them (poq never imports immune — no circular
+  dependency), and `immune.covenant_breach is poq.covenant_breach` — literally one
+  object. First-person harmful intent (checked on quote-char-stripped text) is always
+  a breach; analyst mentions and quoted vocabulary are discounted; bare unquoted use
+  is still a breach.
+- **The PoQ gate is now frame-aware** (follow-up #1). It previously REJECTED an honest
+  ring that quoted the covenant vocabulary to document safety work (a fail-safe but
+  real papercut — you could not seal an accurate note about the immune system). The
+  gate's covenant check now uses `score_covenant_framed`, so mentions pass while
+  genuine breaches (intent or bare use) are still rejected.
+
+### Added
+- **Declared content provenance (topological frames).** `recall.py turn --frame
+  {assertion,mention,input}` lets a ring DECLARE what region its content is — the
+  fully-worn-self-model way to separate documenting an attack from committing one,
+  instead of inferring it lexically. The frame travels in the ring payload and is
+  honored by the gate and the tripwire. It is a floor, not a bypass: a declared
+  `mention` can never launder first-person intent (the intent backstop runs first)
+  or a coordinated structural injection, and it does NOT relax the incoming-input
+  screen, which stays adversarial.
+- selftest **phase23** (8 checks): shared-source identity, the gate accepts mentions
+  and rejects breaches, and a declared frame passes without laundering intent.
+
+### Notes
+- Layer 3 (the reporter's self-blocking antibody op) is resolved: a vocabulary-
+  enumerating discrimination op can be authored via `cambium propose_op` (stored
+  inert, awaiting human `activate`), and with the built-in frame-aware discrimination
+  it is no longer needed. The incoming-input screen remains adversarial by design.
+
 ## v3.18.0 - 2026-07-03
 
 Three defects in the v3.17 self-healing membrane, each confirmed with a failing

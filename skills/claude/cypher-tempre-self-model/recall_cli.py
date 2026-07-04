@@ -269,7 +269,7 @@ def _refusal_notice(verdict):
 
 
 def _loop_seal(root, reg, ring_type, summary, context="", external_scores=None,
-               used_rings=None, at_risk=None):
+               used_rings=None, at_risk=None, frame=None):
     """Seal that ALWAYS leaves a ring — the spine of the enforced loop. Tries an honest
     seal first; the FALLBACK on refusal depends on WHY the conscience refused:
       - FORCE_UNCERTAINTY / REVISE: reseal the SAME content uncertainty-led, so an
@@ -281,7 +281,7 @@ def _loop_seal(root, reg, ring_type, summary, context="", external_scores=None,
     Returns (verdict, ring, labels, was_fallback)."""
     verdict, ring, labels = Recall(root, reg).seal(
         ring_type, summary, context=context, external_scores=external_scores,
-        used_rings=used_rings, at_risk=at_risk)
+        used_rings=used_rings, at_risk=at_risk, frame=frame)
     # v3.12 gate-struggle telemetry: the first verdict is the gate's real work.
     # Before this, only sealed SEALs reached the record, so the conscience was
     # unmeasurable (self-audit: 1,411 rings, zero observed REVISE/REJECT).
@@ -391,7 +391,8 @@ def cmd_turn(args):
     scores = {d: _a[d] for d in _dims if _a.get(d) is not None} or None
     verdict, ring, labels, reseal = _loop_seal(
         root, reg, args.type, args.summary, context=args.context or "",
-        external_scores=scores, used_rings=args.used_rings, at_risk=args.at_risk)
+        external_scores=scores, used_rings=args.used_rings, at_risk=args.at_risk,
+        frame=getattr(args, "frame", None))
     if reseal:
         print("PoQ refused the confident form — restated uncertainty-led so the turn "
               "still seals honestly as tentative.")
@@ -885,6 +886,10 @@ def build_parser():
         pt.add_argument(f"--{d}", type=int, default=None)
     pt.add_argument("--used-rings", nargs="*", type=int, default=None)
     pt.add_argument("--at-risk", nargs="*", default=None)
+    pt.add_argument("--frame", choices=["assertion", "mention", "input"], default=None,
+                    help="declare this ring's content provenance (topological). 'mention' = you are "
+                         "DOCUMENTING/quoting attack vocabulary, not using it — the covenant gate and "
+                         "immune membrane then judge by region, not by lexical match. Default: inferred.")
     pt.set_defaults(func=cmd_turn)
 
     ps = sub.add_parser("seal", parents=[common], help="self-label then PoQ-gate-seal a block")

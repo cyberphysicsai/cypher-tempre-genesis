@@ -135,6 +135,47 @@ def score_covenant(text: str) -> int:
     return clamp(235 - 130 * hits)
 
 
+# --------------------------------------------------------------------------- #
+# Frame-aware covenant (the topological membrane, v3.19)
+# --------------------------------------------------------------------------- #
+# `score_covenant` above is a raw substring proxy: it cannot tell the agent's own USE
+# of the vocabulary from a MENTION of it. The region primitives (assertion / mention /
+# input) live in frames.py; here we build the frame-aware covenant judgment on top —
+# ONE function that both the conscience (PoQGate, below) and the membrane (immune,
+# which imports from here) read, so they can never drift. Incoming input is NOT routed
+# through this: screen() keeps the raw, adversarial score_covenant.
+from frames import (CONTENT_FRAMES, mention_frame, strip_quoted_spans,
+                    strip_quote_chars, has_harmful_intent)
+
+# A clean, passing covenant score: an analyst mention naming the vocabulary is not a
+# breach for naming it. >= covenant_floor so a mention with UNQUOTED vocab still passes.
+_COVENANT_MENTION_PASS = 235
+
+
+def score_covenant_framed(text: str, frame: str = None) -> int:
+    """Frame-aware covenant score on the same 0..255 scale as score_covenant, so the
+    gate's numeric floor logic is unchanged. Ordered so the regions separate:
+      first-person harmful intent (quotes can't hide it) -> real breach score (low)
+      declared/inferred MENTION (analyst stance)         -> passing (naming is fine)
+      bare assertion                                     -> raw, with quoted spans discounted
+    """
+    if not text:
+        return score_covenant(text)
+    if has_harmful_intent(text):
+        return score_covenant(strip_quote_chars(text))       # intent -> breach, regardless of frame
+    if frame == "mention" or mention_frame(text):
+        return max(score_covenant(strip_quoted_spans(text)), _COVENANT_MENTION_PASS)
+    return score_covenant(strip_quoted_spans(text))           # bare use; only quoted vocab discounted
+
+
+def covenant_breach(text: str, floor: int, frame: str = None) -> bool:
+    """Use/mention + frame-aware covenant judgment for the agent's OWN content — the
+    single predicate both the gate and the immune membrane reason from. A breach is
+    first-person intent or bare unquoted covenant use; analyst mentions and quoted
+    vocabulary are not. NOT for incoming input (screen() stays raw-adversarial)."""
+    return score_covenant_framed(text, frame) < floor
+
+
 def score_consistency(text: str, cand: set, chain, ring_token_sets) -> int:
     """Conservative contradiction proxy: penalize when a candidate heavily
     overlaps a prior ring but flips polarity (adds negation the ring lacked)."""
@@ -309,7 +350,7 @@ class PoQGate:
 
     def evaluate(self, candidate: str, chain, context: str = "", external_scores=None,
                  ring_token_sets=None, span_guard=False, declared_evidence=None,
-                 evidence_texts=None) -> dict:
+                 evidence_texts=None, frame: str = None) -> dict:
         ext = external_scores or {}
         cand = set(tokens(candidate))
         ctx = set(tokens(context))
@@ -325,7 +366,9 @@ class PoQGate:
             "novelty":     ext.get("novelty",     score_novelty(cand, ring_token_sets)),
             "consistency": ext.get("consistency", score_consistency(candidate, cand, chain, ring_token_sets)),
             "depth":       ext.get("depth",       score_depth(candidate, cand)),
-            "covenant":    ext.get("covenant",    score_covenant(candidate)),
+            # Frame-aware: the gate judges the agent's OWN assertion, so a MENTION of
+            # attack vocabulary (analyst frame / quotation) is not scored as a breach.
+            "covenant":    ext.get("covenant",    score_covenant_framed(candidate, frame)),
         }
         brightness = round(sum(s.values()) / len(s), 3)
         grounding = measure_grounding(cand, support)
@@ -475,7 +518,7 @@ def gate_and_seal(tc: Timechain, candidate: str, context: str = "",
                   ring_type: str = "experience", difficulty: int = 0,
                   external_scores=None, files=None, extra_payload=None, gate: PoQGate = None,
                   window: int = POQ_WINDOW, relevant_rings=None, use_index: bool = False,
-                  declared_evidence=None, evidence_texts=None):
+                  declared_evidence=None, evidence_texts=None, frame: str = None):
     """Run the gate; seal only if the verdict is SEAL. Returns (verdict, ring|None).
     `extra_payload` (e.g. self-labels from recall.py) is merged into the sealed payload.
     The gate scores against a BOUNDED relevance window (relevant rings first, then recent),
@@ -505,11 +548,13 @@ def gate_and_seal(tc: Timechain, candidate: str, context: str = "",
     verdict = gate.evaluate(candidate, relevance_window(tc, window, relevant_rings),
                             context, external_scores, span_guard=True,
                             declared_evidence=declared_evidence,
-                            evidence_texts=evidence_texts)
+                            evidence_texts=evidence_texts, frame=frame)
     if verdict["decision"] == "SEAL":
         payload = {"summary": candidate}
         if context:
             payload["context"] = context
+        if frame in CONTENT_FRAMES:
+            payload["frame"] = frame        # declared provenance travels with the ring
         payload["poq_verdict"] = {"decision": verdict["decision"],
                                   "cited_rings": verdict["cited_rings"]}
         if verdict.get("span_grounding"):

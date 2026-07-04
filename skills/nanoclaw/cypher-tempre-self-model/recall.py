@@ -1804,7 +1804,7 @@ class Recall:
 
     def seal(self, ring_type, summary, context="", external_scores=None, difficulty=0, files=None,
              window=POQ_WINDOW, relevant_rings=None, use_index=False, used_rings=None,
-             at_risk=None):
+             at_risk=None, frame=None):
         """`used_rings` is the model's DECLARED credit assignment: the ring indices
         whose content actually grounded this thought. Declaring them (a) fills the
         PoQ relevance window with exactly that evidence, so the conscience audits
@@ -1848,7 +1848,8 @@ class Recall:
                                       # the coverage gate audits aggregates against the
                                       # DECLARED evidence count (None = nothing declared)
                                       declared_evidence=(len(used_rings)
-                                                         if used_rings is not None else None))
+                                                         if used_rings is not None else None),
+                                      frame=frame)   # declared content provenance (topological)
         # TELEMETRY (use): the turn's outcome — every gate decision is a labeled
         # event (a REVISE/FORCE_UNCERTAINTY is signal too, not just a SEAL).
         self._emit("use", {
