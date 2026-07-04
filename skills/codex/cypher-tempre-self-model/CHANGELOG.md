@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.21.0 - 2026-07-04
+
+Reconciliation: the best of the two parallel v3.19/v3.20 lines, made coherent.
+v3.20 merged comprehensive detection hardening (83 patterns, normalization,
+decode-and-rescan) on top of v3.19's topological membrane — but that merge kept a
+pre-v3.19 `immune.py` with its own *local* copies of the use/mention helpers, so
+the single-source-of-truth was broken (`immune.covenant_breach` was no longer
+`poq.covenant_breach`) and a ring's declared `--frame` was ignored by the membrane.
+This release folds v3.19's architecture back in without losing any v3.20 detection.
+
+### Fixed
+- **Single source of truth restored.** `immune.py` no longer carries its own copies of
+  `mention_frame` / `strip_quoted_spans` / `covenant_breach`; it imports them from
+  `poq` (built on `frames.py`), so `immune.covenant_breach is poq.covenant_breach`
+  again — the conscience and the membrane can never drift.
+- **Declared frames honored by the membrane.** `immune._wound_reason` is frame-aware
+  again; a ring sealed with `--frame mention` is honored by `detect()`/`tripwire()`
+  (with the intent + structural-injection backstops still running, so a declared
+  mention can never launder a real breach).
+- **Codex `shell` capability re-declared.** A cross-bundle SKILL.md sync had dropped
+  the codex `shell` permission line, so `install_codex_hooks.py`'s declared shell use
+  scanned as undeclared (SkillSpector CAUTION). Restored → SAFE.
+- **Tests no longer ship inside a bundle.** `jailbreak_corpus.py`, `test_smoke.py` and
+  `test_gate_discrimination.py` had been added under the openclaw bundle's `tests/`,
+  so the shipped openclaw zip contained 57 real jailbreak prompts (SkillSpector
+  100/100 DO_NOT_INSTALL). Moved to repo-level `tests/` (per the v3.11.1 convention);
+  the openclaw bundle scans SAFE again.
+
+### Verified
+- All five bundles scan **4/100 SAFE** (ship-view). Benchmark `tests/jailbreak_corpus.py`
+  **57/57 catch, 0/23 false positives**; `test_smoke.py` 106/106; `test_gate_discrimination.py`
+  12/12; selftest phase20–23 PASS; `tools/immune_bench.py` block 72% / detect 100% /
+  0 miss / 0% FP. Detection + recovery hardening, **not** a security guarantee — no
+  membrane is ever 100% secure.
+
 ## v3.20.0 - 2026-07-04
 
 The membrane closes: 100% jailbreak catch, 0% false positives. Comprehensive immune

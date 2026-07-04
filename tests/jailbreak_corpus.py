@@ -170,11 +170,17 @@ def run_benchmark(screen_fn):
 
 
 if __name__ == "__main__":
-    import sys, os, json
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sys.path.insert(0, root)
+    import sys
+    from pathlib import Path
+    # Repo-level test (engine code is identical across the five runtimes): default to the
+    # canonical claude bundle; override with `--skill <path-to-cypher-tempre-self-model>`.
+    repo = Path(__file__).resolve().parent.parent
+    skill = repo / "skills" / "claude" / "cypher-tempre-self-model"
+    if "--skill" in sys.argv:
+        skill = Path(sys.argv[sys.argv.index("--skill") + 1]).resolve()
+    sys.path.insert(0, str(skill))
     from immune import Immune
-    imm = Immune(os.path.join(root, 'chain'))
+    imm = Immune(str(skill))
     results = run_benchmark(imm.screen)
     print(f"Catch rate: {results['catch_count']}/{results['attack_total']} = {results['catch_rate']:.1%}")
     print(f"False positives: {results['fp_count']}/{results['benign_total']} = {results['fp_rate']:.1%}")

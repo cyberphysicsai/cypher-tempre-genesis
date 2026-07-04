@@ -18,6 +18,7 @@ permissions:
   - "file_write — append-only chain rings and blockspace blobs, registries, and per-user learner state (never deletes; history is immutable)"
   - "env — reads CT_TELEMETRY, dormancy, and dashboard dev-unlock toggles only"
   - "network — none in the stdlib core (git provenance is read directly from .git, no process spawning); used only if an optional embedding provider is explicitly selected (--provider st|openai|voyage)"
+  - "shell — the optional Codex hook installer (install_codex_hooks.py) and the *.sh loop hooks invoke /bin/bash to run the per-turn loop and chain an existing notify program; the Python engine itself spawns no processes"
 ---
 
 # Cypher Tempre Self-Model

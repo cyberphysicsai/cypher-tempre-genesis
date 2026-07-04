@@ -36,7 +36,12 @@ from collections import Counter
 from pathlib import Path
 
 from timechain import Timechain
-from poq import PoQGate, tokens, score_covenant
+# v3.19: the use/mention + frame-aware covenant judgment lives in poq.py (which builds
+# it on frames.py) — the home of the covenant blocklist — so the conscience (PoQGate)
+# and this membrane read ONE source and can never drift. immune imports it (poq never
+# imports immune: no circular import).
+from poq import (PoQGate, tokens, score_covenant,
+                 covenant_breach, mention_frame, strip_quoted_spans)
 
 # --------------------------------------------------------------------------- #
 # Structural injection patterns
@@ -171,94 +176,10 @@ _INJECTION_PATTERNS = [
 ]
 
 
-# v3.12 use/mention discrimination (self-audit 2026-07-03, Ring 1414): DESCRIBING
-# an attack (audit findings, risk analysis, CVE review) must not score like
-# PLANNING one. A summary is a mention-frame when it carries analyst stance
-# markers and no first-person intent to execute harm.
-#
-# v3.18 (external bug report, autoimmune false-positive class): the marker set was
-# too narrow, so an honest ring that documents safety work while QUOTING the
-# covenant vocabulary ("deceive", "harm you") matched no marker, scored as a breach,
-# and — under v3.17's post-seal reflex — got auto-quarantined. Widened here with the
-# analyst-stance markers such rings actually carry, and `\baudit(?:ed|ing)?\b` (which
-# missed "auditable" because \b fails before "-able") generalized to `\baudit\w*\b`.
-# The markers are documentation/analyst words unlikely to appear in a real jailbreak
-# payload; genuine breaches are still caught by the first-person INTENT override and
-# by bare (unquoted) covenant use — see covenant_breach().
-_MENTION_RX = re.compile(
-    r"(?:\bFINDINGS?\s*:|\bRISK\s*:?\s*(?:LOW|MEDIUM|HIGH|CRITICAL)\b"
-    r"|\bvulnerabilit(?:y|ies)\b|\bsecurity\s+(?:audit|review|analys[ie]s|perspective|posture)\b"
-    r"|\bthreat\s+model\b|\bCVE-\d{4}\b|\battack\s+(?:vector|surface)\b"
-    r"|\banaly[sz]\w*\b.{0,40}\bsecurity\b|\baudit\w*\b"
-    r"|\bfalse[\s-]?positive\b|\bsafety\s+scaffold\w*\b"
-    r"|\bmention[\s-]?frame\b|\buse[\s/]+(?:vs\.?\s+)?mention\b|\bco-?evolver\b"
-    r"|\bflagged\s+(?:for|as|by)\b|\badversar\w*\b|\bself[\s-]?documenting\b"
-    r"|\bthis\s+(?:ring|note|turn|entry)\s+(?:documents?|explains?|describes?|records?)\b)",
-    re.IGNORECASE)
-_INTENT_RX = re.compile(
-    r"\bI\s+(?:will|shall|am\s+going\s+to|plan\s+to|intend\s+to)\s+"
-    r"(?:deceive|manipulate|betray|exploit|harm|attack|lie\s+to)\b",
-    re.IGNORECASE)
-
-# Quote-span discounting (v3.18). Quoting trigger vocabulary to DOCUMENT it is the
-# strongest use/mention signal there is, and it is what makes the false positive
-# CONTAGIOUS (every ring that quotes a flagged ring to explain it gets flagged too).
-# _strip_quoted_spans removes the CONTENT of quoted spans before covenant/structural
-# scoring of the agent's OWN sealed text; _strip_quote_chars removes only the quote
-# characters so quoting can never HIDE first-person intent ("I will 'deceive' you").
-# Straight single quotes count as a span only when flanked by non-word chars, so
-# contractions ("don't", "isn't") are never mistaken for a quoted span. Applied ONLY
-# to the agent's own sealed content — incoming input (screen()) is judged
-# adversarially, with no such benefit of the doubt.
-_QSPAN_RX = re.compile(
-    r"\"[^\"]{0,200}?\""                      # "double"
-    r"|`[^`]{0,200}?`"                        # `backtick`
-    r"|“[^”]{0,200}?”"         # “smart double”
-    r"|‘[^’]{0,200}?’"         # ‘smart single’
-    r"|(?<!\w)'[^']{1,200}?'(?!\w)",          # 'straight single' (not a contraction)
-    re.S)
-
-
-def _strip_quoted_spans(text: str) -> str:
-    return _QSPAN_RX.sub(" ", text or "")
-
-
-def _strip_quote_chars(text: str) -> str:
-    return re.sub(r"[\"'`‘’“”]", " ", text or "")
-
-
-def _mention_frame(text: str) -> bool:
-    """True when *text* discusses attacks/harm in an analyst frame (use/mention
-    distinction) and contains no first-person intent to commit harm."""
-    if not text:
-        return False
-    return bool(_MENTION_RX.search(text)) and not _INTENT_RX.search(text)
-
-
-def covenant_breach(text: str, floor: int) -> bool:
-    """Use/mention-aware covenant judgment for a SEALED ring — the agent's OWN
-    assertion. Ordered so the three cases the raw lexical proxy conflated separate
-    cleanly (mirrors the PoQ gate's discrimination battery):
-
-      planning-attack (first-person intent, even if quoted)   -> BREACH
-      analyst-describing-attack (mention-frame stance markers) -> clean
-      quoting-triggers-to-explain-them (quoted mention)        -> clean
-      bare covenant vocabulary in the ring's own voice         -> BREACH
-
-    This is deliberately NOT used for incoming input (screen() keeps the raw,
-    adversarial covenant check): an attacker gets no benefit of the doubt for
-    wrapping a payload in quotes, but the agent documenting its own work does."""
-    if not text:
-        return False
-    # 1. First-person harmful intent is a breach regardless of framing. Check it on
-    #    quote-char-stripped text so quotes can't hide intent ("I will 'deceive' you").
-    if _INTENT_RX.search(_strip_quote_chars(text)):
-        return True
-    # 2. Analyst stance with no intent -> a mention, not a use.
-    if _mention_frame(text):
-        return False
-    # 3. A real breach must survive de-quoting: quoted vocabulary is a mention.
-    return score_covenant(_strip_quoted_spans(text)) < floor
+# v3.12 use/mention discrimination, v3.18 widened + quote-discounted, v3.19 moved into
+# frames.py + poq.py (imported above) so the conscience and the membrane share ONE
+# frame-aware judgment. `mention_frame`, `strip_quoted_spans` and `covenant_breach`
+# now come from poq; only immune-specific structural-injection code lives below.
 
 
 # v3.16: Text normalization to defeat obfuscation evasions.
@@ -447,7 +368,7 @@ class Immune:
             if r["index"] == 0 or r["index"] in q or r["ring_type"] in _SKIP_RING_TYPES:
                 continue
             summ = self._summary(r)
-            reason, cats = self._wound_reason(summ)
+            reason, cats = self._wound_reason(summ, self._frame(r))
             if reason == "covenant":
                 signals.append(f"ring {r['index']}: covenant breach sealed into memory")
                 if first_bad is None:
@@ -510,32 +431,38 @@ class Immune:
     # ---- post-seal tripwire (v3.16: catch & quarantine WHEN it happens) ----
     # Skip set shared with detect() via the module-level _SKIP_RING_TYPES so the
     # membrane's two layers can never disagree about what is healthy tissue.
-    def _wound_reason(self, summ):
-        """The SINGLE use/mention-aware wound judgment for a SEALED ring (the agent's
-        OWN assertion). detect(), tripwire() and _ring_is_wound() all reason from this
-        one predicate so they can never disagree. Returns (reason, categories):
+    def _wound_reason(self, summ, frame=None):
+        """The SINGLE use/mention + frame-aware wound judgment for a SEALED ring (the
+        agent's OWN assertion). detect(), tripwire() and _ring_is_wound() all reason
+        from this one predicate so they can never disagree. Returns (reason, categories):
           ("covenant", None)        — a first-person or bare-use covenant breach
           ("structural", [cats])    — a coordinated structural injection (de-quoted)
           (None, None)              — healthy tissue (mention/quotation/clean)
-        De-quoting is applied ONLY here, to the agent's own sealed content — quoting
-        trigger vocabulary to DOCUMENT it is a mention, not a use, and treating it as a
-        breach is the autoimmune false positive (v3.18). Incoming input is judged
-        adversarially by screen()/detect()-input, with no de-quoting."""
-        if _mention_frame(summ):
-            return (None, None)
-        if covenant_breach(summ, self.floor):
+        *frame* is the ring's DECLARED provenance (topological): 'mention' exempts NAMING
+        the vocabulary, but the intent backstop inside covenant_breach still fires — a
+        declared mention can never launder first-person intent. De-quoting is applied
+        ONLY here, to the agent's own sealed content — incoming input is judged
+        adversarially by screen()/detect()-input, never through this predicate."""
+        if covenant_breach(summ, self.floor, frame):   # frame-aware; intent overrides mention
             return ("covenant", None)
-        a = analyze_input(_strip_quoted_spans(summ))
+        if frame == "mention" or mention_frame(summ):
+            return (None, None)                        # analyst stance, no breach
+        a = analyze_input(strip_quoted_spans(summ))
         if a["block_recommended"]:
             return ("structural", a["categories"])
         return (None, None)
+
+    def _frame(self, ring):
+        """The ring's declared content provenance ('assertion' | 'mention' | 'input'),
+        or None when it did not declare one (fall back to lexical inference)."""
+        return (ring.get("payload") or {}).get("frame")
 
     def _ring_is_wound(self, ring) -> bool:
         """True when a SEALED ring is itself a compromise. Skip-type capability rings
         are healthy tissue by construction; everything else defers to _wound_reason."""
         if ring.get("index") == 0 or ring.get("ring_type", "") in _SKIP_RING_TYPES:
             return False
-        return self._wound_reason(self._summary(ring))[0] is not None
+        return self._wound_reason(self._summary(ring), self._frame(ring))[0] is not None
 
     def _wound_floor(self, rings, ring_index):
         """Earliest index of the CONTIGUOUS wound block ending at *ring_index*. Walk
@@ -570,7 +497,7 @@ class Immune:
         if rtype in _SKIP_RING_TYPES:
             return {"compromised": False, "reason": None, "first_bad": None,
                     "ring": ring["index"]}
-        reason, cats = self._wound_reason(summ)
+        reason, cats = self._wound_reason(summ, self._frame(ring))
         if reason == "covenant":
             return {"compromised": True, "reason": "covenant_breach_sealed",
                     "first_bad": ring["index"], "covenant": score_covenant(summ),

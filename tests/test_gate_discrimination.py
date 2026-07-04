@@ -19,7 +19,7 @@ import os
 import sys
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parent.parent
+SKILL = Path(__file__).resolve().parent.parent / "skills" / "claude" / "cypher-tempre-self-model"
 sys.path.insert(0, str(SKILL))
 
 import poq  # noqa: E402
