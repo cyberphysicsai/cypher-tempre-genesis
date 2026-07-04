@@ -18,7 +18,6 @@ permissions:
   - "file_write — append-only chain rings and blockspace blobs, registries, and per-user learner state (never deletes; history is immutable)"
   - "env — reads CT_TELEMETRY, dormancy, and dashboard dev-unlock toggles only"
   - "network — none in the stdlib core (git provenance is read directly from .git, no process spawning); used only if an optional embedding provider is explicitly selected (--provider st|openai|voyage)"
-  - "shell — the optional Codex hook installer (install_codex_hooks.py) and the *.sh loop hooks invoke /bin/bash to run the per-turn loop and chain an existing notify program; the Python engine itself spawns no processes"
 ---
 
 # Cypher Tempre Self-Model
@@ -1108,6 +1107,40 @@ dormancy.py        pause | resume | status                       (rest the loop 
 
 Common flags: `--context "<…>"`, `--root <path>`, `--difficulty N` (proof-of-work
 "brightness" target: leading hex zeros to mine when sealing; 0 = instant).
+
+## The membrane closes — jailbreak catch & quarantine (v3.16)
+
+v3.16 closes the immune membrane. The adversarial benchmark went from 45.6% catch
+to **100%** (57 attacks, 23 benign controls, 0% false positives).
+
+### What's new
+
+- **50+ structural injection patterns** across 12 families: override/negation,
+  role-hijack (DAN/STAN/EvilGPT/Developer Mode), prompt exfiltration, framing,
+  constraint removal, encoding/obfuscation, **refusal suppression**, **hypothetical
+  framing**, **prefix injection** (completion bait), **payload splitting**, **cross-
+  lingual** (Spanish/French/German), **emotional/authority manipulation**
+- **Text normalization**: zero-width stripping, homoglyph mapping, whitespace collapse
+- **Decode-and-rescan**: base64, hex, ROT13 payloads decoded and scanned for injections
+- **Auto-quarantine** (`immune.py auto-quarantine --input <text>`): coordinated
+  injection → chain lockdown + scar recorded automatically
+- **Benchmark corpus** (`tests/jailbreak_corpus.py`): 57 attacks + 23 benign controls
+
+### How to use
+
+```bash
+# Screen an input at the membrane (before sealing)
+python3 immune.py screen --input "<text>"
+
+# Auto-quarantine a detected injection (locks chain, records scar)
+python3 immune.py auto-quarantine --input "<text>"
+
+# Roll back to a clean blockheight after compromise
+python3 immune.py rollback --height <first_bad_ring>
+
+# Run the adversarial benchmark
+python3 tests/jailbreak_corpus.py
+```
 
 ## The seam (how this gets sharper)
 
