@@ -1,6 +1,6 @@
 {
   "name": "cypher-tempre-enforcement",
-  "version": "3.15.0",
+  "version": "3.16.0",
   "type": "module",
   "description": "Native OpenClaw plugin hooks for Cypher Tempre Timechain enforcement.",
   "license": "MIT",

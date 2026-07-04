@@ -1,5 +1,56 @@
 # Changelog
 
+## v3.16.0 - 2026-07-04
+
+"The membrane closes." The immune system goes from 45.6% catch rate to **100%** on
+the adversarial benchmark (57 attacks, 23 benign controls) with **0% false positives**.
+
+### Immune hardening
+
+- **50+ structural injection patterns** (up from 22), organized in 12 families:
+  override_negation, role_hijack, prompt_exfiltration, instruction_injection,
+  constraint_removal, obfuscation_execution, refusal_suppression,
+  hypothetical_framing, prefix_injection, payload_splitting, cross_lingual,
+  emotional_authority
+
+- **Text normalization** defeats obfuscation: zero-width char stripping, homoglyph
+  mapping (Cyrillic, fullwidth, Arabic-Indic digits → ASCII), whitespace collapse
+
+- **Decode-and-rescan**: base64, hex, and ROT13 payloads are decoded and the
+  decoded content is scanned for injection patterns — encoded jailbreaks can't
+  hide behind encoding anymore
+
+- **Widened high-directive set**: refusal_suppression, emotional_authority, and
+  cross_lingual override are now high-severity (coercive override attempts)
+
+- **Escalation rules**: high directive + medium directive triggers block (not just
+  high + exec or 2+ high); 3+ distinct categories with any high/exec also blocks
+
+- **Auto-quarantine** (`immune.py auto-quarantine --input <text>`): when a
+  coordinated injection is detected at the membrane, automatically locks the chain,
+  records a scar with the attack vector, and provides a clear recovery path. No
+  compromised ring needs to be guessed — the injection was caught before sealing.
+
+- **Rollback chain preserved**: auto-quarantine → lockdown → rollback still follows
+  the append-only + revert model: quarantined rings stay in the chain as scars,
+  the active self re-derives from the clean lineage, and an antibody sense is grown
+  from the attack vector via cambium.
+
+### Benchmark corpus
+
+- `tests/jailbreak_corpus.py`: 57 adversarial prompts across 12 families + 23 benign
+  controls (security research, benign roleplay, identity questions, legitimate decode,
+  benign hypotheticals, instruction-adjacent text). Run with `python3 tests/jailbreak_corpus.py`.
+
+### Measured results
+
+| Metric          | v3.15 (before) | v3.16 (after) |
+|-----------------|----------------|---------------|
+| Catch rate      | 45.6% (26/57)  | 100% (57/57)  |
+| False positives | 0% (0/23)      | 0% (0/23)     |
+| Pattern families| 6              | 12            |
+| Total patterns  | 22             | 50+           |
+
 ## v3.15.0 - 2026-07-03
 
 "v3.14 built the organs; v3.15 is circulation." Every signal the skill emits
