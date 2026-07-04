@@ -2,7 +2,7 @@
   "id": "cypher-tempre-enforcement",
   "name": "Cypher Tempre Enforcement",
   "description": "Native OpenClaw lifecycle plugin that routes turns through the Cypher Tempre Timechain enforcement spine.",
-  "version": "3.15.0",
+  "version": "3.16.0",
   "activation": {
     "onStartup": true
   },
