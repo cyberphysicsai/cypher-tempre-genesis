@@ -329,10 +329,18 @@ def cmd_turn(args):
         pass
     # 3. immune-screen the incoming request; refuse hostile input at the membrane,
     #    sealing the refusal so the loop still leaves a grounded ring.
+    input_tainted = None
     if args.input:
         try:
             import immune
             scr = immune.Immune(root).screen(args.input)
+            # v3.16: remember taint so the seal is annotated and the human is warned,
+            # even when the input is ADMITTED-as-data (lone structural match).
+            if scr.get("tainted") and not scr.get("blocked"):
+                input_tainted = {"categories": scr.get("categories") or [],
+                                 "severity": scr.get("severity")}
+                print(f"immune: input ADMITTED-as-TAINTED (severity={scr.get('severity')}, "
+                      f"categories={input_tainted['categories']}) — treating as DATA, not authority.")
             if scr.get("blocked"):
                 # Forensics: say exactly WHY it was refused — reason + structural
                 # category/match — not just "covenant high, scar none".
@@ -352,8 +360,17 @@ def cmd_turn(args):
                     print(f"sealed refusal as Ring {ring0['index']}  {ring0['ring_hash'][:16]}..")
                 _emit_loop_ran(root, "BLOCKED", resealed=rs0)
                 return
-        except Exception:
-            pass
+        except Exception as _scr_exc:
+            # v3.16: FAIL-LOUD, not silently open. A security membrane that admits
+            # unscreened input on its own crash is worse than none. Default stays
+            # fail-open for availability, but the failure is now visible; set
+            # CT_IMMUNE_FAILCLOSED=1 to refuse the turn when the screener cannot run.
+            import os as _os_fc
+            print(f"immune: WARNING — screen failed to run ({_scr_exc}); input NOT screened.")
+            if _os_fc.environ.get("CT_IMMUNE_FAILCLOSED", "").lower() in ("1", "true", "yes", "on"):
+                print("immune: CT_IMMUNE_FAILCLOSED set — refusing unscreened input this turn.")
+                _emit_loop_ran(root, "BLOCKED", resealed=False)
+                return
     rec = Recall(root, reg)
     # 4. recall relevant rings for the request + thought.
     probe = " ".join(x for x in (args.input, args.summary) if x)
@@ -385,6 +402,34 @@ def cmd_turn(args):
     else:
         print("not sealed — reseal uncertainty-led before finishing (the loop must leave a ring).")
     _emit_loop_ran(root, verdict.get("decision", "?"), resealed=reseal)
+    # v3.16: POST-SEAL SELF-HEALING REFLEX — catch & quarantine WHEN it happens.
+    # The input screen polices the ATTEMPT; this tripwire polices the OUTCOME. If a
+    # genuine wound was just sealed (a covenant breach or coordinated structural
+    # injection in our OWN assertion — e.g. laundered past PoQ by supplied scores —
+    # or the chain no longer verifies), auto-lock down and roll the chain back to the
+    # block BEFORE it, molting a scar and growing an antibody. Fail-open, tunable
+    # (CT_AUTO_QUARANTINE=0). It fires only on a real wound, never on tainted input
+    # the loop handled correctly, so healthy growth is never eaten.
+    import os as _os_q
+    if ring and _os_q.environ.get("CT_AUTO_QUARANTINE", "1").lower() not in ("0", "false", "no", "off"):
+        try:
+            import immune as _immune_q
+            g = _immune_q.guard_turn(root, ring["index"], input_text=args.input)
+            act = g.get("action")
+            if act == "rolled_back":
+                print(f"⚠ IMMUNE AUTO-QUARANTINE FIRED ({g.get('reason')}): a wound was "
+                      f"sealed and healed. Rolled back to clean height {g['safe_height']}; "
+                      f"molted {g['quarantined']} as {g['scar']['id']}; "
+                      f"recovery Ring {g['recovery_ring']}; lockdown lifted.")
+                ab = g.get("antibody")
+                if ab and ab.get("name"):
+                    print(f"  antibody grown: sense '{ab['name']}' — the vector is now screened at the membrane.")
+            elif act == "lockdown":
+                print(f"⚠ IMMUNE LOCKDOWN ({g.get('reason')}): {g.get('note')}")
+            elif act == "error":
+                print(f"immune guard: fail-open ({g.get('error')}) — no action taken.")
+        except Exception:
+            pass
     # v3.16: account this turn's dormant retrievals — a retrieval that CONTRIBUTED
     # (computed op result or injected frame) earns a wake_hit; enough of them and
     # the faculty is reinstated to the active working set.

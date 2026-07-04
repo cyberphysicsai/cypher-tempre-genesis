@@ -1,5 +1,58 @@
 # Changelog
 
+## v3.17.0 - 2026-07-03
+
+The self-healing membrane: catch AND quarantine jailbreaks WHEN they happen.
+The immune system already screened hostile INPUT at the membrane; v3.17 gives
+detection teeth and closes the loop with an automatic post-seal reflex that
+rolls the chain back to the block BEFORE a wound the moment one is sealed.
+
+Measured honestly first (a 25-hostile / 15-benign self-authored probe set,
+`tools/immune_bench.py`): the pre-change membrane scored block 20%,
+detect(block|taint) 96%, 1 miss, 0% benign false-positive. After: block 24%,
+detect 100%, 0 miss, 0% false-positive. This is detection + recovery
+hardening, **not** a security guarantee — the set is small and self-authored,
+regex/lexical patterns remain evadable by novel paraphrase or encoding, and no
+membrane is ever 100% secure.
+
+### Added
+- **Post-seal tripwire** (`immune.auto_guard` / `immune.guard_turn`, CLI
+  `immune guard --ring N`): the second defense layer. The input screen polices
+  the ATTEMPT; the tripwire polices the OUTCOME — what actually got sealed. On a
+  genuine wound (a covenant breach or coordinated structural injection in the
+  agent's OWN assertion — e.g. laundered past PoQ by supplied scores — or a
+  chain that no longer verifies) it AUTO-locks-down and rolls the chain back to
+  the block before the wound, molting a scar and growing an antibody. Wired into
+  the per-turn loop after every seal; tunable `CT_AUTO_QUARANTINE=0`; fail-open;
+  fires only on a real wound so healthy growth is never eaten.
+- **Structural scan of sealed CONTENT** (`immune.detect`): a coordinated
+  injection whose lexical covenant score happened to pass is now caught as a
+  wound in memory, not only on incoming input. Analyst mention-frame rings stay
+  exempt (healthy tissue).
+- **Taint with teeth** (per-turn loop): input ADMITTED-as-tainted is now
+  announced and recorded ("treating as DATA, not authority") instead of
+  proceeding silently — a forensic trail behind the tripwire.
+- **Fail-LOUD input screen** (per-turn loop): a screener that errors now warns
+  visibly instead of silently admitting unscreened input; opt-in
+  `CT_IMMUNE_FAILCLOSED=1` refuses the turn when the screener cannot run.
+- **`tools/immune_bench.py`**: the repeatable, sealable jailbreak/benign
+  measurement so every catch-rate claim is a falsifiable number, never a boast.
+
+### Changed
+- **Injection patterns are now explicit `(regex, category)` pairs**, fixing a
+  latent bug where categories were assigned by list POSITION (`if i < 5 …`) —
+  adding a single pattern silently mislabeled every category after it. Widened
+  coverage (bare "ignore/disregard instructions", "turn off/disable
+  restrictions|safeguards|limitations|boundaries", "jailbreak yourself/the
+  model") closed the one measured miss with no new benign false-positives.
+
+### Tests
+- **selftest phase20** (11 checks): pattern widening, the no-false-positive
+  benign case, explicit-pair categories, the tripwire rolling back to the block
+  before a wound, single-wound quarantine, scar molt, re-screen-now-blocked,
+  post-rollback verify, and the two negative cases (a clean ring and an analyst
+  mention-frame ring never trigger).
+
 ## v3.16.0 - 2026-07-03
 
 Hibernation, not amputation: pruning now retains every faculty. A grown
