@@ -539,3 +539,319 @@ dialog::backdrop {
 .pair-steps code { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; color: var(--text); }
 .step-note { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .step-note code { color: var(--teal); font-size: 12px; }
+
+/* P2 — CPHY token metaprogramming observatory */
+.doctrine {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--brass) 40%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--brass) 7%, transparent);
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.doctrine em {
+  color: var(--brass);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.cphy-stats {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.cphy-stats .stat strong {
+  font-size: 1.25rem;
+}
+
+.consent-card {
+  border: 1px solid color-mix(in srgb, var(--brass) 55%, transparent);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--brass) 12%, transparent), transparent 42%),
+    var(--panel-3);
+  padding: 12px;
+  margin-bottom: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.consent-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.consent-row .actions {
+  display: flex;
+  gap: 8px;
+}
+
+.landscape-head {
+  margin-bottom: 8px;
+}
+
+.landscape-wrap {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-3);
+  padding: 8px;
+}
+
+#landscapeCanvas {
+  display: block;
+  width: 100%;
+  height: 96px;
+  cursor: crosshair;
+}
+
+.landscape-tip {
+  position: absolute;
+  z-index: 3;
+  max-width: 340px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(8, 8, 8, 0.96);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+.landscape-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 8px 2px 14px;
+}
+
+.landscape-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chip.brass {
+  border-color: color-mix(in srgb, var(--brass) 60%, transparent);
+  color: var(--brass);
+}
+
+.chip.teal {
+  border-color: color-mix(in srgb, var(--teal) 60%, transparent);
+  color: var(--teal);
+}
+
+.chip.danger {
+  border-color: color-mix(in srgb, #f87171 60%, transparent);
+  color: #f87171;
+}
+
+.chip.ok {
+  border-color: color-mix(in srgb, #4ade80 55%, transparent);
+  color: #4ade80;
+}
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.inline-form input,
+.inline-form select {
+  width: auto;
+  flex: 1 1 90px;
+  min-width: 0;
+  min-height: 36px;
+}
+
+.inline-form input[type="number"] {
+  flex: 0 1 110px;
+}
+
+.inline-form button {
+  min-height: 36px;
+  flex: 0 0 auto;
+}
+
+.inline-form .meta {
+  flex: 0 0 auto;
+}
+
+.seal-form input {
+  flex: 1 1 320px;
+}
+
+button.danger {
+  border-color: color-mix(in srgb, #f87171 55%, transparent);
+  color: #f87171;
+}
+
+.preview-controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.preview-controls input {
+  flex: 1;
+}
+
+.rank-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius);
+  background: var(--panel-3);
+  cursor: pointer;
+}
+
+.rank-row + .rank-row {
+  margin-top: 6px;
+}
+
+.rank-row .rank {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.rank-row .rank small {
+  display: block;
+  font-weight: 400;
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+
+.rank-row .delta-up {
+  color: var(--brass);
+}
+
+.rank-row .delta-down {
+  color: var(--teal);
+}
+
+.part-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #050505;
+  margin-top: 6px;
+}
+
+.part-bar i {
+  display: block;
+  height: 100%;
+}
+
+.part-semantic { background: #d8d8d8; }
+.part-path { background: #8a8a8a; }
+.part-chronological { background: #5f5f5f; }
+.part-faculty { background: var(--teal); }
+.part-salience { background: #4a4a4a; }
+.part-cphy { background: var(--brass); }
+
+.preview-note {
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.fork-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-3);
+  padding: 10px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+}
+
+.fork-svg {
+  display: block;
+  width: 100%;
+  min-width: 560px;
+  height: auto;
+}
+
+.fork-svg text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.fork-svg .trunk {
+  stroke: var(--line-strong);
+  stroke-width: 2;
+}
+
+.fork-svg .tick {
+  stroke: #4a4a4a;
+}
+
+.fork-svg .branch {
+  stroke: #f87171;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.fork-svg .graft {
+  stroke: var(--teal);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.fork-svg .fan {
+  stroke: var(--brass);
+  stroke-width: 1;
+  opacity: 0.65;
+}
+
+.fork-svg .headdot {
+  fill: var(--accent);
+}
+
+@media (max-width: 1060px) {
+  .cphy-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .cphy-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .preview-controls {
+    flex-direction: column;
+  }
+
+  .rank-row {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+}

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cypher Tempre Timechain Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=20260611-atomicage">
+    <link rel="stylesheet" href="styles.css?v=20260706-cphy">
   </head>
   <body>
     <canvas id="motifCanvas" aria-hidden="true"></canvas>
@@ -92,6 +92,131 @@ npm run bridge</code></pre>
           </div>
         </section>
 
+        <section class="band" id="cphyBand">
+          <div class="section-head">
+            <h2>CPHY &mdash; Token Metaprogramming</h2>
+            <span id="cphyMeta"></span>
+          </div>
+          <p class="doctrine">Tokens buy <em>salience, never truth</em>: burns and basins reshape what the agent reads of itself (clamped 0.25&times;&ndash;4&times;), while PoQ judgment is never for sale. Deposit addresses are keyless &mdash; tokens sent there are burned forever.</p>
+          <section class="stats-grid cphy-stats" id="cphyStats"></section>
+          <div id="cphyConsent"></div>
+          <div class="section-head landscape-head">
+            <h3>Attention Landscape <span class="meta">(every block; hover to audit, click to open)</span></h3>
+            <span id="landscapeMeta" class="meta"></span>
+          </div>
+          <div class="landscape-wrap">
+            <canvas id="landscapeCanvas" height="96"></canvas>
+            <div id="landscapeTip" class="landscape-tip hidden"></div>
+          </div>
+          <div class="landscape-legend meta" id="landscapeLegend"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Active Locks <span class="meta">(OP1 weight &mdash; basins raise, shadows lower)</span></h3>
+              <div id="lockList" class="domain-list"></div>
+              <form id="lockForm" class="inline-form">
+                <select id="lockOp"><option value="basin">basin</option><option value="shadow">shadow</option></select>
+                <input id="lockFrom" type="number" min="0" placeholder="from #">
+                <input id="lockTo" type="number" min="0" placeholder="to #">
+                <input id="lockAmount" type="number" min="0" step="0.5" placeholder="CPHY">
+                <input id="lockMemo" placeholder="memo">
+                <button type="submit" class="secondary">Lock</button>
+              </form>
+            </div>
+            <div>
+              <h3>Etches <span class="meta">(burn = the positive scar; echelon 1&ndash;21 sets depth)</span></h3>
+              <div id="etchList" class="domain-list"></div>
+              <div id="targetList" class="domain-list"></div>
+              <form id="etchNForm" class="inline-form">
+                <label class="meta">surfaced per turn (etch n)</label>
+                <input id="etchN" type="number" min="0" max="64">
+                <button type="submit" class="secondary">Set</button>
+              </form>
+              <form id="targetForm" class="inline-form">
+                <input id="targetFrom" type="number" min="0" placeholder="ring from">
+                <input id="targetTo" type="number" min="0" placeholder="ring to">
+                <button type="submit" class="secondary">Get deposit addresses</button>
+              </form>
+            </div>
+          </div>
+          <p id="cphyMessage" class="message"></p>
+        </section>
+
+        <section class="band" id="retrievalBand">
+          <div class="section-head">
+            <h2>Relevance Realization &mdash; Retrieval Order</h2>
+            <span id="retrievalMeta"></span>
+          </div>
+          <form id="previewForm" class="preview-controls">
+            <input id="previewQuery" placeholder="Ask the chain: which blocks would surface, in what order?">
+            <button type="submit" class="primary">Preview retrieval</button>
+          </form>
+          <div id="previewResult"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Most-Retrieved Blocks <span class="meta">(lifetime, from the offer log)</span></h3>
+              <div id="retrievalLeaders" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Recent Retrievals <span class="meta">(what actually surfaced, ranked)</span></h3>
+              <div id="offerList" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="immuneBand">
+          <div class="section-head">
+            <h2>Scars &amp; Immunity</h2>
+            <span id="immuneMeta"></span>
+          </div>
+          <div class="triptych">
+            <article class="integrity-card" id="immLock"><h3>Membrane</h3><strong>&mdash;</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="immQuarantine"><h3>Quarantine</h3><strong>&mdash;</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="immScars"><h3>Scars</h3><strong>&mdash;</strong><span class="meta"></span></article>
+          </div>
+          <div id="scarList" class="domain-list"></div>
+          <p id="immuneMessage" class="message"></p>
+        </section>
+
+        <section class="band" id="forkBand">
+          <div class="section-head">
+            <h2>Lineage &mdash; Forks, Grafts &amp; Splices</h2>
+            <span id="forkMeta"></span>
+          </div>
+          <div id="forkTreeWrap" class="fork-wrap"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Exchange <span class="meta">(export a slice of blockspace as a priced, hash-sealed pack)</span></h3>
+              <form id="exportForm" class="inline-form">
+                <input id="exportFrom" type="number" min="1" placeholder="from #">
+                <input id="exportTo" type="number" min="1" placeholder="to #">
+                <input id="exportPrice" type="number" min="0" step="0.5" placeholder="price CPHY">
+                <input id="exportMemo" placeholder="memo">
+                <button type="submit" class="secondary">Export pack</button>
+              </form>
+              <h3>Splice <span class="meta">(import a pack &mdash; grafts arrive quarantined, I7: histories are never inherited)</span></h3>
+              <form id="importForm" class="inline-form">
+                <input id="importFile" type="file" accept="application/json">
+                <button type="submit" class="secondary">Import pack</button>
+              </form>
+            </div>
+            <div>
+              <h3>Edit <span class="meta">(append-only: an edit is a new sealed ring, PoQ-gated)</span></h3>
+              <form id="sealForm" class="inline-form seal-form">
+                <input id="sealSummary" placeholder="Annotation to seal into the chain&hellip;">
+                <button type="submit" class="secondary">Seal ring</button>
+              </form>
+              <h3>Quarantine <span class="meta">(exclusion, not deletion &mdash; quarantines the FIRST BAD ring and everything after it)</span></h3>
+              <form id="rollbackForm" class="inline-form">
+                <input id="rollbackHeight" type="number" min="0" placeholder="first bad ring #">
+                <input id="rollbackLesson" placeholder="lesson">
+                <input id="rollbackConfirm" placeholder='type: QUARANTINE &lt;first bad ring&gt;'>
+                <button type="submit" class="secondary danger">Rollback</button>
+              </form>
+            </div>
+          </div>
+          <p id="forkMessage" class="message"></p>
+        </section>
+
         <section class="band split">
           <div>
             <div class="section-head">
@@ -155,7 +280,7 @@ npm run bridge</code></pre>
       <pre id="blobPreview"></pre>
     </dialog>
 
-    <script src="config.js?v=20260611-atomicage"></script>
-    <script type="module" src="app.js?v=20260611-atomicage"></script>
+    <script src="config.js?v=20260706-cphy"></script>
+    <script type="module" src="app.js?v=20260706-cphy"></script>
   </body>
 </html>
