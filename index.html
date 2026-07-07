@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cypher Tempre Timechain Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=20260707-nursery">
+    <link rel="stylesheet" href="styles.css?v=20260707-organs">
   </head>
   <body>
     <canvas id="motifCanvas" aria-hidden="true"></canvas>
@@ -59,6 +59,15 @@ npm run bridge</code></pre>
 
         <section class="stats-grid" id="statsGrid"></section>
 
+        <section class="band" id="vitalsBand">
+          <div class="section-head">
+            <h2>Vitals</h2>
+            <span id="vitalsMeta"></span>
+          </div>
+          <div id="vitalsChecks" class="vitals-grid"></div>
+          <div class="stats-grid cphy-stats" id="vitalsStats"></div>
+        </section>
+
         <section class="band" id="learningBand">
           <div class="section-head">
             <h2>Learning Membrane</h2>
@@ -97,9 +106,17 @@ npm run bridge</code></pre>
             <h2>CPHY &mdash; Token Metaprogramming</h2>
             <span id="cphyMeta"></span>
           </div>
-          <p class="doctrine">Tokens buy <em>salience, never truth</em>: burns and basins reshape what the agent reads of itself (clamped 0.25&times;&ndash;4&times;), while PoQ judgment is never for sale. Deposit addresses are keyless &mdash; tokens sent there are burned forever.</p>
-          <section class="stats-grid cphy-stats" id="cphyStats"></section>
+          <p class="doctrine">Two lanes, one law: <em>salience, never truth</em>. The <strong>CPHY token (Base)</strong> is the real, external coin &mdash; this dashboard never mints or moves it; the skill only <em>observes</em> burns to keyless deposit addresses (read-only oracle, pinned contract, allowlisted RPCs) and applies them with your consent. <strong>Attention credits</strong> are the internal metering earned by sealed rings (brightness/255) that fund local basins &mdash; they are <em>not</em> the token, exist on no blockchain, and external burns never mint them (I5). Both only reshape what the agent reads of itself (clamped 0.25&times;&ndash;4&times;); PoQ judgment is never for sale.</p>
+          <div class="section-head lane-head">
+            <h3>CPHY Token (Base) <span class="meta">&mdash; registers only what the contract shows at your deposit addresses</span></h3>
+            <button id="syncOnchain" class="secondary">Sync on-chain now</button>
+          </div>
+          <section class="stats-grid cphy-stats" id="cphyTokenStats"></section>
           <div id="cphyConsent"></div>
+          <div class="section-head lane-head">
+            <h3>Attention Credits <span class="meta">&mdash; earned locally, not the token</span></h3>
+          </div>
+          <section class="stats-grid cphy-stats" id="cphyCreditStats"></section>
           <div class="section-head landscape-head">
             <h3>Attention Landscape <span class="meta">(every block; hover to audit, click to open)</span></h3>
             <span id="landscapeMeta" class="meta"></span>
@@ -111,19 +128,19 @@ npm run bridge</code></pre>
           <div class="landscape-legend meta" id="landscapeLegend"></div>
           <div class="learning-grid">
             <div>
-              <h3>Active Locks <span class="meta">(OP1 weight &mdash; basins raise, shadows lower)</span></h3>
+              <h3>Active Locks <span class="meta">(OP1 &mdash; credit-funded; basins raise, shadows lower)</span></h3>
               <div id="lockList" class="domain-list"></div>
               <form id="lockForm" class="inline-form">
                 <select id="lockOp"><option value="basin">basin</option><option value="shadow">shadow</option></select>
                 <input id="lockFrom" type="number" min="0" placeholder="from #">
                 <input id="lockTo" type="number" min="0" placeholder="to #">
-                <input id="lockAmount" type="number" min="0" step="0.5" placeholder="CPHY">
+                <input id="lockAmount" type="number" min="0" step="0.5" placeholder="credits">
                 <input id="lockMemo" placeholder="memo">
                 <button type="submit" class="secondary">Lock</button>
               </form>
             </div>
             <div>
-              <h3>Etches <span class="meta">(burn = the positive scar; echelon 1&ndash;21 sets depth)</span></h3>
+              <h3>Etches <span class="meta">(real-token burns = positive scars; echelon 1&ndash;21 sets depth)</span></h3>
               <div id="etchList" class="domain-list"></div>
               <div id="targetList" class="domain-list"></div>
               <form id="etchNForm" class="inline-form">
@@ -189,7 +206,7 @@ npm run bridge</code></pre>
               <form id="exportForm" class="inline-form">
                 <input id="exportFrom" type="number" min="1" placeholder="from #">
                 <input id="exportTo" type="number" min="1" placeholder="to #">
-                <input id="exportPrice" type="number" min="0" step="0.5" placeholder="price CPHY">
+                <input id="exportPrice" type="number" min="0" step="0.5" placeholder="price (credits)">
                 <input id="exportMemo" placeholder="memo">
                 <button type="submit" class="secondary">Export pack</button>
               </form>
@@ -240,6 +257,86 @@ npm run bridge</code></pre>
           </div>
           <pre id="nurseryOpCode" class="op-code hidden"></pre>
           <p id="nurseryMessage" class="message"></p>
+        </section>
+
+        <section class="band" id="continuumBand">
+          <div class="section-head">
+            <h2>Continuum &mdash; Long-Horizon Ingestion</h2>
+            <span id="continuumMeta"></span>
+          </div>
+          <p class="doctrine">Corpora larger than any context window, sealed into bounded blocks (256&ndash;1536 tokens each) on per-task chains &mdash; with cursor state, secret redaction, and O(1) resume. Ingestion is not review: the audit cursor tracks what was actually read.</p>
+          <div class="stats-grid cphy-stats" id="continuumStats"></div>
+          <div id="continuumTasks" class="domain-list"></div>
+        </section>
+
+        <section class="band" id="chronoBand">
+          <div class="section-head">
+            <h2>Chronosynaptic Tree &mdash; Forked Perspectives</h2>
+            <span id="chronoMeta"></span>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Latest Collapse <span class="meta">(parallel selves considered, one sealed)</span></h3>
+              <div id="chronoLatest" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Winning Perspectives <span class="meta">(lifetime leaderboard)</span></h3>
+              <div id="chronoLeaders" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="cambiumBand">
+          <div class="section-head">
+            <h2>Cambium &mdash; Faculty Ecology</h2>
+            <span id="cambiumMeta"></span>
+          </div>
+          <div class="stats-grid cphy-stats" id="cambiumStats"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Most-Lived Faculties <span class="meta">(fires across all sealed rings)</span></h3>
+              <div id="mostLivedList" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Hibernation <span class="meta">(rent-delinquent faculties sleep, never die)</span></h3>
+              <div id="hibernationList" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="conscienceBand">
+          <div class="section-head">
+            <h2>Conscience &mdash; PoQ Gate</h2>
+            <span id="conscienceMeta"></span>
+          </div>
+          <div class="stats-grid cphy-stats" id="conscienceStats"></div>
+          <div id="conscienceDetail" class="domain-list"></div>
+        </section>
+
+        <section class="band" id="reflectiveBand">
+          <div class="section-head">
+            <h2>Reflection &mdash; Self-Portrait, Dreams &amp; Recall Index</h2>
+            <span id="reflectiveMeta"></span>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Self-Portrait <span class="meta">(autobiography rings)</span></h3>
+              <div id="portraitCard" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Recall Substrate</h3>
+              <div class="stats-grid cphy-stats" id="reflectiveStats"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="censusBand">
+          <div class="section-head">
+            <h2>Ledger Census</h2>
+            <span id="censusMeta"></span>
+          </div>
+          <div class="stats-grid cphy-stats" id="censusStats"></div>
+          <div id="censusTypes" class="census-bars"></div>
         </section>
 
         <section class="band split">
@@ -305,7 +402,7 @@ npm run bridge</code></pre>
       <pre id="blobPreview"></pre>
     </dialog>
 
-    <script src="config.js?v=20260707-nursery"></script>
-    <script type="module" src="app.js?v=20260707-nursery"></script>
+    <script src="config.js?v=20260707-organs"></script>
+    <script type="module" src="app.js?v=20260707-organs"></script>
   </body>
 </html>

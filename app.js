@@ -734,7 +734,19 @@ async function loadObservatory() {
     loadImmune().catch((e) => setText('immuneMeta', `unavailable — ${e.message}`)),
     loadForks().catch((e) => setText('forkMeta', `unavailable — ${e.message}`)),
     loadNursery().catch((e) => setText('nurseryMeta', `unavailable — ${e.message}`)),
+    loadOrgans().catch((e) => setText('vitalsMeta', `unavailable — ${e.message}`)),
   ]);
+}
+
+async function loadOrgans() {
+  state.organs = await api('/api/organs');
+  renderVitals();
+  renderContinuum();
+  renderChrono();
+  renderCambium();
+  renderConscience();
+  renderReflective();
+  renderCensus();
 }
 
 async function loadNursery() {
@@ -793,9 +805,17 @@ function statCell(label, value, note) {
   return div;
 }
 
+// fmtCphy is for REAL token amounts only (burns observed on-chain). The
+// internal earned lane always renders through fmtCredits so a local metering
+// number can never read as a coin balance.
 function fmtCphy(value) {
   if (value === null || value === undefined) return '—';
-  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })} CPHY`;
+  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
+}
+
+function fmtCredits(value) {
+  if (value === null || value === undefined) return '—';
+  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })} credits`;
 }
 
 function shortAddr(addr) {
@@ -816,23 +836,68 @@ function renderCphy() {
     return;
   }
   const anchorOk = Boolean(c.anchor?.verified);
-  setText('cphyMeta', `${c.onchain?.token ? `${shortAddr(c.onchain.token)} · ${c.onchain.chain}` : 'no on-chain lane'}${anchorOk ? ' · anchor verified' : ''}${c.onchain?.lastSyncTs ? ` · last sync ${new Date(c.onchain.lastSyncTs * 1000).toISOString().slice(0, 19)}` : ''}`);
+  setText('cphyMeta', `${c.onchain?.token ? `${shortAddr(c.onchain.token)} · ${c.onchain.chain}` : 'no on-chain lane'}${anchorOk ? ' · anchor verified' : ''}`);
 
   const etchCount = Object.keys(c.etches || {}).length;
   const pendingOpen = c.pending.filter((p) => p.status === 'pending');
-  $('cphyStats').replaceChildren(
-    statCell('Minted (earned)', fmtCphy(c.supply?.minted), 'one sealed ring mints brightness/255'),
-    statCell('Locked', fmtCphy(c.supply?.locked), `${c.locks.length} lock(s) working`),
-    statCell('Balance', fmtCphy(c.supply?.balance)),
-    statCell('Burned on-chain', fmtCphy(c.burnedTotal), `${etchCount} etched ring(s)`),
+  const targetCount = (c.onchain?.targets || []).length + (c.onchain?.facultyTargets || []).length;
+  const observedCount = Object.keys(c.observed || {}).length;
+  // Lane 1 — the REAL coin: everything here comes from the contract, via
+  // read-only observation, or is zero because nothing was ever sent.
+  $('cphyTokenStats').replaceChildren(
+    statCell('Anchor', anchorOk ? 'VERIFIED' : c.onchain?.token ? 'DECLARED' : '—',
+      c.onchain?.token ? `${shortAddr(c.onchain.token)} on ${c.onchain.chain} — attestation only, never mints` : 'declare with cphy.py anchor'),
+    statCell('Burned to blocks', `${fmtCphy(c.burnedTotal)} CPHY`,
+      etchCount ? `${etchCount} etched ring(s) — real tokens, gone forever` : 'no real-token burns observed yet'),
+    statCell('Observed on-chain', observedCount ? `${observedCount} address(es)` : '0',
+      'cumulative burned balances the oracle has seen (includes applied etches)'),
+    statCell('Deposit addresses', String(targetCount), 'keyless — tokens sent there are burned forever'),
+    statCell('Consent', c.onchain?.approval === 'auto' ? 'AUTO' : 'REQUIRE',
+      pendingOpen.length ? `${pendingOpen.length} burn(s) awaiting you` : 'no burns waiting'),
+    statCell('Last sync', c.onchain?.lastSyncTs ? new Date(c.onchain.lastSyncTs * 1000).toISOString().slice(0, 19) : 'never',
+      'turn-hook oracle stamp — manual syncs report inline'),
+  );
+  // Lane 2 — internal metering. Say what it is NOT, every time.
+  $('cphyCreditStats').replaceChildren(
+    statCell('Earned', fmtCredits(c.supply?.minted), '1 sealed ring mints brightness/255 credits'),
+    statCell('Working', fmtCredits(c.supply?.locked), `${c.locks.length} lock(s) shaping attention`),
+    statCell('Free', fmtCredits(c.supply?.balance), 'spendable on basins/shadows only'),
     statCell('Ledger', `${c.supply?.events ?? 0} events`, c.audit.ok === true ? 'replay AUDIT: PASS' : c.audit.ok === false ? 'AUDIT: FAIL' : 'audit unavailable'),
-    statCell('Consent', c.onchain?.approval === 'auto' ? 'AUTO' : 'REQUIRE', pendingOpen.length ? `${pendingOpen.length} burn(s) awaiting you` : 'no burns waiting'),
   );
 
   renderConsent(pendingOpen, c.pending);
   renderLocks(c.locks);
   renderEtches(c);
   if ($('etchN') && document.activeElement !== $('etchN')) $('etchN').value = c.onchain?.etchRecallN ?? 3;
+}
+
+async function syncOnchain() {
+  const btn = $('syncOnchain');
+  btn.disabled = true;
+  setMsg('cphyMessage', 'Syncing — reading the contract at your deposit addresses (read-only)…');
+  try {
+    const out = await api('/api/cphy/sync', { method: 'POST', body: '{}' });
+    const r = out.result || {};
+    // onchain_sync is PARTIAL-SUCCESS: per-address RPC errors do not stop the
+    // other addresses from reading, staging consent burns, or rotating slots —
+    // report every lane independently, never "nothing changed".
+    const observed = Object.keys(r.observed || {}).length;
+    const staged = Array.isArray(r.pending_approval) ? r.pending_approval.length : 0;
+    const applied = (Array.isArray(r.new_etches) ? r.new_etches.length : 0) + (Array.isArray(r.new_unlocks) ? r.new_unlocks.length : 0);
+    const errors = Array.isArray(r.errors) ? r.errors : [];
+    const parts = [];
+    if (observed) parts.push(`burns at ${observed} ring address(es) · ${r.total_burned_to_blockspace} CPHY total`);
+    if (staged) parts.push(`${staged} burn(s) staged for your consent`);
+    if (applied) parts.push(`${applied} burn(s) applied (auto consent)`);
+    if (errors.length) parts.push(`${errors.length} address(es) unread — RPC error (${String(errors[0].error || '').slice(0, 60)})`);
+    if (!parts.length) parts.push('the contract shows no burns at your deposit addresses. Send CPHY (Base) to a deposit address and sync again');
+    setMsg('cphyMessage', `Sync ${errors.length ? 'partial' : 'complete'} — ${parts.join(' · ')}.`, errors.length > 0);
+    await loadCphy();
+  } catch (error) {
+    setMsg('cphyMessage', error.message, true);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // cphy.py stages pending faculty burns with type 'unlock' (the 'faculty-unlock'
@@ -918,7 +983,7 @@ function renderLocks(locks) {
     const top = document.createElement('div');
     top.className = 'domain-top';
     const name = document.createElement('strong');
-    name.append(chip(lock.op, lock.op === 'basin' ? 'brass' : 'teal'), ` ${fmtCphy(lock.amount)} · ${lock.indices.length ? `rings ${lock.indices[0]}–${lock.indices.at(-1)}` : 'rings —'}`);
+    name.append(chip(lock.op, lock.op === 'basin' ? 'brass' : 'teal'), ` ${fmtCredits(lock.amount)} · ${lock.indices.length ? `rings ${lock.indices[0]}–${lock.indices.at(-1)}` : 'rings —'}`);
     const release = document.createElement('button');
     release.className = 'ghost';
     release.textContent = 'Release';
@@ -935,7 +1000,7 @@ function renderLocks(locks) {
 async function releaseLock(lockId) {
   try {
     await api('/api/cphy/release', { method: 'POST', body: JSON.stringify({ lockId }) });
-    setMsg('cphyMessage', `Lock ${lockId} released — CPHY refunded to balance.`);
+    setMsg('cphyMessage', `Lock ${lockId} released — credits refunded to balance.`);
     await loadCphy();
   } catch (error) {
     setMsg('cphyMessage', error.message, true);
@@ -1168,7 +1233,7 @@ function renderRetrieval() {
       top.append(name, meta);
       const tags = document.createElement('div');
       tags.className = 'tags';
-      if (s.cphy) tags.append(chip(`×${s.cphy} CPHY`, 'brass'), ' ');
+      if (s.cphy) tags.append(chip(`×${s.cphy} weight`, 'brass'), ' ');
       if (s.etched) tags.append(chip(`etched E${s.etched}`, 'brass'), ' ');
       tags.append(`last surfaced ${String(s.lastTs || '').slice(0, 19)}`);
       row.append(top, tags);
@@ -1233,7 +1298,7 @@ function renderPreview(data) {
     // or etch part; a null organicRank without those parts is just a returned-set
     // boundary difference between the two runs, not something CPHY did.
     const cphyLifted = Boolean(b.parts.cphy) || Boolean(b.parts.etched);
-    if (b.rankDelta > 0 && cphyLifted) { sub.textContent = `▲${b.rankDelta} by CPHY`; sub.className = 'delta-up'; }
+    if (b.rankDelta > 0 && cphyLifted) { sub.textContent = `▲${b.rankDelta} by weight`; sub.className = 'delta-up'; }
     else if (b.rankDelta > 0) { sub.textContent = `▲${b.rankDelta}`; sub.className = 'delta-up'; }
     else if (b.rankDelta < 0) { sub.textContent = `▼${-b.rankDelta}`; sub.className = 'delta-down'; }
     else if (b.organicRank === null && cphyLifted) { sub.textContent = b.parts.etched ? 'etch-lifted' : 'token-lifted'; sub.className = 'delta-up'; }
@@ -1243,7 +1308,7 @@ function renderPreview(data) {
     const name = document.createElement('strong');
     name.textContent = `#${b.index} ${b.type || ''}`;
     line.append(name, ` — score ${(b.score || 0).toFixed(3)} `);
-    if (b.parts.cphy) line.append(chip(`×${b.parts.cphy} token weight`, 'brass'), ' ');
+    if (b.parts.cphy) line.append(chip(`×${b.parts.cphy} weight`, 'brass'), ' ');
     if (b.parts.etched) line.append(chip(`etched E${b.parts.etched}`, 'brass'), ' ');
     if (b.explore) line.append(chip('ε-explore', 'teal'), ' ');
     body.append(line);
@@ -1277,8 +1342,8 @@ function renderPreview(data) {
   const legend = document.createElement('p');
   legend.className = 'preview-note';
   legend.textContent = weights
-    ? `Bars show each term’s contribution to the ${trained ? 'scorer' : 'hand'} score (${PART_ORDER.filter((p) => weights[p]).map((p) => `${p} ${weights[p]}`).join(' · ')}); the CPHY multiplier and etch echelon then rerank — attention, never truth.`
-    : 'A trained scorer is active — the per-term weights are learned and not shown here; the CPHY multiplier and etch echelon rerank the result. Attention, never truth.';
+    ? `Bars show each term’s contribution to the ${trained ? 'scorer' : 'hand'} score (${PART_ORDER.filter((p) => weights[p]).map((p) => `${p} ${weights[p]}`).join(' · ')}); the weight multiplier (credit basins + real burns) and etch echelon then rerank — attention, never truth.`
+    : 'A trained scorer is active — the per-term weights are learned and not shown here; the weight multiplier (credit basins + real burns) and etch echelon rerank the result. Attention, never truth.';
   wrap.append(legend);
 }
 
@@ -1447,6 +1512,232 @@ function renderForks() {
     note.className = 'preview-note';
     note.textContent = `Exchanges: ${f.exchanges.map((x) => `${x.kind} ${x.pack || ''} ${x.author ? `(${x.author})` : ''}`).join(' · ')}`;
     $('forkTreeWrap').append(note);
+  }
+}
+
+// --- the organ panel: every organ of the skill, rendered honestly --- //
+
+function organRow(title, metaText, bodyText) {
+  const row = document.createElement('article');
+  row.className = 'domain-row';
+  const top = document.createElement('div');
+  top.className = 'domain-top';
+  const name = document.createElement('strong');
+  name.textContent = title;
+  const meta = document.createElement('span');
+  meta.className = 'meta';
+  meta.textContent = metaText || '';
+  top.append(name, meta);
+  row.append(top);
+  if (bodyText) {
+    const tags = document.createElement('div');
+    tags.className = 'tags';
+    tags.textContent = bodyText;
+    row.append(tags);
+  }
+  return row;
+}
+
+function fmtBig(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString();
+}
+
+function truncate(text, max) {
+  const s = String(text ?? '');
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+function fmtDur(seconds) {
+  if (!Number.isFinite(seconds)) return '—';
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
+  if (seconds < 172800) return `${(seconds / 3600).toFixed(1)} h`;
+  return `${(seconds / 86400).toFixed(1)} days`;
+}
+
+function renderVitals() {
+  const v = state.organs?.vitals;
+  if (!v || v.error) { setText('vitalsMeta', v?.error || 'unavailable'); return; }
+  const worst = v.doctor?.worst;
+  setText('vitalsMeta', v.doctor
+    ? (worst === 0 ? 'doctor: HEALTHY' : worst === 1 ? 'doctor: ATTENTION' : 'doctor: COMPROMISED')
+    : 'doctor unavailable in this root');
+  const grid = $('vitalsChecks');
+  grid.replaceChildren(...(v.doctor?.checks || []).map((c) => {
+    const cell = document.createElement('article');
+    cell.className = `vital-cell ${c.status === 'OK' ? 'ok' : (c.status === 'COMPROMISED' || c.status === 'FAIL') ? 'bad' : 'warn'}`;
+    const name = document.createElement('strong');
+    name.textContent = c.check;
+    const detail = document.createElement('span');
+    detail.className = 'meta';
+    detail.textContent = `${c.status}${c.detail ? ` — ${c.detail}` : ''}`;
+    cell.append(name, detail);
+    return cell;
+  }));
+  $('vitalsStats').replaceChildren(
+    statCell('Dormancy', v.dormancy?.paused ? 'PAUSED' : 'ACTIVE', v.dormancy?.paused ? `${v.dormancy.reason || ''} since ${String(v.dormancy.since || '').slice(0, 19)}` : 'wearing the self-model'),
+    // enforce.py marks turn_head at turn START; a turn is sealed only once
+    // the chain head moves PAST it (watchdog flags unsealed when head <= mark).
+    statCell('Turn seal', v.enforcement?.turnHead != null && v.enforcement.head != null && v.enforcement.head > v.enforcement.turnHead ? 'SEALED' : 'PENDING', `turn started at #${v.enforcement?.turnHead ?? '—'} / chain #${v.enforcement?.head ?? '—'} · ${v.enforcement?.nudges ?? 0} nudge(s)`),
+    statCell('Recall index', v.hippocampus ? (v.hippocampus.fresh ? 'FRESH' : 'STALE') : '—', v.hippocampus ? `${fmtBig(v.hippocampus.indexed)} rings indexed to #${v.hippocampus.headIndex}` : 'hippocampus not built'),
+    statCell('Telemetry digest', v.telemetryBacklog ? `${fmtBig(v.telemetryBacklog.undigested)} B undigested` : '—', v.telemetryBacklog?.lastDigestRing != null ? `notarized at ring #${v.telemetryBacklog.lastDigestRing}` : 'no digest ring yet'),
+    statCell('Checkpoints', String(v.checkpoints?.count ?? 0), v.checkpoints?.latest != null ? `latest #${v.checkpoints.latest} · ${fmtBig(v.checkpoints.unanchored)} rings unanchored` : 'first anchor at ring 500'),
+    statCell('Witness quorum', v.consensus?.configured ? `${v.consensus.quorum}/${v.consensus.n}` : 'NOT CONFIGURED', v.consensus?.configured ? 'HMAC attestations active' : 'single-host tamper-evidence only'),
+    statCell('Custody vault', v.vault?.present ? `${v.vault.secrets} secret(s)` : 'none', v.vault?.present ? 'encrypted at rest (keystore.py)' : 'no vault initialized'),
+    statCell('Ledger attests', String(v.ledgerAttests?.count ?? 0), v.ledgerAttests?.latest != null ? `cphy-digest last at #${v.ledgerAttests.latest}` : 'cphy ledger never notarized to chain'),
+  );
+}
+
+function renderContinuum() {
+  const c = state.organs?.continuum;
+  if (!c || c.error) { setText('continuumMeta', c?.error || 'unavailable'); return; }
+  setText('continuumMeta', c.tasks.length
+    ? `${c.tasks.length} task(s) across ${c.totals.roots} chain root(s)`
+    : 'no continuum tasks yet — open one with continuum.py open-task');
+  $('continuumStats').replaceChildren(
+    statCell('Largest ingested', c.largest ? `${fmtBig(c.largest.tokens)} tokens` : '—', c.largest ? `${c.largest.blocks} blocks · ${truncate(c.largest.objective, 60)}` : 'nothing ingested yet'),
+    statCell('Total ingested', `${fmtBig(c.totals.tokens)} tokens`, `${fmtBig(c.totals.blocks)} sealed blocks`),
+    statCell('Secrets redacted', String(c.totals.redactions), 'stripped before sealing — leaks are forever on a chain'),
+    statCell('Task roots', String(c.totals.roots), c.roots.join(' · ') || 'per-task chains appear beside the main chain'),
+  );
+  $('continuumTasks').replaceChildren(...c.tasks.map((task) => {
+    const audit = task.audit ? ` · audit ${task.audit.reviewed ?? 0}/${task.audit.total ?? '?'}${task.audit.complete ? ' COMPLETE' : ''} (${task.audit.findings ?? 0} findings)` : ' · not audited';
+    const coherent = task.coherent === true ? 'COHERENT' : task.coherent === false ? 'INCOHERENT' : 'unvalidated';
+    return organRow(truncate(task.objective || '(no objective)', 90),
+      `${fmtBig(task.tokens)} tokens · ${task.blocks} blocks · ${task.items} items · ${coherent}`,
+      `${task.root} · opened ${String(task.openedAt || '').slice(0, 10)} · block band ${task.minTokens ?? '—'}–${task.maxTokens ?? '—'} tokens${audit}${task.nextAction ? ` · next: ${task.nextAction}` : ''}`);
+  }));
+}
+
+function renderChrono() {
+  const ch = state.organs?.chronosynaptic;
+  if (!ch || ch.error) { setText('chronoMeta', ch?.error || 'unavailable'); return; }
+  setText('chronoMeta', `${ch.collapses} collapse(s) — ${ch.auto} auto · ${ch.explicit} explicit · ${ch.dreamCacheFlushes} dream-cache flush(es) · ${ch.discardFaculties} discarded branch(es) reborn as faculties`);
+  const latest = $('chronoLatest');
+  if (!ch.latest) {
+    latest.textContent = 'No collapses yet — think through the tree with chronosynaptic.py think.';
+  } else {
+    const l = ch.latest;
+    const rows = [organRow(`#${l.index} — ${l.chosen || '?'} won`, `${String(l.ts || '').slice(0, 19)}${l.spread != null ? ` · value spread ${l.spread}` : ''}`, l.query ? `query: ${l.query}` : '')];
+    for (const f of l.forks.slice(0, 6)) {
+      rows.push(organRow(`${f.perspective}`, `${f.kind}${f.visits != null ? ` · ${f.visits} visits` : ''}${f.value != null ? ` · value ${f.value}` : ''}`, ''));
+    }
+    if (l.epitaphs?.length) rows.push(organRow('Loser epitaphs', '', l.epitaphs.join(' — ')));
+    latest.replaceChildren(...rows);
+  }
+  const leaders = $('chronoLeaders');
+  if (!ch.leaderboard.length) leaders.textContent = 'No winners yet.';
+  else leaders.replaceChildren(...ch.leaderboard.map((w) => organRow(w.name, `won ×${w.wins}`, '')));
+}
+
+function renderCambium() {
+  const ca = state.organs?.cambium;
+  if (!ca || ca.error) { setText('cambiumMeta', ca?.error || 'unavailable'); return; }
+  setText('cambiumMeta', `base ${ca.base.modalities}+${ca.base.senses} · grown ${ca.grownModalities.total + ca.grownSenses.total} · ${ca.imported} imported`);
+  $('cambiumStats').replaceChildren(
+    statCell('Grown modalities', String(ca.grownModalities.total), `${ca.grownModalities.active} active · ${ca.grownModalities.dormant} dormant`),
+    statCell('Grown senses', String(ca.grownSenses.total), `${ca.grownSenses.active} active · ${ca.grownSenses.dormant} dormant`),
+    statCell('Effects attached', `${ca.effects.op} ops`, `${ca.effects.frame} frames · ${ca.effects.hint} hints · ${ca.effects.none} bare`),
+    statCell('Wakes', String(ca.wakeRings.count), ca.wakeRings.latest != null ? `latest ring #${ca.wakeRings.latest} — dormancy is retrievable, not death` : 'no faculty ever woken'),
+  );
+  const most = $('mostLivedList');
+  if (!ca.mostLived.length) most.textContent = 'No labeled rings yet.';
+  else most.replaceChildren(...ca.mostLived.map((f) => organRow(f.name, `${f.kind} · fired ×${f.fires}`, '')));
+  const hib = $('hibernationList');
+  const rows = [];
+  if (ca.pruneRings.count) rows.push(organRow(`${ca.pruneRings.count} prune event(s)`, '', ca.pruneRings.latestSummary));
+  if (ca.wakeHitsPending.length) rows.push(organRow('Earning reinstatement', `${ca.wakeHitsPending.length} faculties with wake credit`, ca.wakeHitsPending.join(' · ')));
+  if (!rows.length) rows.push(organRow('No hibernation events', '', 'every grown faculty is paying rent'));
+  hib.replaceChildren(...rows);
+}
+
+function renderConscience() {
+  const co = state.organs?.conscience;
+  if (!co || co.error) { setText('conscienceMeta', co?.error || 'unavailable'); return; }
+  const total = Object.values(co.verdicts).reduce((s, n) => s + n, 0);
+  setText('conscienceMeta', `${total} gate verdict(s) on record`);
+  $('conscienceStats').replaceChildren(
+    statCell('Sealed', String(co.verdicts.SEAL), 'grounded thoughts that passed the gate'),
+    statCell('Forced uncertainty', String(co.verdicts.FORCE_UNCERTAINTY), 'asserted beyond grounding — hedged before sealing'),
+    statCell('Rejected', String(co.verdicts.REJECT), 'refused outright: covenant or consistency floor'),
+    statCell('Revise loops', String(co.verdicts.REVISE), 'below brightness target — iterate, then reseal'),
+    statCell('Speculation debt', co.conjectures.open > 0 ? `${co.conjectures.open} open` : 'NONE', `${co.conjectures.scored} conjecture(s) scored against evidence`),
+    statCell('Scorer', co.scorer.startsWith('trained') ? co.scorer : 'hand-2.1', co.scorer.startsWith('trained') ? 'learned weights active' : 'no trained operator active'),
+    statCell('Entity gate', co.entityGate ? 'ARMED' : 'off', co.entityGate ? 'entity grounding enforced at seal' : 'policy floor not raised'),
+  );
+  const detail = $('conscienceDetail');
+  const rows = [];
+  if (co.spanGrounding) rows.push(organRow(`Span grounding (ring #${co.spanGrounding.ring})`, `${co.spanGrounding.n_grounded ?? 0} grounded · ${co.spanGrounding.n_weak ?? 0} weak · ${co.spanGrounding.n_unsupported ?? 0} unsupported of ${co.spanGrounding.n_spans ?? 0} spans`, 'every claim in the sealed summary is checked against cited rings'));
+  if (co.lastNonSeal) rows.push(organRow(`Last ${co.lastNonSeal.decision}`, String(co.lastNonSeal.ts || '').slice(0, 19), (co.lastNonSeal.reasons || []).join(' — ')));
+  const frames = Object.entries(co.frames || {});
+  if (frames.length) rows.push(organRow('Declared frames', frames.map(([f, n]) => `${f} ×${n}`).join(' · '), 'mention/input provenance keeps quoted vocabulary from reading as intent'));
+  detail.replaceChildren(...rows);
+}
+
+function renderReflective() {
+  const re = state.organs?.reflective;
+  if (!re || re.error) { setText('reflectiveMeta', re?.error || 'unavailable'); return; }
+  setText('reflectiveMeta', `${re.dreams.count} dream cycle(s) · ${re.autobiography?.count ?? 0} self-portrait(s)`);
+  const card = $('portraitCard');
+  if (!re.autobiography) {
+    card.textContent = 'No autobiography rings yet.';
+  } else {
+    card.replaceChildren(organRow(
+      `Ring #${re.autobiography.index} — ${re.autobiography.authored ? 'model-authored' : 'auto-scaffold'}`,
+      `${String(re.autobiography.ts || '').slice(0, 19)} · ${re.autobiography.ringsSince} ring(s) ago`,
+      re.autobiography.portrait));
+  }
+  $('reflectiveStats').replaceChildren(
+    statCell('Hippocampus', re.hippocampus.terms != null ? `${fmtBig(re.hippocampus.terms)} terms` : '—', 'stem+synonym postings behind every recall'),
+    statCell('Salience overlay', `${re.salience.scored} ring(s)`, re.salience.top.length ? `top: ${re.salience.top.map((t) => `#${t.ring}:${t.score}`).join(' ')}` : 'dreams reinforce and decay what mattered'),
+    statCell('Dreams', String(re.dreams.count), re.dreams.latest ? `latest #${re.dreams.latest.index}: ${truncate(re.dreams.latest.summary, 70)}` : 'no dream yet'),
+    statCell('Missed positives', String(re.dreams.missedPositives), 'retrieval failures mined while dreaming'),
+  );
+}
+
+function renderCensus() {
+  const ce = state.organs?.census;
+  if (!ce || ce.error) { setText('censusMeta', ce?.error || 'unavailable'); return; }
+  if (!ce.total) {
+    setText('censusMeta', 'empty chain — no rings sealed yet');
+    $('censusStats').replaceChildren();
+    $('censusTypes').replaceChildren();
+    return;
+  }
+  setText('censusMeta', `${fmtBig(ce.total)} rings since ${String(ce.genesis?.ts || '').slice(0, 10)} — "${ce.genesis?.name || '?'}"`);
+  $('censusStats').replaceChildren(
+    statCell('Chain', `${fmtBig(ce.total)} rings`, `head #${ce.head?.index ?? '—'} · ${formatBytes(ce.chainBytes)} ledger`),
+    statCell('Cadence', `${ce.ringsPerDay}/day`, `${ce.activeDays} active day(s) since genesis`),
+    statCell('Blockspace', `${fmtBig(ce.blockspace.blobs)} blobs`, formatBytes(ce.blockspace.bytes)),
+    statCell('Largest ring', ce.largestRing?.index != null ? `#${ce.largestRing.index}` : '—', ce.largestRing?.index != null ? `${formatBytes(ce.largestRing.bytes)} · ${ce.largestRing.type}` : ''),
+    statCell('Longest silence', fmtDur(ce.longestGap?.seconds), ce.longestGap?.from != null ? `between rings #${ce.longestGap.from} and #${ce.longestGap.to}` : ''),
+    statCell('Growth share', `${Math.round((ce.growthShare || 0) * 100)}%`, 'of all rings are faculty growth — the mind building itself'),
+  );
+  const wrap = $('censusTypes');
+  const entries = Object.entries(ce.byType || {});
+  const max = Math.max(1, ...entries.map(([, n]) => n));
+  wrap.replaceChildren(...entries.slice(0, 14).map(([type, count]) => {
+    const row = document.createElement('div');
+    row.className = 'census-row';
+    const label = document.createElement('span');
+    label.className = 'census-label';
+    label.textContent = type;
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const fill = document.createElement('i');
+    fill.style.width = `${Math.max(2, (count / max) * 100)}%`;
+    bar.append(fill);
+    const num = document.createElement('span');
+    num.className = 'meta';
+    num.textContent = String(count);
+    row.append(label, bar, num);
+    return row;
+  }));
+  if (ce.genesis?.covenant?.length) {
+    const cov = document.createElement('p');
+    cov.className = 'preview-note';
+    cov.textContent = `Genesis covenant: ${ce.genesis.covenant.join(' · ')}`;
+    wrap.append(cov);
   }
 }
 
@@ -1622,7 +1913,7 @@ async function submitLock(event) {
   try {
     // Number('') is 0 — a blank field would silently lock from ring 0.
     if (!$('lockFrom').value.trim() || !$('lockTo').value.trim() || !$('lockAmount').value.trim()) {
-      setMsg('cphyMessage', 'A lock needs explicit from/to ring numbers and a CPHY amount.', true);
+      setMsg('cphyMessage', 'A lock needs explicit from/to ring numbers and a credit amount.', true);
       return;
     }
     const body = {
@@ -1708,7 +1999,7 @@ async function submitImport(event) {
     const pack = JSON.parse(await file.text());
     const out = await api('/api/pack/import', { method: 'POST', body: JSON.stringify({ pack }) });
     const r = out.result || {};
-    setMsg('forkMessage', `Spliced: ${(r.sealed || []).length} ring(s) grafted in quarantined trust (I7)${(r.refused || []).length ? `, ${r.refused.length} refused` : ''}${r.price_burned ? ` · ${r.price_burned} CPHY burned as price` : ''}.`);
+    setMsg('forkMessage', `Spliced: ${(r.sealed || []).length} ring(s) grafted in quarantined trust (I7)${(r.refused || []).length ? `, ${r.refused.length} refused` : ''}${r.price_burned ? ` · ${r.price_burned} credits burned as price` : ''}.`);
     await Promise.all([loadForks(), loadCphy(), loadRings()]);
   } catch (error) {
     setMsg('forkMessage', error.message, true);
@@ -1763,7 +2054,7 @@ function renderRingCphyChips(index) {
   strip.replaceChildren();
   const b = state.cphyBlockMap?.get(Number(index));
   const stats = state.retrieval?.rings?.find((s) => s.index === Number(index));
-  if (b?.multiplier && b.multiplier !== 1) strip.append(chip(`token weight ×${b.multiplier.toFixed(2)}`, 'brass'), ' ');
+  if (b?.multiplier && b.multiplier !== 1) strip.append(chip(`weight ×${b.multiplier.toFixed(2)}`, 'brass'), ' ');
   if (b?.etch) strip.append(chip(`etched E${b.etch.echelon}/21 · ${b.etch.tokens} CPHY`, 'brass'), ' ');
   if (b?.depositAddress) strip.append(chip(`deposit ${shortAddr(b.depositAddress)}`), ' ');
   if (stats) strip.append(chip(`retrieved ${stats.chosen}× · best rank ${stats.bestRank}`, 'teal'), ' ');
@@ -1773,6 +2064,7 @@ function renderRingCphyChips(index) {
 function bindObservatory() {
   $('previewForm')?.addEventListener('submit', runPreview);
   $('pasteForm')?.addEventListener('submit', submitPaste);
+  $('syncOnchain')?.addEventListener('click', syncOnchain);
   $('lockForm')?.addEventListener('submit', submitLock);
   $('etchNForm')?.addEventListener('submit', submitEtchN);
   $('targetForm')?.addEventListener('submit', submitTarget);
