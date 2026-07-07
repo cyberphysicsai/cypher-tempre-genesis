@@ -710,6 +710,58 @@ button.danger {
   color: #f87171;
 }
 
+.paste-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.paste-form textarea {
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 120px;
+}
+
+.paste-form button {
+  align-self: flex-start;
+}
+
+.nursery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.nursery-actions .meta {
+  margin-right: auto;
+}
+
+.nursery-actions button {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+pre.op-code {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
 .preview-controls {
   display: flex;
   gap: 10px;

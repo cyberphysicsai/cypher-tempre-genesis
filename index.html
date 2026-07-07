@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cypher Tempre Timechain Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=20260706-cphy">
+    <link rel="stylesheet" href="styles.css?v=20260707-nursery">
   </head>
   <body>
     <canvas id="motifCanvas" aria-hidden="true"></canvas>
@@ -217,6 +217,31 @@ npm run bridge</code></pre>
           <p id="forkMessage" class="message"></p>
         </section>
 
+        <section class="band" id="nurseryBand">
+          <div class="section-head">
+            <h2>Emergent Nursery &mdash; Modalities &amp; Senses</h2>
+            <span id="nurseryMeta"></span>
+          </div>
+          <p class="doctrine">The Dream Cache proposes; the owner disposes. <em>Copy</em> a faculty as JSON to carry it to another chain; <em>paste</em> one to enable it &mdash; a plain modality/sense is grown straight into the active self (with a real effect attached), while a paste carrying <code>code</code> is staged INERT for review; <em>activate</em> registers a waiting proposal. Model-authored code never runs until you place it in <code>active_ops.py</code> with your own hands.</p>
+          <div class="learning-grid">
+            <div>
+              <h3>Dream Cache <span class="meta">(emergent &amp; proposed &mdash; awaiting your hand)</span></h3>
+              <div id="emergentList" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Paste a faculty <span class="meta">(JSON copied from any dashboard, or your own design &mdash; enables on paste; include "code" to stage inert instead)</span></h3>
+              <form id="pasteForm" class="paste-form">
+                <textarea id="pasteJson" rows="7" spellcheck="false" placeholder='{"kind":"sense","name":"Drift-Onset Sensing","function":"Detect early drift from...","seed_terms":["drift","onset"],"code":"(optional op body — including it stages the paste inert for review)"}'></textarea>
+                <button type="submit" class="secondary">Paste into the self</button>
+              </form>
+              <h3>Activated <span class="meta">(already registered in the active self)</span></h3>
+              <div id="activatedList" class="domain-list"></div>
+            </div>
+          </div>
+          <pre id="nurseryOpCode" class="op-code hidden"></pre>
+          <p id="nurseryMessage" class="message"></p>
+        </section>
+
         <section class="band split">
           <div>
             <div class="section-head">
@@ -280,7 +305,7 @@ npm run bridge</code></pre>
       <pre id="blobPreview"></pre>
     </dialog>
 
-    <script src="config.js?v=20260706-cphy"></script>
-    <script type="module" src="app.js?v=20260706-cphy"></script>
+    <script src="config.js?v=20260707-nursery"></script>
+    <script type="module" src="app.js?v=20260707-nursery"></script>
   </body>
 </html>

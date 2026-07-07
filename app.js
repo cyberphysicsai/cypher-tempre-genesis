@@ -733,7 +733,13 @@ async function loadObservatory() {
     loadRetrieval().catch((e) => setText('retrievalMeta', `unavailable — ${e.message}`)),
     loadImmune().catch((e) => setText('immuneMeta', `unavailable — ${e.message}`)),
     loadForks().catch((e) => setText('forkMeta', `unavailable — ${e.message}`)),
+    loadNursery().catch((e) => setText('nurseryMeta', `unavailable — ${e.message}`)),
   ]);
+}
+
+async function loadNursery() {
+  state.nursery = await api('/api/registry/emergent');
+  renderNursery();
 }
 
 async function loadCphy() {
@@ -1444,6 +1450,171 @@ function renderForks() {
   }
 }
 
+// --- the emergent nursery: copy / paste / activate faculties --- //
+
+function facultyAsJson(f) {
+  const out = {
+    kind: f.kind,
+    name: f.name,
+    function: f.function,
+    category: f.category || 'knowledge',
+    seed_terms: f.seedTerms || [],
+  };
+  if (f.opCode) out.code = f.opCode;
+  return JSON.stringify(out, null, 2);
+}
+
+function nurseryInSelf(f) {
+  return f.promotedToId != null || f.status === 'activated' || f.status === 'promoted';
+}
+
+function renderNursery() {
+  const n = state.nursery;
+  if (!n) return;
+  const c = n.counts;
+  setText('nurseryMeta', `${c.emergent} emergent · ${c.proposed} proposed · ${c.inSelf} already in the self — active: ${c.activeModalities} modalities, ${c.activeSenses} senses`);
+
+  const facultyRow = (f, { withActivate }) => {
+    const row = document.createElement('article');
+    row.className = 'domain-row';
+    const top = document.createElement('div');
+    top.className = 'domain-top';
+    const name = document.createElement('strong');
+    name.append(chip(f.kind, f.kind === 'modality' ? 'brass' : 'teal'), ` ${f.name}`);
+    const meta = document.createElement('span');
+    meta.className = 'meta';
+    meta.textContent = `${f.eid || '—'} · ${f.status}${f.recurrence > 1 ? ` · recurred ×${f.recurrence}` : ''}${f.opCodeChars ? ` · op code ${f.opCodeChars} chars (inert)` : ''}${f.promotedToId != null ? ` · grown #${f.promotedToId}` : ''}`;
+    top.append(name, meta);
+    const fn = document.createElement('div');
+    fn.className = 'tags';
+    fn.textContent = f.function || '';
+    const actions = document.createElement('div');
+    actions.className = 'actions nursery-actions';
+    if (f.seedTerms?.length) {
+      const seeds = document.createElement('span');
+      seeds.className = 'meta';
+      seeds.textContent = f.seedTerms.join(' · ');
+      actions.append(seeds);
+    }
+    const copy = document.createElement('button');
+    copy.className = 'ghost';
+    copy.textContent = 'Copy JSON';
+    copy.addEventListener('click', () => copyFaculty(f));
+    actions.append(copy);
+    if (withActivate) {
+      const act = document.createElement('button');
+      act.className = 'primary';
+      act.textContent = 'Activate';
+      act.addEventListener('click', () => activateFaculty(f.eid || f.name));
+      actions.append(act);
+    }
+    row.append(top, fn, actions);
+    return row;
+  };
+
+  const waiting = n.faculties.filter((f) => !nurseryInSelf(f));
+  const done = n.faculties.filter(nurseryInSelf);
+  const list = $('emergentList');
+  const WAITING_SHOWN = 24;
+  if (!waiting.length) {
+    list.textContent = 'The Dream Cache is empty — emergent faculties appear here as the mind proposes them (or paste one).';
+  } else {
+    const rows = waiting.slice(-WAITING_SHOWN).reverse().map((f) => facultyRow(f, { withActivate: true }));
+    if (waiting.length > WAITING_SHOWN) {
+      const note = document.createElement('p');
+      note.className = 'meta';
+      note.textContent = `Showing the latest ${WAITING_SHOWN} of ${waiting.length} waiting faculties — the full cache lives in registry/emergent.json.`;
+      rows.push(note);
+    }
+    list.replaceChildren(...rows);
+  }
+  const doneList = $('activatedList');
+  if (!done.length) {
+    doneList.textContent = 'Nothing from the nursery is in the active self yet.';
+  } else {
+    const rows = done.slice(-8).reverse().map((f) => facultyRow(f, { withActivate: false }));
+    if (done.length > 8) {
+      const note = document.createElement('p');
+      note.className = 'meta';
+      note.textContent = `Showing the latest 8 of ${done.length} promoted/activated faculties.`;
+      rows.push(note);
+    }
+    doneList.replaceChildren(...rows);
+  }
+}
+
+async function copyFaculty(f) {
+  const json = facultyAsJson(f);
+  try {
+    await navigator.clipboard.writeText(json);
+    setMsg('nurseryMessage', `${f.name} copied as JSON — paste it into any chain's nursery.`);
+  } catch {
+    // Clipboard can be denied — surface the JSON for manual copying instead.
+    const pre = $('nurseryOpCode');
+    pre.textContent = json;
+    pre.classList.remove('hidden');
+    setMsg('nurseryMessage', 'Clipboard unavailable — copy the JSON shown below.');
+  }
+}
+
+async function activateFaculty(selector) {
+  try {
+    const out = await api('/api/registry/activate', { method: 'POST', body: JSON.stringify({ selector }) });
+    const f = out.faculty || {};
+    const epochNote = out.epoch?.resealed ? 'epoch resealed' : `epoch reseal: ${out.epoch?.note || 'no change'}`;
+    if (f.opCode) {
+      const pre = $('nurseryOpCode');
+      pre.textContent = `# ${f.name} is registered (grown #${f.promotedToId}). Its op code stays INERT until you\n# place it in active_ops.py yourself (OPS = {"${f.name}": <callable>}):\n\n${String(f.opCode).slice(0, 2000)}`;
+      pre.classList.remove('hidden');
+      setMsg('nurseryMessage', `${f.name || selector} activated into the registry (${epochNote}) — its op code is shown below for manual placement.`);
+    } else {
+      setMsg('nurseryMessage', `${f.name || selector} activated into the active registry as grown #${f.promotedToId ?? '?'} (${epochNote}).`);
+    }
+    await Promise.all([loadNursery(), loadDashboardSummaryOnly()]);
+  } catch (error) {
+    setMsg('nurseryMessage', error.message, true);
+  }
+}
+
+async function submitPaste(event) {
+  event.preventDefault();
+  const raw = $('pasteJson').value.trim();
+  if (!raw) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    setMsg('nurseryMessage', 'That is not valid JSON — copy a faculty from a dashboard, or write {"kind","name","function","seed_terms"}.', true);
+    return;
+  }
+  try {
+    const body = {
+      kind: parsed.kind,
+      name: parsed.name,
+      function: parsed.function || '',
+      category: parsed.category || 'knowledge',
+      seedTerms: parsed.seed_terms || parsed.seedTerms || [],
+      code: parsed.code || parsed.op_code || '',
+    };
+    const out = await api('/api/registry/propose', { method: 'POST', body: JSON.stringify(body) });
+    const epochNote = out.epoch?.resealed ? 'epoch resealed' : `epoch reseal: ${out.epoch?.note || 'no change'}`;
+    const f = out.faculty;
+    if (f && nurseryInSelf(f)) {
+      setMsg('nurseryMessage', `${f.name} pasted and ENABLED in the active self as grown #${f.promotedToId} (${epochNote}).`);
+    } else if (f) {
+      setMsg('nurseryMessage', `${f.name} staged as an inert ${f.status} (${epochNote}) — review it in the Dream Cache, then Activate.`);
+    } else {
+      // The skill took the paste but resolved it another way (e.g. it woke a
+      // dormant faculty covering the same vocabulary) — show its own words.
+      setMsg('nurseryMessage', `The skill absorbed the paste: ${String(out.result || '').replace(/\s+/g, ' ').trim().slice(0, 240)} (${epochNote})`);
+    }
+    $('pasteJson').value = '';
+    await Promise.all([loadNursery(), loadDashboardSummaryOnly()]);
+  } catch (error) {
+    setMsg('nurseryMessage', error.message, true);
+  }
+}
+
 // --- edit / exchange / splice actions --- //
 
 async function submitLock(event) {
@@ -1601,6 +1772,7 @@ function renderRingCphyChips(index) {
 
 function bindObservatory() {
   $('previewForm')?.addEventListener('submit', runPreview);
+  $('pasteForm')?.addEventListener('submit', submitPaste);
   $('lockForm')?.addEventListener('submit', submitLock);
   $('etchNForm')?.addEventListener('submit', submitEtchN);
   $('targetForm')?.addEventListener('submit', submitTarget);
