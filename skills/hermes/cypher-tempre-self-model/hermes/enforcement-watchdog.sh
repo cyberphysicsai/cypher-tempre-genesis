@@ -1,7 +1,8 @@
 #!/bin/bash
 # Optional Hermes watchdog for Cypher Tempre.
-# Hermes has no native lifecycle hook that can block a response. This helper is
-# for users who want an external check, for example from cron or a terminal tab.
+# Hermes has lifecycle hooks now, but post_llm_call/subagent_stop return values
+# cannot block a final response. This helper is an optional external check for
+# users who want a manual/cron-visible view of pending seal debt.
 
 set -euo pipefail
 

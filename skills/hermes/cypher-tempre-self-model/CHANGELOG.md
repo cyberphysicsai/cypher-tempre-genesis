@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.28.01 - 2026-07-17
+
+Hermes hook-level enforcement. This patch leaves the existing Claude/Codex/
+OpenClaw/NanoClaw v3.28.0 bundles untouched and updates only the Hermes bundle.
+
+### Fixed
+- **Hermes now receives the per-turn loop as native lifecycle context.** Earlier
+  Hermes bundles copied the Claude/Codex hook scripts unchanged, so `enforce.py`
+  emitted only `hookSpecificOutput.additionalContext`. Hermes' shell-hook bridge
+  reads top-level `{"context": ...}` for `pre_llm_call`, so the reminder could be
+  silently dropped even when the hook script ran. `enforce.py` now emits a union
+  context envelope: top-level `context` for Hermes plus the legacy Claude/Codex
+  `hookSpecificOutput.additionalContext` for back compatibility.
+- **Hermes gets real hook adapters instead of copied Claude wrappers.** New
+  `hermes/pre_llm_call.sh`, `hermes/post_llm_call.sh`, and
+  `hermes/subagent_stop.sh` map Cypher Tempre onto Hermes' actual lifecycle events.
+- **Turn-end enforcement is honest about Hermes' boundary.** Hermes ignores return
+  values from `post_llm_call` and `subagent_stop`, so they cannot same-turn hard
+  block like Claude Code's `Stop` / `SubagentStop` hooks. The Hermes adapters now
+  record seal debt at turn end; the next `pre_llm_call` escalates that debt into a
+  seal-or-waive demand before the model acts again.
+
+### Added
+- `hermes/config.hooks.yaml` — copy/paste `~/.hermes/config.yaml` wiring for
+  `pre_llm_call`, `post_llm_call`, and `subagent_stop`.
+- `hermes/install_hooks.py` — idempotent installer/checker that merges the hook
+  block into Hermes config with absolute paths, preserves existing hooks, makes
+  wrapper scripts executable, and supports `--print`, `--check`, and `--config`.
+- `hermes/README.md` — documents the exact Hermes shell-hook contract, consent
+  model, debugging knobs, and the same-turn hard-stop limitation.
+
+### Verified
+- Focused tests simulate Hermes JSON stdin/stdout and assert that `hermes-pre`
+  emits top-level `context`, legacy context stays intact, `stop-check` emits a
+  union block envelope, and `post_llm_call` / `subagent_stop` wrappers stay
+  stdout-clean while recording debt.
+
 ## v3.28.0 - 2026-07-05
 
 The forced covenant confrontation. After proving — with an adversarial red-team —

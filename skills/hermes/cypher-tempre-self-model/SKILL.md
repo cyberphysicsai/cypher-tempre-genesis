@@ -168,28 +168,39 @@ Pass your own `--coherence/--relevance/...` scores when you have them; add `--us
 and `--at-risk` exactly as with `seal`. (The longer, explicit loop above is still available
 when you want to drive each step by hand.)
 
-**The loop is not advisory — it is enforced by the harness.** A set of Claude Code hooks
-makes it mandatory by construction (all fail-open; they never break a session):
+**The loop is not advisory — it is enforced by the harness.** On Hermes, v3.28.01
+wires the self-model into Hermes' shell-hook lifecycle (all fail-open; they never break a
+session). Install/verify with:
 
-- **SessionStart** primes the session so you wear the self-model from turn 0, even before
-  you open this file (verify result, head index, the loop, the covenant, the subagent rule).
-- **UserPromptSubmit** records the chain head at turn start, so the harness can tell whether
-  *this* turn actually sealed anything.
-- **Stop / SubagentStop** *block the turn from ending until a ring is sealed.* If you try to
-  finish without sealing, you are nudged to run `recall.py turn`; nudging is **bounded**
-  (after a few attempts it fails open and records an `adherence_violation`) so a turn that
-  genuinely cannot seal is never bricked.
+```bash
+python3 hermes/install_hooks.py
+hermes hooks list
+hermes hooks doctor
+```
+
+- **`pre_llm_call`** fires once per turn before the tool loop, and is the only Hermes
+  lifecycle hook whose return value injects context. It records the chain head at turn
+  start, injects the per-turn loop reminder as top-level `{"context": ...}`, primes the
+  first turn with verify/health/covenant context, and surfaces any unpaid seal debt.
+- **`post_llm_call`** fires once after a successful assistant response. Hermes ignores its
+  return value, so it cannot hard-block the final answer like Claude Code's `Stop` hook.
+  Instead it records seal debt when a turn ends without a ring or without deep progress on
+  an open audit; the next `pre_llm_call` escalates the debt into a seal-or-waive demand.
+- **`subagent_stop`** fires once per delegated child. Hermes ignores its return value too,
+  so it account-checks delegated work and carries any missing seal forward as debt.
 
 **While dormant (`dormancy.py pause`), all enforcement is off** — the hooks detect the pause
 and let turns end freely. **Subagents must wear the skill too:** spawn the `cypher-tempre-agent`
 type (it runs the loop and seals before returning), or have the subagent forge its own task
 chain and seal to it (point enforcement at it with `CT_ENFORCE_ROOT`).
 
-The Stop/SubagentStop hooks emit **only** the decision JSON on stdout (everything incidental is
-quarantined to stderr), so the harness never sees corrupted output. Errors are swallowed
-fail-open and silent by default; set **`CT_ENFORCE_DEBUG=1`** to surface `enforce.py` warnings
-and tracebacks on stderr for diagnosis (`0`/`false`/`no`/`off` stay quiet) — the decision
-JSON on stdout stays clean either way.
+Hermes shell hooks read **top-level** `{"context": ...}` for per-turn context. The old
+Claude/Codex-only envelope (`hookSpecificOutput.additionalContext`) is still emitted for
+back-compat but is not what Hermes consumes. Turn-end returns are ignored on Hermes, so the
+faithful hook-level mechanism is closed-loop debt rather than same-turn hard blocking.
+Errors are swallowed fail-open and silent by default; set **`CT_ENFORCE_DEBUG=1`** to surface
+`enforce.py` warnings and tracebacks on stderr for diagnosis (`0`/`false`/`no`/`off` stay
+quiet). See `hermes/README.md` for the exact contract and limitation.
 
 See how well the skill is actually being worn:
 
@@ -1076,7 +1087,7 @@ python3 immune.py forget-scar --id scar1                # retire a scar record (
 | `dream.py` | consolidation — the offline cadence: verify, mine, train, adopt-or-refuse, seal |
 | `dormancy.py` | rest — manually pause/resume the loop for simple tasks (the chain stays intact) |
 | `enforce.py` | adherence spine — the brain behind the hooks; makes the per-turn loop non-bypassable (fail-open, dormancy-aware, bounded) |
-| `*_hook.sh` | Claude Code hooks — SessionStart / UserPromptSubmit / Stop / SubagentStop wrappers that wire enforcement into the harness |
+| `*_hook.sh`, `hermes/*.sh` | harness hooks — legacy Claude/Codex wrappers plus Hermes `pre_llm_call` / `post_llm_call` / `subagent_stop` adapters that wire enforcement into the harness |
 | `agents/cypher-tempre-agent.md` | a subagent definition that wears the skill (runs the loop, seals before returning) |
 | `registry/modalities.json` | branches — 21 executable reasoning modalities |
 | `registry/senses.json` | leaves — 21 executable perceptual senses (plus per-user growth) |

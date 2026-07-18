@@ -4,13 +4,17 @@
 spine that turns the per-turn loop from *advisory* into *non-bypassable*.
 
 A SKILL.md only ADVISES; strong models honor it, weak/long-horizon models drop
-it and the skill becomes useless. This module is the brain behind a small set of
-Claude Code hooks that make the loop mandatory by construction:
+it and the skill becomes useless. This module is the brain behind the hook
+adapters that make the loop mandatory by construction across harnesses:
 
-  UserPromptSubmit -> `enforce.py mark`          (record turn start: head index, reset nudges)
-  Stop             -> `enforce.py stop-check`    (HARD: block turn end until a ring is sealed)
-  SubagentStop     -> `enforce.py subagent-check`(block subagent return until it sealed)
-  SessionStart     -> `enforce.py session-start` (prime: verify + recall + covenant)
+  Claude/Codex UserPromptSubmit -> `enforce.py user-prompt` / `mark`
+  Claude/Codex Stop             -> `enforce.py stop-check`    (HARD where supported)
+  Claude/Codex SubagentStop     -> `enforce.py subagent-check`(HARD where supported)
+  Claude/Codex SessionStart     -> `enforce.py session-start` (prime: verify + covenant)
+
+  Hermes pre_llm_call           -> `enforce.py hermes-pre`    (top-level {"context": ...})
+  Hermes post_llm_call          -> `enforce.py hermes-post`   (records seal debt; return ignored)
+  Hermes subagent_stop          -> `enforce.py hermes-subagent` (records child/delegation debt)
 
 Design guarantees:
   * FAIL-OPEN ALWAYS. A hook must never break the user's session; any internal
@@ -319,13 +323,41 @@ def _emit_stdout(text):
 
 
 def _context_json(event, text):
-    """The hook-JSON envelope for injecting context. SessionStart/UserPromptSubmit
-    hook stdout is parsed as JSON by the harness (the Codex CLI rejects plain text
-    with 'invalid ... JSON output'); the Stop hook already proves this harness uses
-    the Claude-Code schema, so context goes in hookSpecificOutput.additionalContext.
-    This is valid JSON on every harness and still injected as context on Claude Code."""
-    return json.dumps({"hookSpecificOutput": {"hookEventName": event,
-                                              "additionalContext": text}})
+    """UNION context envelope — one JSON object every supported harness honours.
+
+    * Claude Code / Codex read ``hookSpecificOutput.additionalContext`` (and the
+      Codex CLI rejects plain text with 'invalid ... JSON output', so JSON is
+      mandatory there).
+    * Hermes' shell-hook reader (agent/shell_hooks.py :: _parse_response) injects
+      only a TOP-LEVEL ``{"context": "..."}`` on pre_llm_call and ignores
+      hookSpecificOutput entirely — so the Claude-only shape was being SILENTLY
+      DROPPED on Hermes, which is exactly why the loop wasn't worn every turn.
+    Emitting BOTH keys in the same object is valid JSON everywhere: each harness
+    reads the key it understands and ignores the other. `context` is duplicated at
+    top level; the Claude envelope is preserved verbatim for back-compat + tests."""
+    return json.dumps({
+        "context": text,                       # Hermes pre_llm_call injection
+        "hookSpecificOutput": {                 # Claude Code / Codex injection
+            "hookEventName": event,
+            "additionalContext": text,
+        },
+    })
+
+
+def _block_json(reason):
+    """UNION block envelope for turn-end / tool gates.
+
+    * Claude Code Stop/SubagentStop read ``{"decision":"block","reason":...}``.
+    * Hermes' shell-hook reader normalises ``{"action":"block","message":...}``
+      (and also accepts the decision/reason spelling) — but ONLY for pre_tool_call;
+      post_llm_call / subagent_stop return values are ignored by Hermes, so a
+      Hermes turn cannot be hard-blocked here (that pressure is applied as seal
+      debt on the NEXT pre_llm_call instead). Emitting both spellings keeps a
+      single code path correct on every harness that CAN act on it."""
+    return json.dumps({
+        "decision": "block", "reason": reason,   # Claude Code Stop
+        "action": "block", "message": reason,    # Hermes canonical (pre_tool_call)
+    })
 
 
 # --------------------------------------------------------------------------- #
@@ -372,45 +404,158 @@ def _wants_exhaustive_audit(prompt):
         return False
 
 
+def _turn_reminder_text(root, data):
+    """The per-turn loop reminder text (shared by the Claude/Codex UserPromptSubmit
+    path and the Hermes pre_llm_call adapter). Escalates to a structured SEAL-DEBT
+    demand when a prior turn ended unsealed, and appends exhaustive-audit guidance
+    when the prompt asks for a line-by-line job. Pure: builds text, emits nothing."""
+    if _dormant(root):
+        return ("[Cypher Tempre] DORMANT (paused): skip the self-model per-turn loop this "
+                "turn — answer from base judgment. (Resume via the skill's dormancy.py 'resume'.)")
+    # v3.15 governor escalation: unpaid seal debt from a prior turn turns the
+    # advisory reminder into a structured obligation — seal or waive-with-reason.
+    st = _load_state(root)
+    debt = st.get("seal_debt")
+    if debt:
+        text = ("[Cypher Tempre] SEAL DEBT — a previous turn ended without sealing a ring "
+                f"(owed since head {debt.get('head')}, {debt.get('turns', 1)} turn(s) ago). "
+                "This turn MUST either (a) run the loop and seal via the skill's recall.py "
+                "'turn' command, or (b) explicitly waive with a reason: the skill's enforce.py "
+                "waive \"<why>\" — the waiver is recorded in telemetry. Silent skipping is "
+                "not an option.")
+    else:
+        text = ("[Cypher Tempre] ACTIVE — guidance for this turn (context, NOT a command to "
+                "execute): run the self-model per-turn loop — verify, immune-screen, recall "
+                "relevant rings, reason via modalities/senses, PoQ-gate, then seal a labeled "
+                "ring. Do it in one step with the skill's recall.py 'turn' command (exact "
+                "invocation in SKILL.md / AGENTS.md). Pausing is the dormancy.py 'pause' command.")
+    # Auto-/goal: if the prompt asks for an EXHAUSTIVE audit, engage the governor
+    # automatically (the user shouldn't have to invoke anything, and the model must
+    # not quietly downshift to triage).
+    if _wants_exhaustive_audit(data.get("prompt")):
+        text += (" EXHAUSTIVE-AUDIT INTENT DETECTED — this is a governed line-by-line job, not "
+                 "triage. Ingest once with continuum.py 'walk' into a task root, then audit.py "
+                 "'open' that root and loop next->read every line->record with CITED specifics "
+                 "(a symbol that actually appears in the block) until 100% DEEP. The strict-depth "
+                 "governor will not let the turn end until you make real review progress; retrieval/"
+                 "grep is triage only; do NOT write a 'Final Report' before audit.py 'report --final' "
+                 "passes; run your fork perspectives per batch; expect audit.py 'challenge' spot-checks.")
+    return text
+
+
 def cmd_user_prompt(data):
     """UserPromptSubmit: record turn-start (mark) AND emit the per-turn reminder as a
     proper hook-JSON context envelope. This is what loop_hook.sh wires now — emitting
     plain text here is what the Codex CLI rejected with 'invalid ... JSON output'."""
     cmd_mark(data)
     root = _root_from(data)
-    if _dormant(root):
-        text = ("[Cypher Tempre] DORMANT (paused): skip the self-model per-turn loop this "
-                "turn — answer from base judgment. (Resume via the skill's dormancy.py 'resume'.)")
-    else:
-        # v3.15 governor escalation: unpaid seal debt from a prior turn turns the
-        # advisory reminder into a structured obligation — seal or waive-with-reason.
-        st = _load_state(root)
-        debt = st.get("seal_debt")
-        if debt:
-            text = ("[Cypher Tempre] SEAL DEBT — a previous turn ended without sealing a ring "
-                    f"(owed since head {debt.get('head')}, {debt.get('turns', 1)} turn(s) ago). "
-                    "This turn MUST either (a) run the loop and seal via the skill's recall.py "
-                    "'turn' command, or (b) explicitly waive with a reason: the skill's enforce.py "
-                    "waive \"<why>\" — the waiver is recorded in telemetry. Silent skipping is "
-                    "not an option.")
-        else:
-            text = ("[Cypher Tempre] ACTIVE — guidance for this turn (context, NOT a command to "
-                    "execute): run the self-model per-turn loop — verify, immune-screen, recall "
-                    "relevant rings, reason via modalities/senses, PoQ-gate, then seal a labeled "
-                    "ring. Do it in one step with the skill's recall.py 'turn' command (exact "
-                    "invocation in SKILL.md / AGENTS.md). Pausing is the dormancy.py 'pause' command.")
-        # Auto-/goal: if the prompt asks for an EXHAUSTIVE audit, engage the governor
-        # automatically (the user shouldn't have to invoke anything, and the model must
-        # not quietly downshift to triage).
-        if _wants_exhaustive_audit(data.get("prompt")):
-            text += (" EXHAUSTIVE-AUDIT INTENT DETECTED — this is a governed line-by-line job, not "
-                     "triage. Ingest once with continuum.py 'walk' into a task root, then audit.py "
-                     "'open' that root and loop next->read every line->record with CITED specifics "
-                     "(a symbol that actually appears in the block) until 100% DEEP. The strict-depth "
-                     "governor will not let the turn end until you make real review progress; retrieval/"
-                     "grep is triage only; do NOT write a 'Final Report' before audit.py 'report --final' "
-                     "passes; run your fork perspectives per batch; expect audit.py 'challenge' spot-checks.")
-    _emit_stdout(_context_json("UserPromptSubmit", text))
+    _emit_stdout(_context_json("UserPromptSubmit", _turn_reminder_text(root, data)))
+
+
+def _turn_progress(root, data, st):
+    """Compute whether THIS hook-bounded turn made the progress CT requires.
+
+    This is a pure evaluator used by Hermes adapters, where post_llm_call and
+    subagent_stop return values are ignored and therefore cannot reuse the Claude
+    Stop hook's hard-block path. It mirrors the Stop governor's satisfaction
+    criteria without emitting block JSON or bumping the nudge budget."""
+    start = st.get("turn_head")
+    head = _head_index(root)
+    info = {
+        "has_baseline": start is not None,
+        "start": start,
+        "head": head,
+        "sealed_this_turn": False,
+        "turn_audit_root": st.get("turn_audit_root"),
+        "audit_progressed": False,
+        "audit_deep_progressed": False,
+        "audit_active": False,
+        "active_audit_root": None,
+        "task_progress": None,
+        "satisfied": False,
+    }
+    if start is None:
+        return info
+    try:
+        start_i = int(start)
+    except Exception:
+        start_i = head
+    info["sealed_this_turn"] = head > start_i
+
+    tar = st.get("turn_audit_root")
+    base = st.get("turn_audit_cursor")
+    base_deep = st.get("turn_audit_deep")
+    if tar and base is not None:
+        s = _audit_status(tar)
+        if s is not None:
+            try:
+                info["audit_progressed"] = s[0] > int(base)
+            except Exception:
+                info["audit_progressed"] = False
+            if base_deep is not None:
+                try:
+                    info["audit_deep_progressed"] = s[2] > int(base_deep)
+                except Exception:
+                    info["audit_deep_progressed"] = False
+
+    audit_root = _active_audit_root(root)
+    info["active_audit_root"] = audit_root
+    if audit_root:
+        s = _audit_status(audit_root)
+        if s is not None and not s[1]:
+            info["audit_active"] = True
+
+    info["satisfied"] = (
+        (not tar and info["sealed_this_turn"]) or
+        (bool(tar) and info["audit_deep_progressed"]) or
+        (bool(tar) and not info["audit_active"] and info["sealed_this_turn"])
+    )
+    if not info["satisfied"]:
+        info["task_progress"] = _task_root_progress(root, data, st)
+    return info
+
+
+def _record_satisfied(root, st, via, info):
+    """Common accounting for an honoured turn."""
+    st["nudges"] = 0
+    st.pop("seal_debt", None)
+    _save_state(root, st)
+    _emit(root, "adherence_satisfied", {
+        "via": via,
+        "audit_progress": bool(info.get("audit_progressed")),
+        "deep_progress": bool(info.get("audit_deep_progressed")),
+        "sealed": bool(info.get("sealed_this_turn")),
+        "head": info.get("head"),
+    })
+
+
+def _record_debt(root, st, via, info, reason):
+    """Hermes-compatible closed-loop pressure for an unsealed turn.
+
+    Claude's Stop hook can block the same turn. Hermes post_llm_call cannot, so
+    the faithful hook-level equivalent is immediate SEAL DEBT: the next
+    pre_llm_call injects a structured demand to seal or explicitly waive."""
+    debt = st.get("seal_debt") or {}
+    st["nudges"] = 0
+    st["seal_debt"] = {
+        "head": info.get("head", _head_index(root)),
+        "turns": int(debt.get("turns", 0)) + 1,
+        "via": via,
+        "reason": str(reason)[:240],
+    }
+    _save_state(root, st)
+    payload = {
+        "via": via,
+        "reason": str(reason)[:240],
+        "head": st["seal_debt"]["head"],
+        "turns": st["seal_debt"]["turns"],
+        "sealed": bool(info.get("sealed_this_turn")),
+        "audit_active": bool(info.get("audit_active")),
+        "audit_progress": bool(info.get("audit_progressed")),
+        "deep_progress": bool(info.get("audit_deep_progressed")),
+    }
+    _emit(root, "adherence_violation", payload)
+    _emit(root, "adherence_debt", payload)
 
 
 def cmd_stop_check(data):
@@ -512,7 +657,7 @@ def cmd_stop_check(data):
                 "The active audit chain root is: " + str(audit_root) + ". A final report is only "
                 "legitimate at 100% (audit.py 'report --final' refuses otherwise). To pause, use "
                 "dormancy.py 'pause'; to stop the audit, audit.py 'close'. Exact syntax is in SKILL.md.")
-        _emit_stdout(json.dumps({"decision": "block", "reason": reason}))
+        _emit_stdout(_block_json(reason))
         return
 
     # --- default: every meaningful turn must leave a sealed ring --- #
@@ -547,7 +692,7 @@ def cmd_stop_check(data):
         "skill's recall.py 'turn' command (exact invocation in SKILL.md / AGENTS.md), then "
         "finish. To pause instead, use the skill's dormancy.py 'pause' command."
     )
-    _emit_stdout(json.dumps({"decision": "block", "reason": reason}))
+    _emit_stdout(_block_json(reason))
 
 
 def _bump_or_release(root, st, violation_event):
@@ -601,22 +746,15 @@ def cmd_subagent_check(data):
     cmd_stop_check(data)
 
 
-def cmd_session_start(data):
-    """SessionStart: prime the session so it WEARS the skill from turn 0, even if
-    the model never reads SKILL.md. Output becomes startup context."""
-    root = _root_from(data)
+def _session_prime_text(root):
+    """Build the session-priming context (verify + health + covenant + lived
+    identity). Shared by the Claude/Codex SessionStart path and the Hermes
+    pre_llm_call adapter's first-turn priming — Hermes ignores on_session_start
+    return values, so on Hermes this rides the first pre_llm_call instead. Pure."""
     if _dormant(root):
-        _emit_stdout(_context_json("SessionStart",
-                     "[Cypher Tempre] DORMANT (paused): self-model loop is off until "
-                     "the skill's dormancy.py 'resume' command."))
-        return
+        return ("[Cypher Tempre] DORMANT (paused): self-model loop is off until "
+                "the skill's dormancy.py 'resume' command.")
     head = _head_index(root)
-    # capture an initial marker so the first Stop is enforceable
-    st = _load_state(root)
-    st.setdefault("turn_head", head)
-    st["nudges"] = 0
-    _save_state(root, st)
-    _emit(root, "adherence_session_start", {"head": head})
     verify_line = ""
     try:
         import timechain
@@ -660,8 +798,7 @@ def cmd_session_start(data):
                             (ab["payload"]["summary"] or "")[:450] + " ")
     except Exception:
         pass
-    _emit_stdout(_context_json(
-        "SessionStart",
+    return (
         "[Cypher Tempre] ACTIVE — you wear a Timechain self-model. " + verify_line +
         health_line + conjecture_line + autobio_line + f"head at ring {head}. "
         "EVERY meaningful turn runs the loop (enforced): verify -> immune-screen -> recall "
@@ -670,7 +807,24 @@ def cmd_session_start(data):
         "SKILL.md / AGENTS.md). "
         "Covenant: accurate, coherent, persistent, honest, thorough; never assert beyond grounding; "
         "size/horizon are never refusal reasons. Spawned subagents must wear the skill too "
-        "(use the cypher-tempre-agent type or forge their own chain and seal)."))
+        "(use the cypher-tempre-agent type or forge their own chain and seal).")
+
+
+def cmd_session_start(data):
+    """SessionStart: prime the session so it WEARS the skill from turn 0, even if
+    the model never reads SKILL.md. Output becomes startup context."""
+    root = _root_from(data)
+    if _dormant(root):
+        _emit_stdout(_context_json("SessionStart", _session_prime_text(root)))
+        return
+    head = _head_index(root)
+    # capture an initial marker so the first Stop is enforceable
+    st = _load_state(root)
+    st.setdefault("turn_head", head)
+    st["nudges"] = 0
+    _save_state(root, st)
+    _emit(root, "adherence_session_start", {"head": head})
+    _emit_stdout(_context_json("SessionStart", _session_prime_text(root)))
 
 
 def cmd_codex_notify(argv):
@@ -710,6 +864,123 @@ def cmd_codex_notify(argv):
         _emit(root, "adherence_nudge", {"via": "codex-notify", "head": head})
 
 
+def _hermes_prompt(data):
+    """Best-effort extraction of the user's turn text from Hermes shell-hook JSON.
+
+    Hermes serializes lifecycle-hook kwargs into a compact shell-hook payload:
+    {hook_event_name, cwd, session_id, extra: {...}}. For pre_llm_call the real
+    prompt is normally extra.user_message. Accept a few top-level aliases too so
+    this remains forward-compatible. The text is never persisted here; it only
+    drives audit-intent detection for the injected reminder.
+    """
+    if not isinstance(data, dict):
+        return ""
+    for key in ("prompt", "user_message", "message", "input"):
+        val = data.get(key)
+        if isinstance(val, str) and val:
+            return val
+    extra = data.get("extra")
+    if isinstance(extra, dict):
+        for key in ("user_message", "prompt", "message", "input"):
+            val = extra.get(key)
+            if isinstance(val, str) and val:
+                return val
+    return ""
+
+
+def _hermes_is_first_turn(data):
+    """Return Hermes pre_llm_call's first-turn flag across known payload shapes."""
+    if not isinstance(data, dict):
+        return False
+    if bool(data.get("is_first_turn")):
+        return True
+    extra = data.get("extra")
+    return bool(isinstance(extra, dict) and extra.get("is_first_turn"))
+
+
+def _hermes_data(data):
+    """Normalize Hermes shell-hook payloads into enforce.py's small event schema."""
+    data = data if isinstance(data, dict) else {}
+    out = dict(data)
+    prompt = _hermes_prompt(data)
+    if prompt and not out.get("prompt"):
+        out["prompt"] = prompt
+    return out
+
+
+def cmd_hermes_pre(data):
+    """Hermes pre_llm_call adapter: mark the turn and inject native context.
+
+    Hermes uses top-level {"context": "..."} for lifecycle context injection and
+    ignores Claude's hookSpecificOutput.additionalContext. _context_json emits
+    both keys; this handler is the per-turn place where Hermes can actually wear
+    the loop.
+    """
+    data = _hermes_data(data)
+    root = _root_from(data)
+    first = _hermes_is_first_turn(data)
+
+    # UserPromptSubmit equivalent: capture the start head for this turn.
+    cmd_mark(data)
+
+    pieces = []
+    if first:
+        _emit(root, "adherence_session_start", {"head": _head_index(root), "via": "hermes-pre"})
+        pieces.append(_session_prime_text(root))
+    pieces.append(_turn_reminder_text(root, data))
+    _emit_stdout(_context_json("pre_llm_call", "\n\n".join(pieces)))
+
+
+def _hermes_turn_end(data, via):
+    """Shared Hermes post_llm_call/subagent_stop accounting.
+
+    Hermes ignores return values for both events, so this never emits stdout.
+    Instead it records satisfaction or immediate seal debt, which the next
+    pre_llm_call escalates into a mandatory seal-or-waive instruction.
+    """
+    data = _hermes_data(data)
+    root = _root_from(data)
+    if _dormant(root):
+        return
+    st = _load_state(root)
+    info = _turn_progress(root, data, st)
+    if not info.get("has_baseline"):
+        return  # Hook not paired with hermes-pre/mark yet; fail-open.
+    if info.get("satisfied"):
+        _record_satisfied(root, st, via, info)
+        return
+    task_progress = info.get("task_progress")
+    if info.get("audit_active"):
+        if info.get("audit_progressed") and not info.get("audit_deep_progressed"):
+            reason = "audit cursor moved but no deep reviews were added"
+        else:
+            reason = "open exhaustive audit made no deep review progress"
+    elif task_progress:
+        reason = "sealed to a task chain that is not the enforced identity root"
+        try:
+            _emit(root, "adherence_root_mismatch", {
+                "identity_root": str(Path(root).resolve()),
+                "task_root": task_progress.get("root"),
+                "task_head": task_progress.get("head"),
+                "task_hash": task_progress.get("hash"),
+            })
+        except Exception:
+            pass
+    else:
+        reason = "turn ended without sealing a ring"
+    _record_debt(root, st, via, info, reason)
+
+
+def cmd_hermes_post(data):
+    """Hermes post_llm_call adapter: observe turn-end and record seal debt."""
+    _hermes_turn_end(data, "hermes-post")
+
+
+def cmd_hermes_subagent(data):
+    """Hermes subagent_stop adapter: observe delegated work; return ignored."""
+    _hermes_turn_end(data, "hermes-subagent")
+
+
 HANDLERS = {
     "mark": cmd_mark,
     "user-prompt": cmd_user_prompt,
@@ -718,6 +989,10 @@ HANDLERS = {
     "subagent-check": cmd_subagent_check,
     "session-start": cmd_session_start,
     "codex-notify": cmd_codex_notify,
+    # --- Hermes shell-hook adapters (v3.28.01) --- #
+    "hermes-pre": cmd_hermes_pre,          # pre_llm_call  (prime+mark+reminder)
+    "hermes-post": cmd_hermes_post,        # post_llm_call (record seal debt)
+    "hermes-subagent": cmd_hermes_subagent,# subagent_stop (observe spawned work)
 }
 
 # Handlers that read the event from ARGV (not stdin): Codex's notify appends the

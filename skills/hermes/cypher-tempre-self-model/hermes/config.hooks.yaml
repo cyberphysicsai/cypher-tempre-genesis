@@ -1,0 +1,50 @@
+# ============================================================================
+# Cypher Tempre — Hermes shell-hooks wiring (v3.28.01)
+# ============================================================================
+# Merge this `hooks:` block into your ~/.hermes/config.yaml to make the
+# Cypher Tempre per-turn loop MANDATORY on Hermes the same way Claude Code /
+# Codex enforce it with their native hooks.
+#
+# Hermes runs each command as a subprocess on the matching lifecycle event,
+# pipes a JSON payload to stdin, and reads JSON from stdout
+# (agent/shell_hooks.py). The three CT hooks map onto Hermes events like so:
+#
+#   pre_llm_call   -> fires ONCE per turn, BEFORE the tool loop. The ONLY Hermes
+#                     hook whose return value injects context ({"context": ...}).
+#                     CT marks turn-start, injects the loop reminder, primes a new
+#                     session, and escalates any unpaid SEAL DEBT into a demand.
+#   post_llm_call  -> fires ONCE per turn, AFTER the loop. Return is IGNORED, so it
+#                     cannot hard-block like Claude's Stop hook; CT instead RECORDS
+#                     seal debt for an unsealed turn — the next pre_llm_call
+#                     escalates it. Closed-loop, never bricks a turn.
+#   subagent_stop  -> fires once per delegated child; CT accounts spawned work.
+#
+# IMPORTANT — path: replace <SKILLS_ROOT> below with the ABSOLUTE path to the
+# directory that CONTAINS cypher-tempre-self-model. If you installed the skill the
+# usual way that is:
+#     ~/.hermes/skills/openclaw-imports          (adjust to wherever it lives)
+# so the pre hook path becomes:
+#     ~/.hermes/skills/openclaw-imports/cypher-tempre-self-model/hermes/pre_llm_call.sh
+#
+# CONSENT: shell hooks require one-time approval. On a non-TTY run (gateway/cron)
+# set `hooks_auto_accept: true` (below) or export HERMES_ACCEPT_HOOKS=1, else the
+# hooks silently stay unregistered. Verify with:  hermes hooks list / hooks doctor
+#
+# Or just run the installer, which fills the path and merges this for you:
+#     python3 <SKILLS_ROOT>/cypher-tempre-self-model/hermes/install_hooks.py
+# ============================================================================
+
+hooks:
+  pre_llm_call:
+    - command: "<SKILLS_ROOT>/cypher-tempre-self-model/hermes/pre_llm_call.sh"
+      timeout: 30
+  post_llm_call:
+    - command: "<SKILLS_ROOT>/cypher-tempre-self-model/hermes/post_llm_call.sh"
+      timeout: 30
+  subagent_stop:
+    - command: "<SKILLS_ROOT>/cypher-tempre-self-model/hermes/subagent_stop.sh"
+      timeout: 30
+
+# Required for non-interactive (gateway / cron) sessions so the hooks register
+# without a TTY approval prompt. Omit if you prefer to approve interactively once.
+hooks_auto_accept: true

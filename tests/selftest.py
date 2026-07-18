@@ -17,8 +17,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-# The canonical bundle under test (engine code is identical across the five runtimes).
-SKILL = Path(__file__).resolve().parent.parent / "skills" / "claude" / "cypher-tempre-self-model"
+# The canonical bundle under test for shared engine invariants. Hermes has a
+# runtime-specific hook adapter in v3.28.01, so phase12 also smoke-tests the
+# Hermes bundle directly via subprocess.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SKILL = REPO_ROOT / "skills" / "claude" / "cypher-tempre-self-model"
+HERMES_SKILL = REPO_ROOT / "skills" / "hermes" / "cypher-tempre-self-model"
 sys.path.insert(0, str(SKILL))
 
 import timechain, poq, cambium, chronosynaptic, continuum, recall, consensus, immune, embed, hippocampus, dormancy, telemetry, bench, policy, learner, faculties, guard, replay, lens, dream, extractor, task
@@ -1285,7 +1289,10 @@ def main():
                   dcap.getvalue() == "" and "Traceback" in decap.getvalue())
 
             # SessionStart / UserPromptSubmit hook stdout MUST be valid JSON — the Codex CLI
-            # rejects plain text ("invalid ... JSON output"). The context hooks speak JSON now.
+            # rejects plain text ("invalid ... JSON output"). The canonical Claude bundle
+            # must preserve that legacy envelope. Hermes v3.28.01 is tested separately
+            # below because only its runtime bundle gets the top-level {"context": ...}
+            # adapter; the existing Claude/Codex/OpenClaw/NanoClaw bundles stay at 3.28.0.
             for _cmd, _ev in [("session-start", "SessionStart"), ("user-prompt", "UserPromptSubmit")]:
                 _jc, _jr = io.StringIO(), sys.stdout
                 try:
@@ -1294,13 +1301,32 @@ def main():
                 finally:
                     sys.stdout = _jr
                 try:
-                    _hj = json.loads(_jc.getvalue())["hookSpecificOutput"]
-                    _ok_hj = _hj["hookEventName"] == _ev and bool(_hj["additionalContext"])
+                    _j = json.loads(_jc.getvalue())
+                    _hj = _j["hookSpecificOutput"]
+                    _ok_hj = (_hj["hookEventName"] == _ev and bool(_hj["additionalContext"])
+                              and ("context" not in _j or _j.get("context") == _hj["additionalContext"]))
                 except Exception:
                     _ok_hj = False
-                check(f"phase12 hook: {_cmd} emits valid hook-JSON context (Codex-CLI safe)", _ok_hj)
+                check(f"phase12 hook: {_cmd} emits valid context JSON", _ok_hj)
 
-            # Execute the real shell wrappers too. A prior regression was only in
+            # Stop/SubagentStop block output must keep Claude's decision/reason spelling
+            # in the canonical bundle. Hermes' additional action/message spelling is
+            # verified against the Hermes bundle directly below.
+            _enf.cmd_mark({})
+            _bc, _br = io.StringIO(), sys.stdout
+            try:
+                sys.stdout = _bc
+                _enf.main(["stop-check"])
+            finally:
+                sys.stdout = _br
+            try:
+                _bj = json.loads(_bc.getvalue())
+                _ok_block = _bj.get("decision") == "block" and bool(_bj.get("reason"))
+            except Exception:
+                _ok_block = False
+            check("phase12 hook: Stop emits valid Claude block JSON", _ok_block)
+
+            # Execute the real canonical shell wrappers too. A prior regression was only in
             # wrapper boolean logic: CT_ENFORCE_DEBUG=0 re-enabled stderr for
             # SessionStart/UserPromptSubmit even though enforce.py itself parsed
             # the flag correctly.
@@ -1314,13 +1340,83 @@ def main():
                                        text=True, capture_output=True, env=_hook_env,
                                        timeout=10)
                 try:
-                    _hj = json.loads(_proc.stdout)["hookSpecificOutput"]
+                    _j = json.loads(_proc.stdout)
+                    _hj = _j["hookSpecificOutput"]
                     _ok_hj = (_proc.returncode == 0 and _proc.stderr == "" and
-                              _hj["hookEventName"] == _ev and bool(_hj["additionalContext"]))
+                              _hj["hookEventName"] == _ev and bool(_hj["additionalContext"])
+                              and ("context" not in _j or _j.get("context") == _hj["additionalContext"]))
                 except Exception:
                     _ok_hj = False
-                check(f"phase12 wrapper: {_script} CT_ENFORCE_DEBUG=0 emits clean hook JSON",
+                check(f"phase12 wrapper: {_script} CT_ENFORCE_DEBUG=0 emits clean context JSON",
                       _ok_hj)
+
+            # Hermes-native v3.28.01 contract (runtime-specific bundle):
+            #   * pre_llm_call must emit top-level {"context": ...} because Hermes
+            #     ignores Claude's hookSpecificOutput.additionalContext.
+            #   * stop-check also emits action/message for Hermes' shell-hook normalizer.
+            #   * post_llm_call/subagent_stop return values are ignored by Hermes, so
+            #     wrappers stay stdout-clean while recording seal debt for the next turn.
+            _hermes_env = _hook_env.copy()
+            _hermes_env["PYTHONPATH"] = str(HERMES_SKILL)
+
+            _proc = subprocess.run([sys.executable, str(HERMES_SKILL / "enforce.py"), "hermes-pre"],
+                                   input=json.dumps({"hook_event_name": "pre_llm_call",
+                                                     "extra": {"user_message": "hello", "is_first_turn": True}}),
+                                   text=True, capture_output=True, env=_hermes_env, timeout=10)
+            try:
+                _j = json.loads(_proc.stdout)
+                _hj = _j["hookSpecificOutput"]
+                _ok_pre_direct = (_proc.returncode == 0 and _proc.stderr == "" and
+                                  isinstance(_j.get("context"), str) and "[Cypher Tempre]" in _j["context"]
+                                  and _hj["hookEventName"] == "pre_llm_call"
+                                  and _hj["additionalContext"] == _j["context"])
+            except Exception:
+                _ok_pre_direct = False
+            check("phase12 Hermes enforce: hermes-pre emits top-level context", _ok_pre_direct)
+
+            subprocess.run([sys.executable, str(HERMES_SKILL / "enforce.py"), "mark"],
+                           input="{}", text=True, capture_output=True, env=_hermes_env, timeout=10)
+            _proc = subprocess.run([sys.executable, str(HERMES_SKILL / "enforce.py"), "stop-check"],
+                                   input="{}", text=True, capture_output=True, env=_hermes_env, timeout=10)
+            try:
+                _bj = json.loads(_proc.stdout)
+                _ok_block_union = (_proc.returncode == 0 and _proc.stderr == ""
+                                   and _bj.get("decision") == "block" and bool(_bj.get("reason"))
+                                   and _bj.get("action") == "block" and _bj.get("message") == _bj.get("reason"))
+            except Exception:
+                _ok_block_union = False
+            check("phase12 Hermes enforce: Stop emits union block JSON", _ok_block_union)
+
+            _proc = subprocess.run(["/bin/bash", str(HERMES_SKILL / "hermes" / "pre_llm_call.sh")],
+                                   input=json.dumps({"hook_event_name": "pre_llm_call",
+                                                     "extra": {"user_message": "hello", "is_first_turn": True}}),
+                                   text=True, capture_output=True, env=_hermes_env, timeout=10)
+            try:
+                _j = json.loads(_proc.stdout)
+                _hj = _j["hookSpecificOutput"]
+                _ok_pre = (_proc.returncode == 0 and _proc.stderr == "" and
+                           isinstance(_j.get("context"), str) and "[Cypher Tempre]" in _j["context"]
+                           and _hj["hookEventName"] == "pre_llm_call"
+                           and _hj["additionalContext"] == _j["context"])
+            except Exception:
+                _ok_pre = False
+            check("phase12 Hermes wrapper: pre_llm_call emits top-level context", _ok_pre)
+
+            _proc = subprocess.run(["/bin/bash", str(HERMES_SKILL / "hermes" / "post_llm_call.sh")],
+                                   input=json.dumps({"hook_event_name": "post_llm_call", "extra": {}}),
+                                   text=True, capture_output=True, env=_hermes_env, timeout=10)
+            check("phase12 Hermes wrapper: post_llm_call stays stdout-clean",
+                  _proc.returncode == 0 and _proc.stdout == "" and _proc.stderr == "")
+            _st_after_post = _enf._load_state(eroot)
+            check("phase12 Hermes wrapper: post_llm_call records seal debt",
+                  bool(_st_after_post.get("seal_debt")) and
+                  _st_after_post["seal_debt"].get("via") == "hermes-post")
+
+            _proc = subprocess.run(["/bin/bash", str(HERMES_SKILL / "hermes" / "subagent_stop.sh")],
+                                   input=json.dumps({"hook_event_name": "subagent_stop", "extra": {}}),
+                                   text=True, capture_output=True, env=_hermes_env, timeout=10)
+            check("phase12 Hermes wrapper: subagent_stop stays stdout-clean",
+                  _proc.returncode == 0 and _proc.stdout == "" and _proc.stderr == "")
 
             for _script in ["stop_hook.sh", "subagent_stop_hook.sh"]:
                 _enf.cmd_mark({})
