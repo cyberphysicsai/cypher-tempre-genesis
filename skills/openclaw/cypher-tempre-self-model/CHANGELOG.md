@@ -1,5 +1,36 @@
 # Changelog
 
+## v3.30.0 - 2026-08-03
+
+A hard ceiling on the brightness target, so the one gate that can stall a turn
+without adding safety can no longer be tightened indefinitely.
+
+### Why
+Brightness is a "not luminous enough — iterate" signal, not a safety floor: raising
+it blocks honest, well-grounded work while catching nothing that covenant,
+consistency or grounding/assertiveness don't already catch. In practice it drifted
+upward on its own — v3.14 gave dream's gate-calibration the right to RAISE the
+target when verdict entropy looks low, and on a real 201-verdict chain it had
+reached **195**, blocking 4.5% of turns whose lowest observed brightness was 177.5.
+Those turns did still leave a ring (the loop reseals uncertainty-led), but as a
+degraded restatement rather than the intended seal.
+
+### Added
+- **`poq.BRIGHTNESS_TARGET_CAP = 169`.** The brightness target may still rise above
+  its 150 default, but never past the cap. The clamp is applied last and *outside*
+  the policy try/except, so it covers **both** existing raise paths — dream's
+  `poq.calibrated.brightness_target` and the v3.23 declarative `floors` section —
+  and any future one, and it holds even if the policy file is broken.
+- selftest **phase25** (6 checks): each raise path individually and both together
+  stay capped; a value under the cap still applies (it is not clamped up); and the
+  real safety floors (covenant, consistency, grounding) are explicitly **not**
+  affected by the ceiling.
+
+### Note
+This only bounds *brightness*. Covenant, consistency, grounding and assertiveness
+remain uncapped and untouched — tightening those is a genuine safety act; tightening
+brightness is not.
+
 ## v3.29.0 - 2026-08-03
 
 Consistency cleanup: the code now says what v3.27/v3.28 actually shipped. No

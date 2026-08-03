@@ -1815,6 +1815,36 @@ def main():
         finally:
             shutil.rmtree(_troot, ignore_errors=True)
 
+        # -- phase25: v3.30 brightness ceiling — the target may rise from its default
+        #    but NEVER past BRIGHTNESS_TARGET_CAP, on either raise path (dream's
+        #    calibration or the declarative floors section). Brightness only says
+        #    "iterate"; an over-tight target stalls honest turns without adding safety.
+        import policy as _polmod
+        def _bt(pol):
+            _orig = _polmod.load_policy
+            _polmod.load_policy = lambda *a, **k: pol
+            try:
+                return poq.policy_thresholds()["brightness_target"]
+            finally:
+                _polmod.load_policy = _orig
+        _base = {"values": {"covenant_floor": 150, "consistency_floor": 120}}
+        check("phase25 ceiling: default target is below the cap",
+              poq.DEFAULT_THRESHOLDS["brightness_target"] <= poq.BRIGHTNESS_TARGET_CAP)
+        check("phase25 ceiling: dream calibration cannot raise past the cap",
+              _bt({**_base, "poq": {"calibrated": {"brightness_target": 255}}})
+              == poq.BRIGHTNESS_TARGET_CAP)
+        check("phase25 ceiling: operator floors cannot raise past the cap",
+              _bt({**_base, "floors": {"brightness_target": 240}})
+              == poq.BRIGHTNESS_TARGET_CAP)
+        check("phase25 ceiling: both raise paths together stay capped",
+              _bt({**_base, "poq": {"calibrated": {"brightness_target": 195}},
+                   "floors": {"brightness_target": 250}}) == poq.BRIGHTNESS_TARGET_CAP)
+        check("phase25 ceiling: a value UNDER the cap still applies (not clamped up)",
+              _bt({**_base, "poq": {"calibrated": {"brightness_target": 160}}}) == 160)
+        check("phase25 ceiling: the real safety floors are NOT capped by it",
+              _bt({**_base, "floors": {"covenant_floor": 200}}) <= poq.BRIGHTNESS_TARGET_CAP
+              and poq.policy_thresholds()["covenant_floor"] >= 150)
+
         check("timechain: final verify", tc.verify()[0])
 
         # phase24 — CPHY economic layer + custody/PQ organs run their own

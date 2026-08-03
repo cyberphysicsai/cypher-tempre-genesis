@@ -302,6 +302,13 @@ def measure_effort(text: str):
 # chains <= POQ_WINDOW this is identical to scoring the whole chain.
 POQ_WINDOW = 121
 
+# Hard ceiling on the brightness target (v3.30). Brightness is a "not luminous enough,
+# iterate" signal, not a safety floor: raising it stalls honest, well-grounded turns
+# without catching anything covenant/consistency/grounding don't already catch. Measured
+# on a 201-verdict chain, a target of 195 blocked 4.5% of turns whose minimum observed
+# brightness was 177.5. So the target may be raised from its default but never past this.
+BRIGHTNESS_TARGET_CAP = 169
+
 DEFAULT_THRESHOLDS = {
     "brightness_target": 150,
     "covenant_floor": 150,
@@ -372,6 +379,15 @@ def policy_thresholds():
                                         int(t.get("effort_floor") or 0))
     except Exception:
         pass                       # a broken policy file must never disable the gate
+    # v3.30 CEILING: brightness is the one gate that can stall a turn without adding
+    # safety — a REVISE only says "iterate", so an over-tight target blocks honest,
+    # well-grounded work while catching nothing a floor doesn't already catch. Both
+    # raise paths above (dream's calibration and the declarative floors section) are
+    # therefore clamped here: brightness may rise from the 150 default but NEVER past
+    # BRIGHTNESS_TARGET_CAP. Applied outside the try so it holds even if policy is
+    # broken, and last so it covers any future raise path. The real guards — covenant,
+    # consistency, grounding/assertiveness — are uncapped and untouched.
+    t["brightness_target"] = min(int(t["brightness_target"]), BRIGHTNESS_TARGET_CAP)
     return t
 
 
