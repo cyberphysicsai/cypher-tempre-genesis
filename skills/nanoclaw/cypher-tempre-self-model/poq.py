@@ -334,7 +334,7 @@ def aggregate_claim(text: str) -> bool:
     return bool(AGGREGATE_CUE.search(text)) and bool(re.search(r"\d", text))
 
 
-def policy_thresholds():
+def policy_thresholds(registry_root=None):
     """Thresholds split by KIND (the Phase B doctrine): the VALUES floors come from
     policy — they may only ever TIGHTEN, and are never trained (policy.py enforces
     the guard). The grounding floor may be CALIBRATED by the learner from
@@ -343,7 +343,7 @@ def policy_thresholds():
     t = dict(DEFAULT_THRESHOLDS)
     try:
         import policy as policymod
-        pol = policymod.load_policy()
+        pol = policymod.load_policy(registry_root)
         t["covenant_floor"] = max(t["covenant_floor"], int(pol["values"]["covenant_floor"]))
         t["consistency_floor"] = max(t["consistency_floor"], int(pol["values"]["consistency_floor"]))
         cal = (pol.get("poq") or {}).get("calibrated")
@@ -659,11 +659,15 @@ def cmd_thresholds(args):
     otherwise invisible: dream may silently raise brightness_target from its 150 default
     (it reached 195 on a real chain, stalling 4.5% of turns) and nothing surfaced it
     until someone read policy.json by hand. This makes the drift, and its source, plain."""
-    eff = policy_thresholds()
+    # v3.30.02: honour --root. Previously the flag was accepted but never threaded, so
+    # `thresholds --root <other> --reset-brightness` read AND WROTE this install's
+    # policy.json instead of the targeted one — a silent wrong-target mutation.
+    root = getattr(args, "root", None)
+    eff = policy_thresholds(root)
     src = {k: "default" for k in eff}
     try:
         import policy as policymod
-        pol = policymod.load_policy()
+        pol = policymod.load_policy(root)
         cal = (pol.get("poq") or {}).get("calibrated") or {}
         for k in ("grounding_floor", "assertive_ceiling", "brightness_target"):
             if cal.get(k) is not None:
@@ -691,13 +695,13 @@ def cmd_thresholds(args):
     if getattr(args, "reset_brightness", False):
         try:
             import policy as policymod
-            pol = policymod.load_policy()
+            pol = policymod.load_policy(root)
             cal = (pol.get("poq") or {}).get("calibrated") or {}
             old = cal.pop("brightness_target", None)
             if not cal:
                 (pol.get("poq") or {}).pop("calibrated", None)
             (pol.get("floors") or {}).pop("brightness_target", None)
-            policymod.save_policy(pol)
+            policymod.save_policy(pol, root)
             print(f"\nreset: removed the raised brightness_target ({old}) — "
                   f"default {DEFAULT_THRESHOLDS['brightness_target']} now applies.")
         except Exception as exc:

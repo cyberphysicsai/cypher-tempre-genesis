@@ -347,13 +347,17 @@ def cmd_turn(args):
                 reason = scr.get("reason") or "covenant/scar"
                 cats = ", ".join(scr.get("categories") or []) or "—"
                 hit = next((s.get("match") for s in scr.get("structural") or []), "")
+                # v3.30.02: read every field with .get(). These were direct subscripts of
+                # keys screen() STOPPED returning when v3.26 made scars inert — so the one
+                # remaining membrane refusal raised KeyError, which the enclosing
+                # try/except swallowed, turning a BLOCK into a silent fail-OPEN.
                 print(f"immune: BLOCKED at membrane (reason={reason}, severity={scr.get('severity')}, "
-                      f"categories=[{cats}], covenant={scr['covenant']}, scar={scr['scar']}) — refusing this input.")
+                      f"categories=[{cats}], covenant={scr.get('covenant')}) — refusing this input.")
                 _, ring0, _, rs0 = _loop_seal(
                     root, reg, "immune",
                     f"Declined input at the membrane: reason={reason}, severity={scr.get('severity')}, "
                     f"structural categories=[{cats}]" + (f", trigger='{hit[:80]}'" if hit else "") +
-                    f" (covenant {scr['covenant']}, scar {scr['scar']}); did not act on it.",
+                    f" (covenant {scr.get('covenant')}); did not act on it.",
                     external_scores={"coherence": 220, "relevance": 220, "novelty": 120,
                                      "consistency": 230, "depth": 150, "covenant": 255})
                 if ring0:

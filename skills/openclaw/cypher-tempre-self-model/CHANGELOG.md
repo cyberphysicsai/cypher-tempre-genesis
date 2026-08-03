@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.30.02 - 2026-08-03
+
+Two defects found by a full adversarial verification pass over v3.30.01. Both were
+silent — no error surfaced to the user in either case.
+
+### Fixed
+- **`poq.py thresholds --root` was accepted but never threaded.** `policy_thresholds()`
+  and `cmd_thresholds` always read (and `--reset-brightness` always WROTE) the *installed*
+  skill's `registry/policy.json`, whatever `--root` said. Pointing the command at another
+  chain therefore mutated the wrong install's policy. `policy_thresholds(registry_root)`
+  now takes a root and both `load_policy` / `save_policy` receive it. Verified: a reset
+  against a scratch root now edits that root and leaves the live install byte-identical.
+- **The immune membrane's BLOCK path failed OPEN.** `recall_cli.cmd_turn` formatted its
+  refusal message with `scr['covenant']` and `scr['scar']` — direct subscripts of keys
+  `Immune.screen()` stopped returning in v3.26 when scars became inert records. The
+  resulting `KeyError` was swallowed by the enclosing `try/except`, so the one remaining
+  membrane refusal printed nothing and let the input through. All fields are now read
+  with `.get()`, so a block is reported and honoured.
+
 ## v3.30.01 - 2026-08-03
 
 Makes calibration drift visible. v3.30.0 capped the brightness target; this patch
