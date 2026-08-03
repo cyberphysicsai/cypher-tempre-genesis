@@ -30,6 +30,7 @@ Stdlib only. Python 3.8+.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import hmac
 import json
@@ -38,6 +39,19 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# v3.30.03: cross-process advisory lock for the seal critical section. Sealing reads the
+# head and then appends; without a lock two concurrent processes read the SAME head and
+# both append index head+1, producing duplicate indices and a chain that can never verify
+# again. Concurrent agent sessions sharing one chain hit this in practice.
+try:                                        # POSIX
+    import fcntl as _fcntl
+except ImportError:                         # pragma: no cover - Windows
+    _fcntl = None
+try:                                        # Windows fallback
+    import msvcrt as _msvcrt
+except ImportError:
+    _msvcrt = None
 
 GENESIS_PREV = "0" * 64
 POQ_DIMENSIONS = ["coherence", "relevance", "novelty", "consistency", "depth", "covenant"]
@@ -327,8 +341,47 @@ class Timechain:
         self._append(ring)
         return ring
 
+    @contextlib.contextmanager
+    def _append_lock(self):
+        """Exclusive cross-process lock over the seal critical section (read head ->
+        append). Advisory but sufficient: every writer goes through seal(). Fails OPEN
+        (a platform without flock still seals, just unserialised) so locking can never
+        brick the loop — the lock file lives in chain/ and is never committed."""
+        self.dir.mkdir(parents=True, exist_ok=True)
+        fh = None
+        try:
+            fh = open(self.dir / ".seal.lock", "a+")
+            if _fcntl is not None:
+                _fcntl.flock(fh.fileno(), _fcntl.LOCK_EX)
+            elif _msvcrt is not None:               # pragma: no cover - Windows
+                fh.seek(0)
+                _msvcrt.locking(fh.fileno(), _msvcrt.LK_LOCK, 1)
+        except Exception:
+            pass                                    # unlocked is worse than locked, never fatal
+        try:
+            yield
+        finally:
+            if fh is not None:
+                try:
+                    if _fcntl is not None:
+                        _fcntl.flock(fh.fileno(), _fcntl.LOCK_UN)
+                    elif _msvcrt is not None:       # pragma: no cover - Windows
+                        fh.seek(0)
+                        _msvcrt.locking(fh.fileno(), _msvcrt.LK_UNLCK, 1)
+                except Exception:
+                    pass
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+
     def seal(self, ring_type: str, payload: dict, files=None,
              poq=None, difficulty: int = 0) -> dict:
+        with self._append_lock():
+            return self._seal_locked(ring_type, payload, files, poq, difficulty)
+
+    def _seal_locked(self, ring_type: str, payload: dict, files=None,
+                     poq=None, difficulty: int = 0) -> dict:
         prev = self._current_head()
         if prev is None:
             raise RuntimeError("No Genesis Block. Run 'init' first.")

@@ -1851,6 +1851,31 @@ def main():
               _bt({**_base, "floors": {"covenant_floor": 200}}) <= poq.BRIGHTNESS_TARGET_CAP
               and poq.policy_thresholds()["covenant_floor"] >= 150)
 
+        # -- phase26: v3.30.03 concurrent-seal lock. Two processes sealing at once used to
+        #    read the SAME head and both append head+1, producing duplicate indices and a
+        #    chain that could never verify again. Real risk: concurrent agent sessions.
+        _c26 = Path(tempfile.mkdtemp(prefix="ct_conc_"))
+        try:
+            copy_base_registry(_c26)
+            timechain.Timechain(_c26).genesis(name="conc")
+            _proc = [subprocess.Popen(
+                [sys.executable, "-c",
+                 f"import sys;sys.path.insert(0,{str(SKILL)!r});import timechain;"
+                 f"timechain.Timechain({str(_c26)!r}).seal('turn',{{'summary':'c{i}'}})"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for i in range(8)]
+            for p in _proc:
+                p.wait(timeout=90)
+            _rings = timechain.Timechain(_c26).load()
+            _idx = [r["index"] for r in _rings]
+            check("phase26 concurrency: no duplicate ring indices under concurrent seals",
+                  len(_idx) == len(set(_idx)))
+            check("phase26 concurrency: indices are a contiguous sequence",
+                  _idx == list(range(len(_idx))))
+            check("phase26 concurrency: chain still verifies after concurrent seals",
+                  timechain.Timechain(_c26).verify()[0])
+        finally:
+            shutil.rmtree(_c26, ignore_errors=True)
+
         check("timechain: final verify", tc.verify()[0])
 
         # phase24 — CPHY economic layer + custody/PQ organs run their own

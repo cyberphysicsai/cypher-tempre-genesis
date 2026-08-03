@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.30.03 - 2026-08-03
+
+Fixes the one CRITICAL defect from the v3.30.01 verification pass.
+
+### Fixed
+- **Concurrent seals permanently corrupted the chain.** `seal()` read the head and then
+  appended as two separate steps with no lock, so two processes sealing at once both read
+  the same head and both appended index `head+1`. Reproduced in one shot: six concurrent
+  seals produced a duplicate index and a chain that **failed verification forever**, with
+  no built-in repair. Concurrent agent sessions sharing one chain hit this in practice.
+  The read-head-to-append critical section is now wrapped in an exclusive cross-process
+  advisory lock (`flock` on POSIX, `msvcrt` on Windows) that **fails open** on platforms
+  with neither, so locking can never brick the loop. Verified: 10 concurrent seals now
+  yield a contiguous `0..10` index sequence that verifies. selftest **phase26** covers it.
+
 ## v3.30.02 - 2026-08-03
 
 Two defects found by a full adversarial verification pass over v3.30.01. Both were
