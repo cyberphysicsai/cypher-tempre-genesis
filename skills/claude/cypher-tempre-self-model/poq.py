@@ -20,11 +20,19 @@ HONEST DESIGN NOTE
 ------------------
 True judgment of coherence/consistency/covenant is semantic and belongs to a
 model. The scorers below are deterministic *proxies* (lexical overlap, novelty
-vs. prior rings, structural depth, a covenant blocklist) so the gate runs and
-is testable with zero dependencies. The real path is to pass model-produced
-scores via `external_scores=` — they override any dimension, and the gate logic
-is identical. The anti-hallucination power comes from the gate *logic* (forced
+vs. prior rings, structural depth) so the gate runs and is testable with zero
+dependencies. The real path is to pass model-produced scores via
+`external_scores=` — they override any dimension, and the gate logic is
+identical. The anti-hallucination power comes from the gate *logic* (forced
 grounding + cited rings + uncertainty rule), not from the proxy numbers.
+
+COVENANT (v3.27/v3.28): there is NO covenant blocklist and no antithesis list —
+both were removed after a red-team proved every lexical rule either false-
+positives on ordinary words ("controller", "good news") or is trivially
+paraphrased. `score_covenant` reports in-harmony by default, so ANY subject is
+free to explore; genuine tension with the genesis fruitages is the agent's own
+judgment, supplied via `external_scores["covenant"]`, and the gate REJECTS below
+the floor (no-launder). The per-turn loop forces that confrontation every turn.
 
 Stdlib only. Python 3.8+.  Companion to timechain.py.
 """

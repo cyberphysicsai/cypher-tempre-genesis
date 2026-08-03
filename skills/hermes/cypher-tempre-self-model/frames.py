@@ -15,9 +15,11 @@ by the REGION it sits in —
 
 This module owns only those region primitives — pure stdlib text logic that imports
 nothing from the gate, so poq.py can build its frame-aware covenant on top without a
-cycle, and the discrimination regexes live apart from the covenant blocklist rather
-than piling into one file. Both the conscience (poq.PoQGate) and the membrane
-(immune) read the ONE judgment poq builds from these, so they can never drift.
+cycle. Both the conscience (poq.PoQGate) and the membrane (immune) read the ONE
+judgment poq builds from these, so they can never drift. Note (v3.27/v3.28): there is
+no covenant blocklist and no harm-verb intent list anywhere — the frames here label
+provenance only; they no longer gate the covenant, which is a harmony judgment against
+the genesis fruitages supplied by the agent.
 """
 
 from __future__ import annotations

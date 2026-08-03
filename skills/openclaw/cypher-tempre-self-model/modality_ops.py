@@ -70,9 +70,29 @@ _FAM = {
     "assume": r"assum\w*|presumably|given that|suppose|implies|obviously|of course|clearly\b|naturally|it goes without",
     "balance": r"however|on the other hand|both\b|whereas|alternatively|that said|conversely|trade-?off|pros and cons",
     "injection": r"ignore (?:previous|all|prior|the)|disregard (?:previous|all|the)|override\b|system prompt|exfiltrat\w*|reveal the|bypass\w*|jailbreak|prompt injection|do anything now",
-    "covenant": r"deceiv\w*|manipulat\w*|malice|cruel|betray\w*|hateful|exploit you|harm you|lie to",
+    # v3.29: the "covenant" antithesis family (deceive|manipulate|malice|...) is REMOVED.
+    # It was the hardcoded antithesis v3.27 deleted from the covenant path, left behind
+    # here where its output was consumed by nobody. Judging whether an action is in tension
+    # with the genesis fruitages is semantic (v3.28's finding: any lexical rule either
+    # false-positives on ordinary words or is trivially paraphrased), so no regex stands in
+    # for it. "Value Alignment Check" remains a faculty — a lens the agent reasons THROUGH —
+    # with no deterministic op behind it.
 }
 _FAM_RX = {k: re.compile(v, re.I) for k, v in _FAM.items()}
+
+_COVENANT_FALLBACK = ["loving", "joyful", "peaceful", "patient", "kind",
+                      "good", "faithful", "gentle", "self-controlled"]
+
+
+def _genesis_covenant():
+    """The genesis covenant words — the standard an action is judged against. Imported
+    lazily from timechain (poq imports this module lazily, so a top-level import here
+    would risk a cycle)."""
+    try:
+        from timechain import DEFAULT_COVENANT
+        return list(DEFAULT_COVENANT)
+    except Exception:
+        return list(_COVENANT_FALLBACK)
 _MODAL = re.compile(r"\b(must|should|could|would|may|might|can|will|shall|ought|need to|have to)\b", re.I)
 _HEDGE = re.compile(r"\b(maybe|might|perhaps|possibly|i think|not sure|unsure|uncertain|unclear|seems|could be|appears|tentative\w*|roughly|approximately)\b", re.I)
 _ASSERT = re.compile(r"\b(definitely|certainly|always|never|the fact|clearly|obviously|must|undeniably|guaranteed|proven|exactly)\b", re.I)
@@ -283,8 +303,14 @@ OPS = {
     "Concept-Relation Mapping": lambda t, c="": {"relations": concept_pairs(t)},
     "Relevant-Memory Retrieval": lambda t, c="": {"cues": entities(t) + [x[0] for x in top_terms(t, 4)],
                                                   "time_anchors": temporal(t)["dates"]},
-    "Value Alignment Check": lambda t, c="": {"covenant_flags": hits(_FAM_RX["covenant"], t)["hits"],
-                                              "aligned": not _FAM_RX["covenant"].search(t or "")},
+    # v3.29: this op PRESENTS the standard instead of pretending to detect violations.
+    # It surfaces the genesis covenant so the agent can judge THIS action against it in a
+    # fresh frame (v3.28's forced confrontation). It deliberately returns no verdict:
+    # covenant harmony is semantic, and every lexical rule for it was proven to either
+    # false-positive on ordinary words or be trivially paraphrased.
+    "Value Alignment Check": lambda t, c="": {"covenant": _genesis_covenant(),
+                                              "judgment": "agent-supplied (semantic; "
+                                                          "pass --covenant to the gate)"},
     "Self-Consistency Mapping": lambda t, c="": {"negations": hits(_NEG, t)["count"],
                                                  "contrasts": hits(_CONTRAST, t)["count"],
                                                  "context_overlap": overlap(t, c)},
@@ -325,8 +351,9 @@ OPS = {
     "Memory-Texture Sensing": lambda t, c="": {"specificity": len(entities(t)) + len(numbers(t)) + (1 if _CITATION.search(t or "") else 0),
                                                "entities": entities(t), "numbers": numbers(t)},
     "Link-Strength Testing": lambda t, c="": {"context_overlap": overlap(t, c)},
-    "Value-Breach and Injection Detection": lambda t, c="": {"injection": hits(_FAM_RX["injection"], t),
-                                                             "covenant": hits(_FAM_RX["covenant"], t)},
+    # v3.29: the covenant (antithesis) half is removed — see _FAM. The injection half is
+    # retained as an INERT observation only; it gates nothing and never lowers a score.
+    "Value-Breach and Injection Detection": lambda t, c="": {"injection": hits(_FAM_RX["injection"], t)},
     "Grounding Stabilizer": lambda t, c="": {"specificity": (1 if _CITATION.search(t or "") else 0) + len(numbers(t)),
                                              "context_overlap": overlap(t, c)},
     "Emerging-Pattern Foresight": lambda t, c="": {"trends": hits(_FAM_RX["trend"], t), "repeats": repeats(t)},

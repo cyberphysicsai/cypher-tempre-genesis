@@ -35,10 +35,9 @@ import sys
 from pathlib import Path
 
 from timechain import Timechain
-# v3.19: the use/mention + frame-aware covenant judgment lives in poq.py (which builds
-# it on frames.py) — the home of the covenant blocklist — so the conscience (PoQGate)
-# and this membrane read ONE source and can never drift. immune imports it (poq never
-# imports immune: no circular import).
+# v3.19: the covenant judgment lives in poq.py (which builds it on frames.py) — the home
+# of the covenant scoring — so the conscience (PoQGate) and this membrane read ONE source
+# and can never drift. immune imports it (poq never imports immune: no circular import).
 from poq import PoQGate, score_covenant, covenant_breach, mention_frame
 
 # --------------------------------------------------------------------------- #
@@ -152,14 +151,15 @@ class Immune:
         does it DRIFT from the genesis covenant? detect(), tripwire() and _ring_is_wound()
         all reason from this one predicate so they can never disagree. Returns
         (reason, categories):
-          ("covenant", None)  — the action drifts into the antithesis of the fruitages
-                                 (first-person harmful intent, or bare unquoted covenant
-                                 violation), scored by poq.covenant_breach
-          (None, None)        — in harmony with the covenant (incl. analyst mention frames
-                                 that merely NAME attack vocabulary — naming is not doing)
-        *frame* is the ring's DECLARED provenance: 'mention' exempts naming, but the
-        first-person intent backstop inside covenant_breach still fires. There is NO
-        lexical injection-pattern branch: drift from the covenant is the only signal."""
+          ("covenant", None)  — the action is in tension with the genesis fruitages, per
+                                 poq.covenant_breach
+          (None, None)        — in harmony with the covenant (the default: any subject may
+                                 be named or discussed; naming is not doing)
+        HONEST LIMIT (v3.27/v3.28): covenant_breach carries NO antithesis blocklist and NO
+        first-person intent list — both were removed after a red-team proved every lexical
+        rule either false-positives on ordinary words or is trivially paraphrased. It
+        therefore reports in-harmony unless the agent supplied a low covenant score at seal
+        time. This tripwire is a recorder of that judgment, not an independent detector."""
         if covenant_breach(summ, self.floor, frame):   # frame-aware; intent overrides mention
             return ("covenant", None)
         return (None, None)

@@ -1,5 +1,34 @@
 # Changelog
 
+## v3.29.0 - 2026-08-03
+
+Consistency cleanup: the code now says what v3.27/v3.28 actually shipped. No
+behaviour change to the gate or the membrane — this removes a contradiction and
+several stale claims that would mislead anyone auditing the covenant path.
+
+### Removed
+- **The last hardcoded antithesis.** `modality_ops.py` still carried a `covenant`
+  regex family (`deceiv\w*|manipulat\w*|malice|cruel|betray\w*|hateful|exploit
+  you|harm you|lie to`) — exactly what v3.27 removed from the covenant path —
+  left behind where its output landed inert in `labels.computed` and was read by
+  nobody. Deleted, along with the covenant half of "Value-Breach and Injection
+  Detection" (its injection half stays, explicitly inert: it gates nothing and
+  never lowers a score).
+
+### Changed
+- **"Value Alignment Check" now presents the standard instead of faking a verdict.**
+  The curated modality keeps an executable op (the 21/21 invariant holds), but it
+  returns the *genesis covenant words* plus `judgment: agent-supplied` — handing the
+  agent the standard to judge THIS action against in a fresh frame (v3.28's forced
+  confrontation), rather than pattern-matching for violations.
+- **Stale docstrings corrected.** `immune.py` claimed "the first-person intent
+  backstop inside covenant_breach still fires" — false since v3.27 deleted the intent
+  list, and precisely the kind of comment that makes a reader trust a guard that isn't
+  there. `immune.py`, `poq.py` and `frames.py` no longer describe a "covenant
+  blocklist" that no longer exists; `poq.py`'s header now states the real covenant
+  design (in-harmony default, any subject explorable, tension is the agent's judgment
+  supplied via `external_scores`, gate REJECTs below the floor).
+
 ## v3.28.0 - 2026-07-05
 
 The forced covenant confrontation. After proving — with an adversarial red-team —
