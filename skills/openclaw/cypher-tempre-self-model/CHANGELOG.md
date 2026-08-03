@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.30.01 - 2026-08-03
+
+Makes calibration drift visible. v3.30.0 capped the brightness target; this patch
+surfaces it, because the drift that started the thread was invisible — dream had
+silently raised the target from its 150 default to 195, and nothing reported it
+until the policy file was read by hand.
+
+### Added
+- **`python3 poq.py thresholds`** — prints every effective gate threshold **and where
+  each came from** (default / `policy values` / `policy poq.calibrated` /
+  `policy floors`), marks `brightness_target` with its cap, and says explicitly when a
+  value has been CLAMPED to that cap. If the target has been raised above its default
+  it says so and names the fix.
+- **`--reset-brightness`** — removes a calibrated- or floors-raised `brightness_target`
+  so the shipped default applies again. Verified end-to-end against a reproduction of
+  the original drifted policy: `195 → reported as raised & clamped to 169 → reset → 150`.
+- selftest: the thresholds CLI is covered (it must report the effective target and cap).
+
+### Note
+Recommended per-install state is now the shipped default **150 with the 169 cap** —
+brightness is a "keep iterating" nudge, so leaving headroom under the cap avoids
+stalling honest turns. Nothing else changed; the cap and all safety floors are as
+shipped in v3.30.0.
+
 ## v3.30.0 - 2026-08-03
 
 A hard ceiling on the brightness target, so the one gate that can stall a turn

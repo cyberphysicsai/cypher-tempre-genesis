@@ -654,6 +654,56 @@ def cmd_seal(args):
         sys.exit(2)
 
 
+def cmd_thresholds(args):
+    """Show the EFFECTIVE gate thresholds and WHERE each came from. Calibrated drift is
+    otherwise invisible: dream may silently raise brightness_target from its 150 default
+    (it reached 195 on a real chain, stalling 4.5% of turns) and nothing surfaced it
+    until someone read policy.json by hand. This makes the drift, and its source, plain."""
+    eff = policy_thresholds()
+    src = {k: "default" for k in eff}
+    try:
+        import policy as policymod
+        pol = policymod.load_policy()
+        cal = (pol.get("poq") or {}).get("calibrated") or {}
+        for k in ("grounding_floor", "assertive_ceiling", "brightness_target"):
+            if cal.get(k) is not None:
+                src[k] = f"policy poq.calibrated ({cal[k]})"
+        for k, v in (pol.get("values") or {}).items():
+            if k in eff and int(v) >= int(DEFAULT_THRESHOLDS.get(k, 0)):
+                src[k] = f"policy values ({v})"
+        for k, v in (pol.get("floors") or {}).items():
+            if k in eff:
+                src[k] = f"policy floors ({v})"
+    except Exception as exc:
+        print(f"(policy unreadable: {exc} — showing defaults)")
+    print("effective PoQ thresholds:")
+    for k in sorted(eff):
+        v = eff[k]
+        note = ""
+        if k == "brightness_target":
+            note = f"   [cap {BRIGHTNESS_TARGET_CAP}]"
+            if src[k] != "default" and v == BRIGHTNESS_TARGET_CAP:
+                note += " — CLAMPED to the cap"
+        print(f"  {k:24} = {str(v):>6}   from {src.get(k, 'default')}{note}")
+    if src.get("brightness_target", "default") != "default":
+        print("\nbrightness_target has been RAISED from its default by calibration/policy.")
+        print("  reset it with:  python3 poq.py thresholds --reset-brightness")
+    if getattr(args, "reset_brightness", False):
+        try:
+            import policy as policymod
+            pol = policymod.load_policy()
+            cal = (pol.get("poq") or {}).get("calibrated") or {}
+            old = cal.pop("brightness_target", None)
+            if not cal:
+                (pol.get("poq") or {}).pop("calibrated", None)
+            (pol.get("floors") or {}).pop("brightness_target", None)
+            policymod.save_policy(pol)
+            print(f"\nreset: removed the raised brightness_target ({old}) — "
+                  f"default {DEFAULT_THRESHOLDS['brightness_target']} now applies.")
+        except Exception as exc:
+            print(f"\nreset FAILED (policy not writable): {exc}")
+
+
 def build_parser():
     default_root = Path(__file__).resolve().parent
     common = argparse.ArgumentParser(add_help=False)
@@ -679,6 +729,12 @@ def build_parser():
     ps.add_argument("--index", action="store_true",
                     help="ground the conscience against the most-relevant rings via the Hippocampus index (relevance-driven, not recency-defaulted)")
     ps.set_defaults(func=cmd_seal)
+
+    pt = sub.add_parser("thresholds", help="show the effective gate thresholds and where each came from")
+    pt.add_argument("--root", type=Path, default=default_root)
+    pt.add_argument("--reset-brightness", action="store_true",
+                    help="remove a calibrated/floors-raised brightness_target so the default applies")
+    pt.set_defaults(func=cmd_thresholds)
     return p
 
 

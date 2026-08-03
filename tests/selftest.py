@@ -1841,6 +1841,12 @@ def main():
                    "floors": {"brightness_target": 250}}) == poq.BRIGHTNESS_TARGET_CAP)
         check("phase25 ceiling: a value UNDER the cap still applies (not clamped up)",
               _bt({**_base, "poq": {"calibrated": {"brightness_target": 160}}}) == 160)
+        # v3.30.01: the thresholds CLI must SURFACE a raised target (drift was invisible)
+        _thr_out = subprocess.run(
+            [sys.executable, str(SKILL / "poq.py"), "thresholds"],
+            capture_output=True, text=True, timeout=60).stdout
+        check("phase25 thresholds CLI: reports effective brightness_target and its cap",
+              "brightness_target" in _thr_out and str(poq.BRIGHTNESS_TARGET_CAP) in _thr_out)
         check("phase25 ceiling: the real safety floors are NOT capped by it",
               _bt({**_base, "floors": {"covenant_floor": 200}}) <= poq.BRIGHTNESS_TARGET_CAP
               and poq.policy_thresholds()["covenant_floor"] >= 150)
