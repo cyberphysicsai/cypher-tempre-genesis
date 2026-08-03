@@ -433,7 +433,23 @@ class PoQGate:
         cited = [c for c in ranked if c["overlap"] > 0][:3]
 
         reasons = []
-        if s["covenant"] < self.t["covenant_floor"]:
+        covenant_explicit = "covenant" in ext
+        covenant_tightened = self.t["covenant_floor"] > DEFAULT_THRESHOLDS["covenant_floor"]
+        if covenant_tightened and not covenant_explicit:
+            # score_covenant() is deliberately a non-semantic, antithesis-free
+            # fallback (235). Comparing a tightened policy floor with that one
+            # constant made every value <=235 a no-op and every value >235 a
+            # universal block. A stricter co-evolver policy now has real,
+            # monotonic meaning: the candidate must carry the agent/model's
+            # fresh semantic judgment through the documented external seam.
+            decision = "REJECT"
+            reasons.append(
+                f"covenant floor {self.t['covenant_floor']} is tightened above the default "
+                f"{DEFAULT_THRESHOLDS['covenant_floor']}, but no model-supplied covenant "
+                "score was provided; the deterministic 235 fallback is not a semantic "
+                "conscience judgment — resubmit with --covenant 0..255."
+            )
+        elif s["covenant"] < self.t["covenant_floor"]:
             decision = "REJECT"
             reasons.append(f"covenant {s['covenant']} < floor {self.t['covenant_floor']}: violates the covenant — profound dissonance.")
         elif s["consistency"] < self.t["consistency_floor"]:
@@ -468,6 +484,7 @@ class PoQGate:
 
         verdict = {
             "scores": s,
+            "score_sources": {"covenant": "external" if covenant_explicit else "fallback"},
             "brightness": brightness,
             "grounding": grounding,
             "assertiveness": assertive,
@@ -692,6 +709,10 @@ def cmd_thresholds(args):
     if src.get("brightness_target", "default") != "default":
         print("\nbrightness_target has been RAISED from its default by calibration/policy.")
         print("  reset it with:  python3 poq.py thresholds --reset-brightness")
+    if eff["covenant_floor"] > DEFAULT_THRESHOLDS["covenant_floor"]:
+        print("\ncovenant_floor is tightened: seals must provide a model-supplied "
+              "--covenant score; the antithesis-free fallback cannot satisfy "
+              "tightened policy by itself.")
     if getattr(args, "reset_brightness", False):
         try:
             import policy as policymod

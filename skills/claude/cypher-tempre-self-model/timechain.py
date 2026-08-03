@@ -458,43 +458,61 @@ class Timechain:
             pass   # checkpointing is an accelerator, never a failure source
 
     def latest_checkpoint(self):
+        ok, checkpoints, _ = self._validated_checkpoints()
+        return checkpoints[-1] if ok and checkpoints else None
+
+    def _validated_checkpoints(self):
+        """Validate the independent checkpoint ledger before trusting it.
+
+        A full ring walk proves internal hash continuity, but it cannot detect an
+        attacker who rewrites an old ring and recomputes every later ring hash. The
+        checkpoint ledger is the independently retained anchor for that history, so
+        *both* verification modes must validate it and compare its pinned ring hashes
+        with the live chain. Returning malformed checkpoints as "no checkpoint" would
+        silently discard the very evidence that detects a forward rewrite.
+        """
         p = self._ckpt_path()
         if not p.exists():
-            return None
-        last = None
+            return True, [], []
+        checkpoints = []
+        prev_hash = None
+        prev_index = -1
         try:
-            for line in p.read_text().splitlines():
-                if line.strip():
-                    last = json.loads(line)
-        except Exception:
-            return None
-        return last
+            for line_no, line in enumerate(p.read_text().splitlines(), 1):
+                if not line.strip():
+                    continue
+                c = json.loads(line)
+                idx = c.get("index")
+                if not isinstance(idx, int) or idx < 0 or idx <= prev_index:
+                    return False, [], [
+                        f"checkpoint line {line_no}: invalid/non-increasing index -> TAMPERED"
+                    ]
+                if c.get("prev_ckpt_hash") != prev_hash:
+                    return False, [], [f"checkpoint {idx}: broken checkpoint chain"]
+                expect = hashlib.sha256(json.dumps(
+                    {k: c.get(k) for k in ("index", "ring_hash", "prev_ckpt_hash")},
+                    sort_keys=True).encode()).hexdigest()
+                if expect != c.get("ckpt_hash"):
+                    return False, [], [f"checkpoint {idx}: ckpt_hash mismatch -> TAMPERED"]
+                checkpoints.append(c)
+                prev_hash = c["ckpt_hash"]
+                prev_index = idx
+        except Exception as exc:
+            return False, [], [f"checkpoint file unreadable: {exc}"]
+        return True, checkpoints, []
 
     def verify_fast(self):
         """O(tail) verification: trust the newest checkpoint (whose hash chain
         is itself validated), then walk only the rings after it. Falls back to
         full verify() when no checkpoint exists."""
-        ck = self.latest_checkpoint()
-        if not ck:
+        ck_ok, checkpoints, ck_report = self._validated_checkpoints()
+        if not ck_ok:
+            return False, ck_report
+        if not checkpoints:
             return self.verify()
-        # validate the checkpoint chain itself
-        import hashlib as _h
-        prev_hash = None
-        try:
-            for line in self._ckpt_path().read_text().splitlines():
-                if not line.strip():
-                    continue
-                c = json.loads(line)
-                if c.get("prev_ckpt_hash") != prev_hash:
-                    return False, [f"checkpoint {c.get('index')}: broken checkpoint chain"]
-                expect = _h.sha256(json.dumps(
-                    {k: c.get(k) for k in ("index", "ring_hash", "prev_ckpt_hash")},
-                    sort_keys=True).encode()).hexdigest()
-                if expect != c.get("ckpt_hash"):
-                    return False, [f"checkpoint {c.get('index')}: ckpt_hash mismatch -> TAMPERED"]
-                prev_hash = c["ckpt_hash"]
-        except Exception as exc:
-            return False, [f"checkpoint file unreadable: {exc}"]
+        ck = checkpoints[-1]
+        if not self.rings_path.exists():
+            return False, ["checkpoint ledger exists but the ring chain is missing -> TAMPERED"]
         # walk only the tail after the checkpoint
         report, ok = [], True
         prev_ring_hash, i, count = None, 0, 0
@@ -510,9 +528,14 @@ class Timechain:
                     r = json.loads(line)
                 except Exception as exc:
                     return False, [f"ring {i}: unreadable/torn line -> TAMPERED ({exc})"]
+                if r.get("index") != i:
+                    ok = False
+                    report.append(f"ring {i}: index mismatch (got {r.get('index')})")
                 if i == ck["index"]:
                     if r.get("ring_hash") != ck["ring_hash"]:
                         return False, [f"ring {i}: hash != checkpoint -> TAMPERED"]
+                    if compute_ring_hash(r) != r.get("ring_hash"):
+                        return False, [f"ring {i}: checkpointed ring_hash mismatch -> TAMPERED"]
                 else:
                     if r.get("prev_hash") != prev_ring_hash:
                         ok = False
@@ -520,9 +543,23 @@ class Timechain:
                     if compute_ring_hash(r) != r.get("ring_hash"):
                         ok = False
                         report.append(f"ring {i}: ring_hash mismatch -> TAMPERED")
+                diff = r.get("difficulty", 0)
+                if diff and not str(r.get("ring_hash", "")).startswith("0" * diff):
+                    ok = False
+                    report.append(f"ring {i}: does not meet stated difficulty {diff}")
+                for ref in r.get("blockspace_refs", []):
+                    h = ref.get("hash")
+                    if not self.blockspace.has(h):
+                        ok = False
+                        report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. missing ({ref.get('role')})")
+                    elif not self.blockspace.verify_blob(h):
+                        ok = False
+                        report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. corrupted ({ref.get('role')})")
                 prev_ring_hash = r.get("ring_hash")
                 i += 1
                 count += 1
+        if count == 0:
+            return False, [f"checkpoint {ck['index']}: pinned ring is missing from the chain -> TAMPERED"]
         if ok:
             report.append(f"fast-verified {count} rings from checkpoint "
                           f"{ck['index']} -> tail intact (full verify still "
@@ -534,10 +571,17 @@ class Timechain:
         """Stream the chain one ring at a time — O(1) memory regardless of height, so
         verification scales to millions of rings. A torn/unreadable line is reported
         rather than crashing the walk."""
+        ck_ok, checkpoints, ck_report = self._validated_checkpoints()
+        report = list(ck_report)
+        ok = ck_ok
+        checkpoint_by_index = {c["index"]: c for c in checkpoints}
+        seen_checkpoints = set()
         if not self.rings_path.exists():
+            if not ck_ok:
+                return False, report
+            if checkpoints:
+                return False, report + ["checkpoint ledger exists but the ring chain is missing -> TAMPERED"]
             return True, ["empty chain"]
-        report = []
-        ok = True
         prev_hash = GENESIS_PREV
         i = 0
         count = 0
@@ -564,6 +608,12 @@ class Timechain:
                     ok = False
                     report.append(f"ring {i}: ring_hash mismatch -> TAMPERED "
                                    f"(stored {str(ring.get('ring_hash'))[:12]}.., recomputed {recomputed[:12]}..)")
+                checkpoint = checkpoint_by_index.get(i)
+                if checkpoint is not None:
+                    seen_checkpoints.add(i)
+                    if ring.get("ring_hash") != checkpoint.get("ring_hash"):
+                        ok = False
+                        report.append(f"ring {i}: hash != checkpoint -> FORWARD REWRITE/TAMPERED")
                 diff = ring.get("difficulty", 0)
                 if diff and not str(ring.get("ring_hash", "")).startswith("0" * diff):
                     ok = False
@@ -579,8 +629,12 @@ class Timechain:
                 prev_hash = ring.get("ring_hash")
                 i += 1
                 count += 1
+        missing_checkpoints = sorted(set(checkpoint_by_index) - seen_checkpoints)
+        for idx in missing_checkpoints:
+            ok = False
+            report.append(f"checkpoint {idx}: pinned ring is missing from the chain -> TAMPERED")
         if count == 0:
-            return True, ["empty chain"]
+            return (ok, report or ["empty chain"])
         if ok:
             report.append(f"verified {count} rings -> chain intact, all hashes link, blockspace consistent")
         return ok, report

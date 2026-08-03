@@ -238,7 +238,7 @@ _HEDGE_PAD = (" (tentatively; i think; maybe; perhaps; possibly; unclear; unsure
 # clears the brightness floor so the loop always leaves a ring, while grounding and
 # assertiveness (computed from text) keep the ring honestly labeled as tentative.
 _UNCERTAIN_SCORES = {"coherence": 200, "relevance": 180, "novelty": 120,
-                     "consistency": 200, "depth": 150, "covenant": 220}
+                     "consistency": 200, "depth": 150, "covenant": 255}
 
 
 def _uncertainty_led(summary):
@@ -998,4 +998,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

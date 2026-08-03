@@ -346,6 +346,10 @@ def cmd_scan(args):
         print(f"  ! {sig}")
     if d["first_bad_height"] is not None:
         print(f"  -> first drifted blockheight: {d['first_bad_height']}  (safe height: {d['first_bad_height']-1})")
+    # A diagnostic that prints compromise but exits success gives CI, hooks,
+    # and shell automation a false green. Match `timechain verify`/`epochs
+    # check`: zero means clean, nonzero means the caller must stop and inspect.
+    sys.exit(1 if d["compromised"] else 0)
 
 
 def cmd_screen(args):

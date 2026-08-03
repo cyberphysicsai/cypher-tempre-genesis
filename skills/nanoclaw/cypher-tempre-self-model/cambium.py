@@ -77,6 +77,24 @@ def _atomic_write_json(path: Path, obj):
     atomic_write_json(path, obj)
 
 
+def _guarded_registry_write(root: Path, path: Path, obj, reason: str):
+    """Write one epoch-protected registry file from an authenticated baseline.
+
+    The preflight happens before the bytes change. If the registry already
+    differs from its last epoch, ``begin_mutation`` raises and the write is not
+    attempted; a routine growth/prune/wake path can therefore never bless
+    attacker-injected content merely because it happened to run next.
+    """
+    try:
+        import epochs
+    except ImportError:                         # stripped-down legacy bundle
+        _atomic_write_json(path, obj)
+        return
+    ticket = epochs.begin_mutation(root)
+    _atomic_write_json(path, obj)
+    epochs.commit_mutation(root, ticket, reason=reason)
+
+
 SKILL_DIR = Path(__file__).resolve().parent
 
 
@@ -113,7 +131,8 @@ def load_grown(root: Path) -> dict:
 
 
 def save_grown(root: Path, data: dict):
-    _atomic_write_json(root / "registry" / "grown.json", data)
+    _guarded_registry_write(root, root / "registry" / "grown.json", data,
+                            "grown registry mutation")
 
 
 def migrate_legacy_promotions(root: Path) -> bool:
@@ -142,7 +161,8 @@ def migrate_legacy_promotions(root: Path) -> bool:
             if (e.get("id"), e.get("name")) not in have:
                 grown.setdefault(key, []).append(e)
         data[key] = [e for e in entries if "promoted" not in str(e.get("origin", "")).lower()]
-        _atomic_write_json(p, data)
+        _guarded_registry_write(root, p, data,
+                                f"legacy promotion migration: {fname}")
         moved = True
     if grown is not None and moved:
         save_grown(root, grown)
@@ -318,7 +338,8 @@ def load_emergent(root: Path) -> dict:
 
 
 def save_emergent(root: Path, data: dict):
-    (root / "registry" / "emergent.json").write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    _guarded_registry_write(root, root / "registry" / "emergent.json", data,
+                            "emergent registry mutation")
 
 
 def match_emergent(data: dict, prop: dict):

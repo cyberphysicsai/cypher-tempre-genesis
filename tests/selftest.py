@@ -21,7 +21,7 @@ from pathlib import Path
 SKILL = Path(__file__).resolve().parent.parent / "skills" / "claude" / "cypher-tempre-self-model"
 sys.path.insert(0, str(SKILL))
 
-import timechain, poq, cambium, chronosynaptic, continuum, recall, consensus, immune, embed, hippocampus, dormancy, telemetry, bench, policy, learner, faculties, guard, replay, lens, dream, extractor, task
+import timechain, poq, cambium, chronosynaptic, continuum, recall, consensus, immune, embed, hippocampus, dormancy, telemetry, bench, policy, learner, faculties, guard, replay, lens, dream, extractor, task, epochs
 
 _ok = True
 
@@ -1875,6 +1875,105 @@ def main():
                   timechain.Timechain(_c26).verify()[0])
         finally:
             shutil.rmtree(_c26, ignore_errors=True)
+
+        # -- phase27: v3.30.04 operational-integrity regressions found by the
+        #    adversarial verification handoff after v3.30.03. -- #
+        _ck27 = Path(tempfile.mkdtemp(prefix="ct_checkpoint_"))
+        try:
+            copy_base_registry(_ck27)
+            _tc27 = timechain.Timechain(_ck27)
+            _tc27.genesis(name="checkpoint-anchor")
+            _old_autoindex = os.environ.get("CT_AUTOINDEX")
+            os.environ["CT_AUTOINDEX"] = "0"
+            try:
+                for _i in range(_tc27.CHECKPOINT_EVERY):
+                    _tc27.seal("experience", {"summary": f"checkpoint item {_i}"})
+            finally:
+                if _old_autoindex is None:
+                    os.environ.pop("CT_AUTOINDEX", None)
+                else:
+                    os.environ["CT_AUTOINDEX"] = _old_autoindex
+            _rewritten = [json.loads(line) for line in
+                          _tc27.rings_path.read_text().splitlines() if line.strip()]
+            _rewritten[0]["payload"]["name"] = "forward-rewritten"
+            _prev = timechain.GENESIS_PREV
+            for _i, _ring in enumerate(_rewritten):
+                _ring["index"] = _i
+                _ring["prev_hash"] = _prev
+                _ring["ring_hash"] = timechain.compute_ring_hash(_ring)
+                _prev = _ring["ring_hash"]
+            _tc27.rings_path.write_text("\n".join(
+                json.dumps(r, sort_keys=True, separators=(",", ":"))
+                for r in _rewritten) + "\n")
+            check("phase27 checkpoints: full verify detects a forward rewrite",
+                  _tc27.verify()[0] is False)
+            check("phase27 checkpoints: fast verify also detects the rewrite",
+                  _tc27.verify_fast()[0] is False)
+            _scan27 = subprocess.run(
+                [sys.executable, str(SKILL / "immune.py"), "scan", "--root", str(_ck27)],
+                capture_output=True, text=True, timeout=60)
+            check("phase27 immune: scan exits nonzero on a tampered chain",
+                  _scan27.returncode != 0 and "DETECTED" in _scan27.stdout)
+            _tc27.rings_path.unlink()
+            check("phase27 checkpoints: a checkpoint ledger cannot outlive its chain",
+                  _tc27.verify()[0] is False and _tc27.verify_fast()[0] is False)
+        finally:
+            shutil.rmtree(_ck27, ignore_errors=True)
+
+        _ep27 = Path(tempfile.mkdtemp(prefix="ct_epoch_guard_"))
+        try:
+            copy_base_registry(_ep27)
+            timechain.Timechain(_ep27).genesis(name="epoch-guard")
+            epochs.seal_epoch(_ep27, "baseline")
+            _gp27 = _ep27 / "registry" / "grown.json"
+            _gp27.write_text(json.dumps({"registry": "grown", "senses": [],
+                                         "modalities": [], "injected": True}))
+            _refused27 = False
+            try:
+                epochs.seal_epoch(_ep27, "automatic hot path")
+            except epochs.EpochMismatchError:
+                _refused27 = True
+            check("phase27 epochs: automatic reseal refuses a dirty baseline",
+                  _refused27 and epochs.check_epoch(_ep27)[0] is False)
+            _write_refused27 = False
+            try:
+                cambium.save_grown(_ep27, {"registry": "grown", "senses": [],
+                                           "modalities": []})
+            except epochs.EpochMismatchError:
+                _write_refused27 = True
+            check("phase27 epochs: registry hot paths preflight before writing",
+                  _write_refused27 and json.loads(_gp27.read_text()).get("injected") is True)
+            epochs.seal_epoch(_ep27, "human-reviewed recovery", accept_current=True)
+            check("phase27 epochs: explicit human re-anchor clears the reviewed alarm",
+                  epochs.check_epoch(_ep27)[0] is True)
+            for _argv in (("--root", str(_ep27), "status"),
+                          ("status", "--root", str(_ep27))):
+                _p27 = subprocess.run([sys.executable, str(SKILL / "epochs.py"), *_argv],
+                                      capture_output=True, text=True, timeout=60)
+                check(f"phase27 epochs: --root honored in position {_argv[0]}",
+                      _p27.returncode == 0 and "latest epoch:" in _p27.stdout)
+        finally:
+            shutil.rmtree(_ep27, ignore_errors=True)
+
+        _tight27 = poq.PoQGate({"covenant_floor": 200, "brightness_target": 0})
+        _no_judgment27 = _tight27.evaluate("A neutral candidate with adequate detail.", [],
+                                           context="neutral")
+        _judged27 = _tight27.evaluate("A neutral candidate with adequate detail.", [],
+                                      context="neutral",
+                                      external_scores={"covenant": 220})
+        _high27 = poq.PoQGate({"covenant_floor": 236, "brightness_target": 0}).evaluate(
+            "A neutral candidate with adequate detail.", [], context="neutral",
+            external_scores={"covenant": 245})
+        check("phase27 covenant: a tightened floor requires a semantic score",
+              _no_judgment27["decision"] == "REJECT"
+              and _no_judgment27["score_sources"]["covenant"] == "fallback")
+        check("phase27 covenant: supplied scores make every 0..255 floor meaningful",
+              _judged27["decision"] != "REJECT" and _high27["decision"] != "REJECT")
+
+        _skill_text27 = (SKILL / "SKILL.md").read_text()
+        check("phase27 docs: removed runtime commands are no longer documented as runnable",
+              'python3 immune.py auto-quarantine' not in _skill_text27
+              and 'python3 tests/jailbreak_corpus.py' not in _skill_text27)
 
         check("timechain: final verify", tc.verify()[0])
 

@@ -891,8 +891,10 @@ faculties and their executable ops (`registry/*.json`) are anchored to the chain
 every mutation (autogrow, prune, dream growth) seals an `epoch` ring carrying
 their content-hashes, and `timechain.py verify` FAILS if the live files do not
 match the last sealed epoch. If verify reports a registry mismatch you did not
-cause, treat it as compromise. If it was your own deliberate edit, re-anchor it:
-`python3 epochs.py seal --reason "<why>"`.
+cause, treat it as compromise. If it was your own deliberate edit, inspect it and
+re-anchor explicitly:
+`python3 epochs.py seal --accept-current --reason "<why>"`. Automatic hot paths
+cannot accept a mismatched baseline.
 
 **Growth hygiene.** Faculties must pay rent: `python3 cambium.py prune --dry-run`
 shows grown faculties that never fire (junk-named ones get no grace); dropping
@@ -1116,39 +1118,31 @@ dormancy.py        pause | resume | status                       (rest the loop 
 Common flags: `--context "<…>"`, `--root <path>`, `--difficulty N` (proof-of-work
 "brightness" target: leading hex zeros to mine when sealing; 0 = instant).
 
-## The membrane closes — jailbreak catch & quarantine (v3.16)
+## The covenant membrane — semantic judgment, no lexical autoimmune response
 
-v3.16 closes the immune membrane. The adversarial benchmark went from 45.6% catch
-to **100%** (57 attacks, 23 benign controls, 0% false positives).
+The v3.27/v3.28 redesign removed structural injection patterns, decoded-payload
+scanning, and scar-vocabulary matching. Those deterministic nets rejected benign
+security analysis that merely *named* an attack and then taught the false positive
+back into the next turn. They are not part of the current runtime.
 
-### What's new
+The live membrane has two layers:
 
-- **50+ structural injection patterns** across 12 families: override/negation,
-  role-hijack (DAN/STAN/EvilGPT/Developer Mode), prompt exfiltration, framing,
-  constraint removal, encoding/obfuscation, **refusal suppression**, **hypothetical
-  framing**, **prefix injection** (completion bait), **payload splitting**, **cross-
-  lingual** (Spanish/French/German), **emotional/authority manipulation**
-- **Text normalization**: zero-width stripping, homoglyph mapping, whitespace collapse
-- **Decode-and-rescan**: base64, hex, ROT13 payloads decoded and scanned for injections
-- **Auto-quarantine** (`immune.py auto-quarantine --input <text>`): coordinated
-  injection → chain lockdown + scar recorded automatically
-- **Benchmark corpus** (`tests/jailbreak_corpus.py`): 57 attacks + 23 benign controls
-
-### How to use
+1. `immune.py screen --input "<text>"` presents the request for covenant judgment but
+   does not block by vocabulary. Any subject may be quoted, analyzed, or explored.
+2. The PoQ gate judges the agent's own proposed action against the genesis fruitages.
+   A model-supplied covenant score below policy is rejected, and `immune.py guard
+   --ring <index>` checks the sealed outcome and locks down on chain-integrity failure.
 
 ```bash
-# Screen an input at the membrane (before sealing)
-python3 immune.py screen --input "<text>"
-
-# Auto-quarantine a detected injection (locks chain, records scar)
-python3 immune.py auto-quarantine --input "<text>"
-
-# Roll back to a clean blockheight after compromise
+python3 immune.py screen --input "<text>"       # antithesis-free intake check
+python3 immune.py guard --ring <index>          # post-seal outcome/integrity tripwire
+python3 immune.py scan                          # nonzero exit on compromise
 python3 immune.py rollback --height <first_bad_ring>
-
-# Run the adversarial benchmark
-python3 tests/jailbreak_corpus.py
+python3 immune.py forget-scar --id scar1        # retire an inert scar after review
 ```
+
+There is intentionally no `auto-quarantine` command and no bundled jailbreak-pattern
+benchmark: quarantine is an outcome of the post-seal `guard`, not an input-word matcher.
 
 ## The seam (how this gets sharper)
 

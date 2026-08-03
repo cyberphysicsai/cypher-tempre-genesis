@@ -504,6 +504,11 @@ def register_grown_op(registry_root, name, spec):
     if not name or build_op(spec) is None:
         return False
     try:
+        # Authenticate the complete registry set before this write. A mismatch
+        # must remain an alarm; an automatic faculty promotion may not turn
+        # unknown bytes into the next trusted epoch.
+        import epochs
+        ticket = epochs.begin_mutation(Path(registry_root))
         p = _grown_ops_path(registry_root)
         p.parent.mkdir(parents=True, exist_ok=True)
         data = json.loads(p.read_text()) if p.is_file() else {}
@@ -511,6 +516,8 @@ def register_grown_op(registry_root, name, spec):
             data = {"registry": "grown_ops", "ops": {}}
         data["ops"][name] = spec
         p.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        epochs.commit_mutation(Path(registry_root), ticket,
+                               reason=f"grown op registration: {name[:80]}")
         return True
     except Exception:
         return False

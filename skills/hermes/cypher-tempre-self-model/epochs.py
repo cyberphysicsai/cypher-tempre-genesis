@@ -20,7 +20,9 @@ Commands:
     python3 epochs.py status  [--root R]   # latest epoch summary
 
 Library:
-    seal_epoch(root, reason)   -> ring | None (no-op if hashes unchanged)
+    begin_mutation(root)       -> authorization ticket (refuses a dirty baseline)
+    commit_mutation(root, ticket, reason) -> ring | None
+    seal_epoch(root, reason)   -> ring | None (manual/first-anchor path)
     check_epoch(root)          -> (ok: bool, report: [str])
 
 Stdlib only. Python 3.8+. Fail-open on missing chain (a fresh install has no
@@ -39,6 +41,10 @@ from timechain import Timechain
 
 REGISTRY_FILES = ("senses.json", "modalities.json", "grown.json",
                   "grown_ops.json", "emergent.json")
+
+
+class EpochMismatchError(RuntimeError):
+    """A registry differs from the last authenticated epoch."""
 
 
 def _registry_dir(root: Path) -> Path:
@@ -88,22 +94,85 @@ def _iter(tc: Timechain):
                     continue
 
 
-def seal_epoch(root: Path, reason: str = "registry mutation"):
-    """Seal an epoch ring anchoring current registry hashes. No-op (returns
-    None) when hashes are identical to the latest epoch — idempotent, so
-    callers may invoke it after every growth event without chain spam."""
-    root = Path(root)
+def _seal_snapshot(root: Path, hashes: dict, reason: str):
     tc = Timechain(root)
-    hashes = registry_hashes(root)
-    prev = latest_epoch(tc)
-    if prev and (prev.get("payload") or {}).get("registry_hashes") == hashes:
-        return None
     files = [str(_registry_dir(root) / n) for n in REGISTRY_FILES
              if (_registry_dir(root) / n).exists()]
     return tc.seal("epoch", {
         "summary": f"registry epoch: {reason}",
         "registry_hashes": hashes,
     }, files=files)
+
+
+def begin_mutation(root: Path):
+    """Authorize one known registry mutation from a verified baseline.
+
+    The old post-write-only API could not distinguish a legitimate mutation
+    from attacker-injected content: any hot path simply snapshotted whatever
+    was on disk and made a tamper alarm self-clear. This preflight validates the
+    live registry *before* the caller writes and returns a ticket binding the
+    later commit to that exact authenticated epoch.
+    """
+    root = Path(root)
+    tc = Timechain(root)
+    live = registry_hashes(root)
+    prev = latest_epoch(tc)
+    if prev is not None:
+        sealed = (prev.get("payload") or {}).get("registry_hashes") or {}
+        if sealed != live:
+            raise EpochMismatchError(
+                f"registry differs from epoch ring {prev['index']}; refusing to "
+                "authorize a mutation over a compromised/unreviewed baseline"
+            )
+    elif tc.rings_path.exists() and tc.load():
+        # First protected mutation on a lived chain: authenticate the baseline
+        # before anything changes, then bind the ticket to that ring.
+        prev = _seal_snapshot(root, live, "pre-mutation baseline")
+    return {
+        "registry_hashes": live,
+        "epoch_ring_hash": prev.get("ring_hash") if prev else None,
+        "anchored": prev is not None,
+    }
+
+
+def seal_epoch(root: Path, reason: str = "registry mutation",
+               expected_previous=None, accept_current: bool = False):
+    """Seal current registry hashes without laundering an existing mismatch.
+
+    - unchanged state is an idempotent no-op;
+    - automatic callers pass a ticket from :func:`begin_mutation`;
+    - a manual re-anchor after human review requires ``accept_current=True``.
+    """
+    root = Path(root)
+    tc = Timechain(root)
+    hashes = registry_hashes(root)
+    prev = latest_epoch(tc)
+    sealed = (prev.get("payload") or {}).get("registry_hashes") if prev else None
+    if prev and sealed == hashes:
+        return None
+    if expected_previous is not None:
+        expected_hashes = expected_previous.get("registry_hashes") or {}
+        expected_ring = expected_previous.get("epoch_ring_hash")
+        if expected_previous.get("anchored"):
+            if prev is None or prev.get("ring_hash") != expected_ring or sealed != expected_hashes:
+                raise EpochMismatchError(
+                    "registry epoch changed after mutation authorization; refusing to seal"
+                )
+        elif prev is not None and sealed != expected_hashes:
+            raise EpochMismatchError(
+                "an epoch appeared after an unanchored mutation authorization; refusing to seal"
+            )
+        return _seal_snapshot(root, hashes, reason)
+    if prev is not None and not accept_current:
+        raise EpochMismatchError(
+            f"registry differs from epoch ring {prev['index']}; refusing to bless current "
+            "content automatically (inspect it, then rerun with --accept-current)"
+        )
+    return _seal_snapshot(root, hashes, reason)
+
+
+def commit_mutation(root: Path, ticket, reason: str = "registry mutation"):
+    return seal_epoch(root, reason=reason, expected_previous=ticket)
 
 
 def check_epoch(root: Path):
@@ -130,7 +199,12 @@ def check_epoch(root: Path):
 
 
 def cmd_seal(args):
-    ring = seal_epoch(args.root, reason=args.reason)
+    try:
+        ring = seal_epoch(args.root, reason=args.reason,
+                          accept_current=args.accept_current)
+    except EpochMismatchError as exc:
+        print(f"EPOCH SEAL REFUSED: {exc}")
+        sys.exit(1)
     if ring is None:
         print("no change — registries already match the latest epoch")
     else:
@@ -160,11 +234,19 @@ def cmd_status(args):
 
 
 def main():
+    default_root = Path(__file__).parent
+    # The subparser copy uses SUPPRESS so `epochs.py --root R status` is not
+    # overwritten by a second default while `epochs.py status --root R` remains
+    # accepted. v3.30.03 silently discarded the first form.
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--root", default=str(Path(__file__).parent))
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1], parents=[common])
+    common.add_argument("--root", type=Path, default=argparse.SUPPRESS)
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--root", type=Path, default=default_root)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("seal", parents=[common]); s.add_argument("--reason", default="manual seal"); s.set_defaults(func=cmd_seal)
+    s = sub.add_parser("seal", parents=[common]); s.add_argument("--reason", default="manual seal")
+    s.add_argument("--accept-current", action="store_true",
+                   help="after human review, deliberately replace a mismatched epoch anchor")
+    s.set_defaults(func=cmd_seal)
     c = sub.add_parser("check", parents=[common]); c.set_defaults(func=cmd_check)
     st = sub.add_parser("status", parents=[common]); st.set_defaults(func=cmd_status)
     args = ap.parse_args()

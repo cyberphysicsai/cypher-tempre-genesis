@@ -1,5 +1,36 @@
 # Changelog
 
+## v3.30.04 - 2026-08-03
+
+Closes the six operational-integrity defects explicitly enumerated in the full
+verification handoff after v3.30.03.
+
+### Fixed
+- **Full verification now honors checkpoint anchors.** A forward rewrite that recomputed
+  every ring hash previously passed `verify` while `verify --fast` caught the mismatch.
+  Both modes now validate the checkpoint ledger; full verification cross-checks every
+  pinned ring, while fast verification also recomputes and fully validates its tail.
+- **Registry epoch alarms cannot self-clear through routine work.** Registry writers now
+  authenticate the last sealed epoch *before* changing bytes and commit with a ticket bound
+  to that baseline. A pre-existing mismatch aborts the write and remains visible. Deliberate
+  recovery after human review requires `epochs.py seal --accept-current`.
+- **`immune.py scan` exits nonzero on compromise.** CI and shell callers can no longer get
+  a success status beside a printed tamper warning.
+- **Tightened covenant floors are meaningful across the full 0–255 score range.** A floor
+  above the default requires the documented model-supplied covenant score. The constant,
+  antithesis-free fallback can no longer turn lower settings into no-ops or higher settings
+  into universal rejection.
+- **`epochs.py --root` is honored before or after the subcommand.** The subparser default no
+  longer overwrites a root supplied to the top-level parser.
+- **Removed stale membrane documentation.** The skill manual now describes the live semantic
+  covenant/outcome guard and no longer presents deleted pattern-matching machinery or absent
+  commands as runnable.
+
+### Verification
+- Added selftest **phase27** covering forward rewrites, scan exit status, dirty-epoch refusal,
+  guarded registry writes, explicit reviewed re-anchoring, both root flag positions,
+  covenant-floor semantics, and the documentation regressions.
+
 ## v3.30.03 - 2026-08-03
 
 Fixes the one CRITICAL defect from the v3.30.01 verification pass.
