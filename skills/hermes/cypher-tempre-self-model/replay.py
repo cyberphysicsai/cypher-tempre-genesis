@@ -78,14 +78,14 @@ class Replay:
     def _ledger(self):
         if self.ledger_path.exists():
             try:
-                return json.loads(self.ledger_path.read_text())
+                return json.loads(self.ledger_path.read_text(encoding="utf-8"))
             except Exception:
                 return {}
         return {}
 
     def _save_ledger(self, led):
         tmp = self.ledger_path.with_name(self.ledger_path.name + f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(led, indent=2))
+        tmp.write_text(json.dumps(led, indent=2), encoding="utf-8")
         tmp.replace(self.ledger_path)
 
     def threshold(self):

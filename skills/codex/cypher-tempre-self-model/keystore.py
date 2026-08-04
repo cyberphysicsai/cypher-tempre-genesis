@@ -177,14 +177,14 @@ def shamir_combine(share_strs: list) -> bytes:
 
 def load_vault(root) -> dict:
     p = vault_path(root)
-    return json.loads(p.read_text()) if p.exists() else {"vault": 1, "secrets": {}}
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"vault": 1, "secrets": {}}
 
 
 def save_vault(root, v):
     p = vault_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(json.dumps(v, indent=1))
+    tmp.write_text(json.dumps(v, indent=1), encoding="utf-8")
     tmp.replace(p)
 
 

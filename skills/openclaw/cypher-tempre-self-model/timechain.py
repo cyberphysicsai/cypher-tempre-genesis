@@ -36,6 +36,7 @@ import hmac
 import json
 import mimetypes
 import os
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,6 +64,36 @@ DEFAULT_COVENANT = [
 ]
 
 
+class StorageEncodingError(RuntimeError):
+    """A managed text store is not valid UTF-8 and needs explicit recovery."""
+
+
+def _encoding_error(path: Path, line_no, exc: UnicodeDecodeError) -> StorageEncodingError:
+    location = (f"physical line {line_no}, byte-in-line {exc.start}"
+                if line_no is not None else f"chain-tail byte {exc.start}")
+    return StorageEncodingError(
+        f"{path}: invalid UTF-8 at {location}; inspect without changing it: "
+        f"python3 encoding_recovery.py inspect {shlex.quote(str(path))}"
+    )
+
+
+def _utf8_physical_lines(path: Path):
+    """Yield physical ``\\n``-delimited records decoded strictly as UTF-8.
+
+    Binary iteration makes the on-disk boundary explicit and lets verification
+    report an encoding failure at the exact physical record instead of silently
+    re-decoding with the host locale and mislabeling the chain TAMPERED.
+    """
+    path = Path(path)
+    with path.open("rb") as fh:
+        for line_no, raw in enumerate(fh, 1):
+            try:
+                yield line_no, raw.decode("utf-8"), None
+            except UnicodeDecodeError as exc:
+                yield line_no, None, _encoding_error(path, line_no, exc)
+                return
+
+
 # --------------------------------------------------------------------------- #
 # Hashing primitives
 # --------------------------------------------------------------------------- #
@@ -86,17 +117,20 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def atomic_write_json(path, obj, compact=False):
+def atomic_write_json(path, obj, compact=False, sort_keys=False):
     """Write JSON via temp + rename so a crash never leaves a half-written file.
     Every DERIVED store (indexes, registries, ledgers) writes through this; the
     chain itself stays append-only and never rewrites."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    if compact:
-        tmp.write_text(json.dumps(obj, separators=(",", ":"), ensure_ascii=False))
-    else:
-        tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False))
+    text = (json.dumps(obj, separators=(",", ":"), ensure_ascii=False,
+                       sort_keys=sort_keys) if compact
+            else json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=sort_keys))
+    # newline="\\n" makes pretty JSON byte-stable on Windows too; UTF-8 is the
+    # one canonical text encoding for every managed store.
+    with tmp.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
     tmp.replace(path)
 
 
@@ -113,10 +147,10 @@ class Blockspace:
         self.blobs = self.root / "blobs"
         self.index_path = self.root / "index.json"
         self.blobs.mkdir(parents=True, exist_ok=True)
-        self.index = json.loads(self.index_path.read_text()) if self.index_path.exists() else {}
+        self.index = json.loads(self.index_path.read_text(encoding="utf-8")) if self.index_path.exists() else {}
 
     def _save_index(self):
-        self.index_path.write_text(json.dumps(self.index, indent=2, sort_keys=True))
+        atomic_write_json(self.index_path, self.index, sort_keys=True)
 
     def put_bytes(self, data: bytes, filename=None, mime=None) -> str:
         h = sha256_hex(data)
@@ -170,15 +204,16 @@ class Timechain:
         has to be materialized into a list at once."""
         if not self.rings_path.exists():
             return
-        with self.rings_path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    yield json.loads(line)
-                except Exception:
-                    continue   # tolerate a torn line; verify() reports it explicitly
+        for _, line, encoding_error in _utf8_physical_lines(self.rings_path):
+            if encoding_error is not None:
+                raise encoding_error
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except Exception:
+                continue   # tolerate a torn line; verify() reports it explicitly
 
     def load(self) -> list:
         # Eager full-chain read — fine for small chains and tests. For bulk
@@ -204,18 +239,27 @@ class Timechain:
                 f.seek(pos)
                 data = f.read(step) + data
         rings = []
-        for line in data.splitlines():
+        parts = data.split(b"\n")
+        truncated_prefix = pos > 0
+        for part_index, line in enumerate(parts):
             line = line.strip()
             if not line:
                 continue
             try:
-                rings.append(json.loads(line))
-            except Exception:
-                continue   # a torn leading fragment from mid-block read — skip it
+                text = line.decode("utf-8")
+                rings.append(json.loads(text))
+            except UnicodeDecodeError as exc:
+                if part_index == 0 and truncated_prefix:
+                    continue   # a multi-byte codepoint may straddle the tail window
+                raise _encoding_error(self.rings_path, None, exc)
+            except json.JSONDecodeError:
+                if part_index == 0 and truncated_prefix:
+                    continue   # a torn leading JSON fragment from mid-record
+                raise RuntimeError(f"{self.rings_path}: malformed JSONL record in chain tail")
         return rings[-k:]
 
     def _append(self, ring: dict):
-        with self.rings_path.open("a") as f:
+        with self.rings_path.open("a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(ring, ensure_ascii=False) + "\n")
         self._auto_attest(ring)
 
@@ -241,13 +285,23 @@ class Timechain:
                 pos -= step
                 f.seek(pos)
                 data = f.read(step) + data
-                for line in reversed(data.split(b"\n")):
+                parts = data.split(b"\n")
+                for part_index in range(len(parts) - 1, -1, -1):
+                    line = parts[part_index]
                     if not line.strip():
                         continue
                     try:
-                        return json.loads(line)
+                        text = line.decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        if part_index == 0 and pos > 0:
+                            break   # a multi-byte codepoint straddles this window
+                        raise _encoding_error(self.rings_path, None, exc)
+                    try:
+                        return json.loads(text)
                     except json.JSONDecodeError:
-                        break   # likely a torn leading fragment; read another chunk
+                        if part_index == 0 and pos > 0:
+                            break   # likely a torn leading fragment; read another chunk
+                        raise RuntimeError(f"{self.rings_path}: malformed final JSONL record")
         return None
 
     def _current_head(self):
@@ -264,9 +318,10 @@ class Timechain:
         cfg_path = self.dir / "consensus" / "config.json"
         if not cfg_path.exists():
             return
-        cfg = json.loads(cfg_path.read_text())
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
         msg = f"{ring['index']}:{ring['ring_hash']}"
-        with (self.dir / "consensus" / "attestations.jsonl").open("a") as f:
+        with (self.dir / "consensus" / "attestations.jsonl").open(
+                "a", encoding="utf-8", newline="\n") as f:
             for w in cfg["witnesses"]:
                 mac = hmac.new(bytes.fromhex(w["key"]), msg.encode(), hashlib.sha256).hexdigest()
                 f.write(json.dumps({"height": ring["index"], "ring_hash": ring["ring_hash"],
@@ -350,10 +405,17 @@ class Timechain:
         self.dir.mkdir(parents=True, exist_ok=True)
         fh = None
         try:
-            fh = open(self.dir / ".seal.lock", "a+")
+            fh = open(self.dir / ".seal.lock", "a+", encoding="utf-8")
             if _fcntl is not None:
                 _fcntl.flock(fh.fileno(), _fcntl.LOCK_EX)
             elif _msvcrt is not None:               # pragma: no cover - Windows
+                # msvcrt locks a byte range; ensure byte zero exists even on a
+                # brand-new lock file. Concurrent initializers may append more
+                # than one NUL, but every process deliberately locks byte zero.
+                fh.seek(0, os.SEEK_END)
+                if fh.tell() == 0:
+                    fh.write("\0")
+                    fh.flush()
                 fh.seek(0)
                 _msvcrt.locking(fh.fileno(), _msvcrt.LK_LOCK, 1)
         except Exception:
@@ -443,7 +505,7 @@ class Timechain:
             prev_ck = None
             p = self._ckpt_path()
             if p.exists():
-                lines = [l for l in p.read_text().splitlines() if l.strip()]
+                lines = [l for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
                 if lines:
                     prev_ck = json.loads(lines[-1])
             ck = {"index": ring["index"], "ring_hash": ring["ring_hash"],
@@ -452,7 +514,7 @@ class Timechain:
             ck["ckpt_hash"] = _h.sha256(json.dumps(
                 {k: ck[k] for k in ("index", "ring_hash", "prev_ckpt_hash")},
                 sort_keys=True).encode()).hexdigest()
-            with p.open("a") as fh:
+            with p.open("a", encoding="utf-8", newline="\n") as fh:
                 fh.write(json.dumps(ck) + "\n")
         except Exception:
             pass   # checkpointing is an accelerator, never a failure source
@@ -478,8 +540,11 @@ class Timechain:
         prev_hash = None
         prev_index = -1
         try:
-            for line_no, line in enumerate(p.read_text().splitlines(), 1):
-                if not line.strip():
+            for line_no, line, encoding_error in _utf8_physical_lines(p):
+                if encoding_error is not None:
+                    return False, [], [str(encoding_error)]
+                line = line.strip()
+                if not line:
                     continue
                 c = json.loads(line)
                 idx = c.get("index")
@@ -516,48 +581,49 @@ class Timechain:
         # walk only the tail after the checkpoint
         report, ok = [], True
         prev_ring_hash, i, count = None, 0, 0
-        with self.rings_path.open("r") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if not line:
-                    continue
-                if i < ck["index"]:
-                    i += 1
-                    continue
-                try:
-                    r = json.loads(line)
-                except Exception as exc:
-                    return False, [f"ring {i}: unreadable/torn line -> TAMPERED ({exc})"]
-                if r.get("index") != i:
-                    ok = False
-                    report.append(f"ring {i}: index mismatch (got {r.get('index')})")
-                if i == ck["index"]:
-                    if r.get("ring_hash") != ck["ring_hash"]:
-                        return False, [f"ring {i}: hash != checkpoint -> TAMPERED"]
-                    if compute_ring_hash(r) != r.get("ring_hash"):
-                        return False, [f"ring {i}: checkpointed ring_hash mismatch -> TAMPERED"]
-                else:
-                    if r.get("prev_hash") != prev_ring_hash:
-                        ok = False
-                        report.append(f"ring {i}: prev_hash broken")
-                    if compute_ring_hash(r) != r.get("ring_hash"):
-                        ok = False
-                        report.append(f"ring {i}: ring_hash mismatch -> TAMPERED")
-                diff = r.get("difficulty", 0)
-                if diff and not str(r.get("ring_hash", "")).startswith("0" * diff):
-                    ok = False
-                    report.append(f"ring {i}: does not meet stated difficulty {diff}")
-                for ref in r.get("blockspace_refs", []):
-                    h = ref.get("hash")
-                    if not self.blockspace.has(h):
-                        ok = False
-                        report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. missing ({ref.get('role')})")
-                    elif not self.blockspace.verify_blob(h):
-                        ok = False
-                        report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. corrupted ({ref.get('role')})")
-                prev_ring_hash = r.get("ring_hash")
+        for _, raw, encoding_error in _utf8_physical_lines(self.rings_path):
+            if encoding_error is not None:
+                return False, [str(encoding_error)]
+            line = raw.strip()
+            if not line:
+                continue
+            if i < ck["index"]:
                 i += 1
-                count += 1
+                continue
+            try:
+                r = json.loads(line)
+            except Exception as exc:
+                return False, [f"ring {i}: unreadable/torn line -> TAMPERED ({exc})"]
+            if r.get("index") != i:
+                ok = False
+                report.append(f"ring {i}: index mismatch (got {r.get('index')})")
+            if i == ck["index"]:
+                if r.get("ring_hash") != ck["ring_hash"]:
+                    return False, [f"ring {i}: hash != checkpoint -> TAMPERED"]
+                if compute_ring_hash(r) != r.get("ring_hash"):
+                    return False, [f"ring {i}: checkpointed ring_hash mismatch -> TAMPERED"]
+            else:
+                if r.get("prev_hash") != prev_ring_hash:
+                    ok = False
+                    report.append(f"ring {i}: prev_hash broken")
+                if compute_ring_hash(r) != r.get("ring_hash"):
+                    ok = False
+                    report.append(f"ring {i}: ring_hash mismatch -> TAMPERED")
+            diff = r.get("difficulty", 0)
+            if diff and not str(r.get("ring_hash", "")).startswith("0" * diff):
+                ok = False
+                report.append(f"ring {i}: does not meet stated difficulty {diff}")
+            for ref in r.get("blockspace_refs", []):
+                h = ref.get("hash")
+                if not self.blockspace.has(h):
+                    ok = False
+                    report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. missing ({ref.get('role')})")
+                elif not self.blockspace.verify_blob(h):
+                    ok = False
+                    report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. corrupted ({ref.get('role')})")
+            prev_ring_hash = r.get("ring_hash")
+            i += 1
+            count += 1
         if count == 0:
             return False, [f"checkpoint {ck['index']}: pinned ring is missing from the chain -> TAMPERED"]
         if ok:
@@ -585,50 +651,51 @@ class Timechain:
         prev_hash = GENESIS_PREV
         i = 0
         count = 0
-        with self.rings_path.open("r") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    ring = json.loads(line)
-                except Exception as exc:
-                    ok = False
-                    report.append(f"ring {i}: unreadable/torn line -> TAMPERED ({exc})")
-                    i += 1
-                    continue
-                if ring.get("index") != i:
-                    ok = False
-                    report.append(f"ring {i}: index mismatch (got {ring.get('index')})")
-                if ring.get("prev_hash") != prev_hash:
-                    ok = False
-                    report.append(f"ring {i}: prev_hash broken (expected {prev_hash[:12]}..)")
-                recomputed = compute_ring_hash(ring)
-                if recomputed != ring.get("ring_hash"):
-                    ok = False
-                    report.append(f"ring {i}: ring_hash mismatch -> TAMPERED "
-                                   f"(stored {str(ring.get('ring_hash'))[:12]}.., recomputed {recomputed[:12]}..)")
-                checkpoint = checkpoint_by_index.get(i)
-                if checkpoint is not None:
-                    seen_checkpoints.add(i)
-                    if ring.get("ring_hash") != checkpoint.get("ring_hash"):
-                        ok = False
-                        report.append(f"ring {i}: hash != checkpoint -> FORWARD REWRITE/TAMPERED")
-                diff = ring.get("difficulty", 0)
-                if diff and not str(ring.get("ring_hash", "")).startswith("0" * diff):
-                    ok = False
-                    report.append(f"ring {i}: does not meet stated difficulty {diff}")
-                for ref in ring.get("blockspace_refs", []):
-                    h = ref.get("hash")
-                    if not self.blockspace.has(h):
-                        ok = False
-                        report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. missing ({ref.get('role')})")
-                    elif not self.blockspace.verify_blob(h):
-                        ok = False
-                        report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. corrupted ({ref.get('role')})")
-                prev_hash = ring.get("ring_hash")
+        for _, raw, encoding_error in _utf8_physical_lines(self.rings_path):
+            if encoding_error is not None:
+                return False, report + [str(encoding_error)]
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                ring = json.loads(line)
+            except Exception as exc:
+                ok = False
+                report.append(f"ring {i}: unreadable/torn line -> TAMPERED ({exc})")
                 i += 1
-                count += 1
+                continue
+            if ring.get("index") != i:
+                ok = False
+                report.append(f"ring {i}: index mismatch (got {ring.get('index')})")
+            if ring.get("prev_hash") != prev_hash:
+                ok = False
+                report.append(f"ring {i}: prev_hash broken (expected {prev_hash[:12]}..)")
+            recomputed = compute_ring_hash(ring)
+            if recomputed != ring.get("ring_hash"):
+                ok = False
+                report.append(f"ring {i}: ring_hash mismatch -> TAMPERED "
+                              f"(stored {str(ring.get('ring_hash'))[:12]}.., recomputed {recomputed[:12]}..)")
+            checkpoint = checkpoint_by_index.get(i)
+            if checkpoint is not None:
+                seen_checkpoints.add(i)
+                if ring.get("ring_hash") != checkpoint.get("ring_hash"):
+                    ok = False
+                    report.append(f"ring {i}: hash != checkpoint -> FORWARD REWRITE/TAMPERED")
+            diff = ring.get("difficulty", 0)
+            if diff and not str(ring.get("ring_hash", "")).startswith("0" * diff):
+                ok = False
+                report.append(f"ring {i}: does not meet stated difficulty {diff}")
+            for ref in ring.get("blockspace_refs", []):
+                h = ref.get("hash")
+                if not self.blockspace.has(h):
+                    ok = False
+                    report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. missing ({ref.get('role')})")
+                elif not self.blockspace.verify_blob(h):
+                    ok = False
+                    report.append(f"ring {i}: blockspace blob {str(h)[:12]}.. corrupted ({ref.get('role')})")
+            prev_hash = ring.get("ring_hash")
+            i += 1
+            count += 1
         missing_checkpoints = sorted(set(checkpoint_by_index) - seen_checkpoints)
         for idx in missing_checkpoints:
             ok = False

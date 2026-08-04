@@ -32,13 +32,15 @@ MODULES = ["timechain", "poq", "recall", "cambium", "immune", "continuum",
            "modality_ops", "faculties", "guard", "task", "policy", "bench",
            "consensus", "embed", "almanac", "operators", "audit", "router",
            "conjecture", "autobiography", "watchdog", "calibrators",
-           "recall_core", "recall_query", "recall_evidence", "recall_cli"]
+           "recall_core", "recall_query", "recall_evidence", "recall_cli",
+           "encoding_recovery"]
 
 CLI = ["timechain", "poq", "recall", "cambium", "immune", "continuum",
        "chronosynaptic", "telemetry", "dormancy", "replay", "dream",
        "learner", "lens", "extractor", "hippocampus", "epochs", "doctor",
        "guard", "task", "bench", "almanac", "audit", "router",
-       "conjecture", "autobiography", "watchdog", "calibrators"]
+       "conjecture", "autobiography", "watchdog", "calibrators",
+       "encoding_recovery"]
 
 PASS, FAIL = [], []
 

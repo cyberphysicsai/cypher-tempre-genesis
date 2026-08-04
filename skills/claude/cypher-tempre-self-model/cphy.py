@@ -111,7 +111,7 @@ def append_event(root, kind: str, data: dict) -> dict:
     ev["event_hash"] = event_hash(ev)
     p = ledger_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
+    with p.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
     write_derived(root)
     return ev
@@ -431,7 +431,7 @@ def apply_stakes(root, registry_root=None):
     current = {}
     if p.exists():
         try:
-            current = json.loads(p.read_text())
+            current = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             current = {}
     floors = current.get("floors") or {}
@@ -447,7 +447,7 @@ def apply_stakes(root, registry_root=None):
         current["floors"] = floors
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".cphy.tmp")
-    tmp.write_text(json.dumps(current, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
     return values
 
@@ -507,7 +507,7 @@ def fund(root, work, amount, every, memo="") -> dict:
     # at the first tick — a fund pays down debt, it doesn't reset the clock.
     if work == "dream":
         try:
-            am = json.loads((Path(root) / "chain" / "automaint.json").read_text())
+            am = json.loads((Path(root) / "chain" / "automaint.json").read_text(encoding="utf-8"))
             head = min(head, int(am.get("last_dream_head", head)))
         except Exception:
             pass
@@ -595,7 +595,7 @@ def export_pack(root, out_path, frm=None, to=None, match=None,
             "source_head": len(by_idx) - 1,
             "rings": rings}
     pack["pack_hash"] = sha256_hex(canonical(pack))
-    Path(out_path).write_text(json.dumps(pack, ensure_ascii=False, indent=1))
+    Path(out_path).write_text(json.dumps(pack, ensure_ascii=False, indent=1), encoding="utf-8")
     append_event(root, "export", {"pack_hash": pack["pack_hash"][:16],
                                   "rings": len(rings), "price": price,
                                   "expires": expires or "", "to": to_agent})
@@ -604,7 +604,7 @@ def export_pack(root, out_path, frm=None, to=None, match=None,
 
 
 def import_pack(root, pack_path) -> dict:
-    pack = json.loads(Path(pack_path).read_text())
+    pack = json.loads(Path(pack_path).read_text(encoding="utf-8"))
     claimed = pack.pop("pack_hash", "")
     if sha256_hex(canonical(pack)) != claimed:
         raise RuntimeError("pack hash mismatch — tampered or torn in transit")
@@ -764,7 +764,7 @@ def onchain_cfg_path(root) -> Path:
 def load_onchain_cfg(root) -> dict:
     p = onchain_cfg_path(root)
     if p.exists():
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     return {"token": None, "chain": "base", "rpc": DEFAULT_RPC,
             "density_per_token": 1.0, "targets": {}}
 
@@ -1148,7 +1148,7 @@ def pending_path(root) -> Path:
 
 def load_pending(root) -> list:
     p = pending_path(root)
-    return json.loads(p.read_text()) if p.exists() else []
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
 
 
 def save_pending(root, items):
@@ -1306,7 +1306,7 @@ def cmd_import_pack(args):
 def cmd_anchor(args):
     meta = None
     if args.verified_json:
-        meta = json.loads(Path(args.verified_json).read_text())
+        meta = json.loads(Path(args.verified_json).read_text(encoding="utf-8"))
     print(json.dumps(anchor(args.root, args.address, args.chain, meta), indent=2))
 
 
@@ -1554,7 +1554,7 @@ def cmd_selftest(args):
            and u["floors_now"].get("brightness_target", 150) >= 150)
         unstake(root, s1["stake_id"], registry_root=root)
         polp = root / "registry" / "policy.json"
-        floors_txt = json.loads(polp.read_text()).get("floors") if polp.exists() else None
+        floors_txt = json.loads(polp.read_text(encoding="utf-8")).get("floors") if polp.exists() else None
         ok("all stakes released -> managed floors removed from policy",
            not floors_txt or "brightness_target" not in floors_txt)
         s3 = stake(root, "entity_grounding_enforce", 8.0, registry_root=root)
@@ -1595,12 +1595,12 @@ def cmd_selftest(args):
             st2b = compile_state(read_ledger(root2))
             ok("import price burned from importer's earned supply",
                abs(st2b["burned"] - 0.5) < 1e-9)
-            expired = json.loads(pack_p.read_text())
+            expired = json.loads(pack_p.read_text(encoding="utf-8"))
             expired.pop("pack_hash")
             expired["expires"] = "2000-01-01T00:00:00+00:00"
             expired["pack_hash"] = sha256_hex(canonical(expired))
             exp_p = root / "expired.json"
-            exp_p.write_text(json.dumps(expired))
+            exp_p.write_text(json.dumps(expired), encoding="utf-8")
             try:
                 import_pack(root2, exp_p)
                 ok("expired grant refused at import (OP5 TTL)", False)
@@ -1676,7 +1676,7 @@ def cmd_selftest(args):
             if not bp.exists():
                 bp.write_text(json.dumps({"registry": base.split(".")[0],
                                           "version": 1, "categories": {},
-                                          base.split(".")[0]: []}))
+                                          base.split(".")[0]: []}), encoding="utf-8")
         home = _cb.registry_home(root)
         ok("selftest registry is hermetic (temp home, not the agent's)",
            Path(home).resolve() == root.resolve())
@@ -1818,17 +1818,17 @@ def cmd_selftest(args):
         ok("derived state rebuild is deterministic (I4)", st1 == st2)
 
         p = ledger_path(root)
-        lines = p.read_text().splitlines()
+        lines = p.read_text(encoding="utf-8").splitlines()
         tampered = json.loads(lines[1])
         tampered["amount"] = 9999
         lines[1] = json.dumps(tampered)
-        p.write_text("\n".join(lines) + "\n")
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
         ok("tampered ledger detected", not verify_ledger(read_ledger(root))[0])
 
     here = Path(__file__).resolve().parent
     live_grown = here / "registry" / "grown.json"
     if live_grown.exists():
-        lg = json.loads(live_grown.read_text())
+        lg = json.loads(live_grown.read_text(encoding="utf-8"))
         ok("no selftest pollution leaked into the LIVE registry",
            not any(f.get("id") == 9001 or f.get("origin") == "selftest"
                    for k in ("senses", "modalities") for f in lg.get(k, [])))
@@ -1840,7 +1840,7 @@ def cmd_selftest(args):
     # (import recall_overlay) so upstream syncs can't sever the economy;
     # the WeightMap wiring lives in local-only recall_overlay.py.
     overlay_p = Path(__file__).resolve().parent / "recall_overlay.py"
-    overlay_src = overlay_p.read_text() if overlay_p.exists() else ""
+    overlay_src = overlay_p.read_text(encoding="utf-8") if overlay_p.exists() else ""
     ok("recall.py consumes the overlay",
        ("recall_overlay" in recall_src and "WeightMap" in overlay_src)
        or "WeightMap" in recall_src)

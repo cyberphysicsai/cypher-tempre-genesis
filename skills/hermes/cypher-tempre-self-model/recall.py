@@ -93,7 +93,7 @@ def _git_dir(path):
             if g.is_dir():
                 return g, d
             if g.is_file():
-                line = g.read_text(errors="ignore").strip()
+                line = g.read_text(errors="ignore", encoding="utf-8").strip()
                 if line.startswith("gitdir:"):
                     gd = (d / line.split(":", 1)[1].strip()).resolve()
                     return (gd if gd.exists() else None), d
@@ -106,13 +106,13 @@ def _read_ref(git_dir, ref):
     try:
         loose = git_dir / ref
         if loose.is_file():
-            return loose.read_text(errors="ignore").strip() or None
+            return loose.read_text(errors="ignore", encoding="utf-8").strip() or None
     except Exception:
         pass
     try:
         packed = git_dir / "packed-refs"
         if packed.is_file():
-            for line in packed.read_text(errors="ignore").splitlines():
+            for line in packed.read_text(errors="ignore", encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line or line[0] in "#^":
                     continue
@@ -127,7 +127,7 @@ def _read_ref(git_dir, ref):
 def _git_remote(git_dir):
     try:
         section = None
-        for raw in (git_dir / "config").read_text(errors="ignore").splitlines():
+        for raw in (git_dir / "config").read_text(errors="ignore", encoding="utf-8").splitlines():
             s = raw.strip()
             if s.startswith("[") and s.endswith("]"):
                 section = s[1:-1].strip().lower()
@@ -149,7 +149,7 @@ def _git_info(path):
             return info
         info["git_root"] = str(root) if root else None
         info["git_remote"] = _git_remote(git_dir)
-        head = (git_dir / "HEAD").read_text(errors="ignore").strip()
+        head = (git_dir / "HEAD").read_text(errors="ignore", encoding="utf-8").strip()
         if head.startswith("ref:"):
             ref = head.split(":", 1)[1].strip()
             info["git_branch"] = ref.rsplit("/", 1)[-1]
@@ -1755,7 +1755,7 @@ class Recall:
             self._emit("falsify", {"ring_index": ring_index, "verdict": "missing-source-file"})
             return result
 
-        text = file_path.read_text(errors="replace")
+        text = file_path.read_text(errors="replace", encoding="utf-8")
         file_hash = sha256_text(text)
         result["current"]["file_content_hash"] = file_hash
         result["file_hash_match"] = bool(data.get("file_content_hash") and data.get("file_content_hash") == file_hash)

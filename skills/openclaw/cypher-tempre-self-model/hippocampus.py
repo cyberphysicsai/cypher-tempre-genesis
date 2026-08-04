@@ -170,10 +170,10 @@ class Hippocampus:
     def _load(self):
         if self._loaded:
             return
-        self._meta = json.loads(self.meta_path.read_text()) if self.meta_path.exists() else {}
-        self._postings = json.loads(self.postings_path.read_text()) if self.postings_path.exists() else {}
-        self._offsets = json.loads(self.offsets_path.read_text()) if self.offsets_path.exists() else {}
-        self._lsh = json.loads(self.lsh_path.read_text()) if self.lsh_path.exists() else {}
+        self._meta = json.loads(self.meta_path.read_text(encoding="utf-8")) if self.meta_path.exists() else {}
+        self._postings = json.loads(self.postings_path.read_text(encoding="utf-8")) if self.postings_path.exists() else {}
+        self._offsets = json.loads(self.offsets_path.read_text(encoding="utf-8")) if self.offsets_path.exists() else {}
+        self._lsh = json.loads(self.lsh_path.read_text(encoding="utf-8")) if self.lsh_path.exists() else {}
         self._loaded = True
 
     def _save(self):

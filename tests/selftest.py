@@ -1975,6 +1975,12 @@ def main():
               'python3 immune.py auto-quarantine' not in _skill_text27
               and 'python3 tests/jailbreak_corpus.py' not in _skill_text27)
 
+        _utf28 = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("test_utf8_io.py"))],
+            capture_output=True, text=True, timeout=120)
+        check("phase28 UTF-8: persistence/recovery regression suite passes",
+              _utf28.returncode == 0)
+
         check("timechain: final verify", tc.verify()[0])
 
         # phase24 — CPHY economic layer + custody/PQ organs run their own

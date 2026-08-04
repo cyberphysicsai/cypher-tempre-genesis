@@ -149,8 +149,8 @@ def load_active(registry_root=None):
     if not active.exists():
         return None
     try:
-        version = active.read_text().strip()
-        head = ProjectionHead.from_json(json.loads((d / f"{version}.json").read_text()))
+        version = active.read_text(encoding="utf-8").strip()
+        head = ProjectionHead.from_json(json.loads((d / f"{version}.json").read_text(encoding="utf-8")))
         base = embmod.get_embedder("hashing")
         if not embmod.compatible(head.base_fingerprint, base.fingerprint):
             return None
@@ -331,8 +331,8 @@ def adopt_lens(root, report, registry_root=None):
     d = lens_dir(registry_root)
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{version}.json"
-    path.write_text(json.dumps(head.to_json(), separators=(",", ":")))
-    (d / "ACTIVE").write_text(version + "\n")
+    path.write_text(json.dumps(head.to_json(), separators=(",", ":")), encoding="utf-8")
+    (d / "ACTIVE").write_text(version + "\n", encoding="utf-8")
     ring = seal_adopt(
         tc, "lens",
         (f"Operator adopted: representation lens {version} "
@@ -366,7 +366,7 @@ def rollback_lens(root, registry_root=None):
                 if ref.get("role", "").startswith(version):
                     d.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(tc.blockspace.get(ref["hash"]))
-        (d / "ACTIVE").write_text(version + "\n")
+        (d / "ACTIVE").write_text(version + "\n", encoding="utf-8")
         target = version
     else:
         active = d / "ACTIVE"

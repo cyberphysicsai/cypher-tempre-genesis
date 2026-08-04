@@ -226,7 +226,7 @@ def cmd_probes(args):
 
 def cmd_run(args):
     if args.pairs_file:
-        probes = json.loads(Path(args.pairs_file).read_text())
+        probes = json.loads(Path(args.pairs_file).read_text(encoding="utf-8"))
         for p in probes:
             p.setdefault("kind", "gold")
     else:

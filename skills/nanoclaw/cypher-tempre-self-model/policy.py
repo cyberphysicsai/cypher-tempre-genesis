@@ -128,7 +128,7 @@ def load_policy(registry_root=None):
     user = {}
     if p.exists():
         try:
-            user = json.loads(p.read_text())
+            user = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             user = {}
     policy = _deep_merge(DEFAULT_POLICY, user)
@@ -150,7 +150,7 @@ def save_policy(policy, registry_root=None):
         vals[floor] = max(DEFAULT_POLICY["values"][floor], int(vals.get(floor, 0) or 0))
     out["values"] = vals
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(out, indent=2, ensure_ascii=False))
+    p.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     return p
 
 
@@ -161,14 +161,14 @@ def write_calibration(section, payload, registry_root=None):
     current = {}
     if p.exists():
         try:
-            current = json.loads(p.read_text())
+            current = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             current = {}
     current.setdefault(section, {})["calibrated"] = payload
     current["policy_version"] = POLICY_VERSION
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(current, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
     return payload
 

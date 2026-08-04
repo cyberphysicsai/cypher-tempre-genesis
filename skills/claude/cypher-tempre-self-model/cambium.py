@@ -121,7 +121,7 @@ def load_grown(root: Path) -> dict:
     p = root / "registry" / "grown.json"
     if p.exists():
         try:
-            data = json.loads(p.read_text())
+            data = json.loads(p.read_text(encoding="utf-8"))
             data.setdefault("modalities", [])
             data.setdefault("senses", [])
             return data
@@ -147,7 +147,7 @@ def migrate_legacy_promotions(root: Path) -> bool:
         if not p.exists():
             continue
         try:
-            data = json.loads(p.read_text())
+            data = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             continue
         entries = data.get(key, [])
@@ -178,7 +178,7 @@ def load_corpus(root: Path, include_dormant: bool = False):
     corpus = []
     for kind, fname, key in [("modality", "registry/modalities.json", "modalities"),
                              ("sense", "registry/senses.json", "senses")]:
-        data = json.loads((root / fname).read_text())
+        data = json.loads((root / fname).read_text(encoding="utf-8"))
         for f in list(data.get(key, [])) + list(grown.get(key, [])):   # base + per-user promotions
             if not include_dormant and f.get("status") == "dormant":
                 continue        # hibernated: out of the working set, retrievable on relevance
@@ -333,7 +333,7 @@ def propose(gap: dict, input_text: str, mode: str = "auto", kind_override=None) 
 def load_emergent(root: Path) -> dict:
     p = root / "registry" / "emergent.json"
     if p.exists():
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     return {"registry": "emergent", "faculties": []}
 
 
@@ -450,7 +450,7 @@ def activate(root: Path, selector: str, registry_root=None, difficulty: int = 0)
     if not fac:
         return {"ok": False, "reason": f"no emergent proposal matched {selector!r}"}, None
     key = "modalities" if fac["kind"] == "modality" else "senses"
-    base = json.loads((home / "registry" / f"{key}.json").read_text()).get(key, [])
+    base = json.loads((home / "registry" / f"{key}.json").read_text(encoding="utf-8")).get(key, [])
     grown = load_grown(home)
     existing_ids = [it["id"] for it in base] + [it["id"] for it in grown.get(key, [])]
     new_id = (max(existing_ids) if existing_ids else 0) + 1
@@ -482,7 +482,7 @@ def promote(root: Path, tc: Timechain, e: dict, difficulty: int = 0,
             op_spec_override=None, activation_text: str = "",
             activation_context: str = "") -> dict:
     key = "modalities" if e["kind"] == "modality" else "senses"
-    base = json.loads((root / "registry" / f"{key}.json").read_text()).get(key, [])
+    base = json.loads((root / "registry" / f"{key}.json").read_text(encoding="utf-8")).get(key, [])
     grown = load_grown(root)
     # Soft cap: the only backstop against pathological unbounded growth (0 = unlimited).
     if MAX_GROWN and len(grown.get(key, [])) >= MAX_GROWN:
@@ -939,7 +939,7 @@ def cmd_grow(args):
 
 
 def cmd_propose_op(args):
-    code = Path(args.code_file).read_text() if args.code_file else (args.code or "")
+    code = Path(args.code_file).read_text(encoding="utf-8") if args.code_file else (args.code or "")
     if not str(code).strip():
         print("  -> provide --code-file or --code (the op body to propose)")
         return
@@ -1075,7 +1075,7 @@ def prune(root: Path, registry_root=None, min_fires: int = 2,
     fire, birth = {}, {}
     head = -1
     if tc.rings_path.exists():
-        with tc.rings_path.open() as fh:
+        with tc.rings_path.open(encoding="utf-8") as fh:
             for line in fh:
                 try:
                     r = json.loads(line)

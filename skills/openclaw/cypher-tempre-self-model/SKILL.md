@@ -271,6 +271,35 @@ This is a **persistent memory system**, so be deliberate about what enters it:
   may include memory chunks or source excerpts — to that third party. Keep the local embedder
   unless the user has accepted that transmission.
 
+## Canonical UTF-8 storage and explicit legacy recovery (v3.30.05)
+
+Every managed or derived text store is UTF-8 on every platform. JSONL appenders also
+emit physical LF delimiters, so the bytes hashed or later verified never depend on the
+Windows codepage or host newline convention. A non-UTF-8 chain fails closed with an
+encoding-specific diagnostic; it is never silently re-decoded and mislabeled as hash
+tampering.
+
+Legacy locale-encoded stores are recoverable only through an explicit, two-phase tool:
+
+```bash
+python3 encoding_recovery.py inspect <exact-file>            # read-only
+python3 encoding_recovery.py scan --root <skill-or-chain>     # read-only
+python3 encoding_recovery.py recover <exact-file> --confirm   # backup + validate + convert
+# Review the converted registry and byte-exact backup, then deliberately re-anchor:
+python3 encoding_recovery.py reanchor --root <skill-or-chain> \
+  --confirm-reviewed --reason "reviewed cp1252-to-UTF-8 recovery"
+```
+
+Root scans cover active stores and deliberately skip inactive `quarantine/`
+forensic artifacts. Inspect an exact quarantined path when those bytes need review.
+
+`recover` refuses an already-valid UTF-8 file, a symlink, malformed semantic JSON/JSONL,
+or a `rings.jsonl` whose logical ring hashes do not verify. It creates and verifies a
+byte-exact sibling backup *before* decoding or semantic validation, atomically replaces
+only the named file, and never seals or re-anchors anything. The separate `reanchor`
+command requires the human-review confirmation and refuses while any active JSON/JSONL
+store under the chosen root remains non-UTF-8 or semantically invalid.
+
 ## Growth (Cambium) — when you hit your limits
 
 When an input reveals a gap your existing faculties cannot cover (cognitive
@@ -1077,6 +1106,7 @@ python3 immune.py forget-scar --id scar1                # retire a scar record (
 | `extractor.py` | the extractor learner — distilled labeler, confidence routing, teach pairs, falling annotation cost |
 | `dream.py` | consolidation — the offline cadence: verify, mine, train, adopt-or-refuse, seal |
 | `dormancy.py` | rest — manually pause/resume the loop for simple tasks (the chain stays intact) |
+| `encoding_recovery.py` | storage recovery — read-only UTF-8 inspection plus confirmation-gated cp1252 conversion and reviewed registry re-anchoring |
 | `enforce.py` | adherence spine — the brain behind the hooks; makes the per-turn loop non-bypassable (fail-open, dormancy-aware, bounded) |
 | `*_hook.sh` | Claude Code hooks — SessionStart / UserPromptSubmit / Stop / SubagentStop wrappers that wire enforcement into the harness |
 | `agents/cypher-tempre-agent.md` | a subagent definition that wears the skill (runs the loop, seals before returning) |
@@ -1112,6 +1142,7 @@ lens.py            train [--adopt] | status | rollback | sim        (representat
 extractor.py       label | teach | train [--adopt] | rollback | status  (distilled labeler; routing rate falls)
 dream.py           run [--no-train] [--no-seal] | status            (the consolidation cadence; trains all learners)
 dormancy.py        pause | resume | status                       (rest the loop for simple tasks; chain stays intact)
+encoding_recovery.py  inspect | scan | recover | reanchor        (explicit legacy text-store recovery)
 ```
 
 Common flags: `--context "<…>"`, `--root <path>`, `--difficulty N` (proof-of-work

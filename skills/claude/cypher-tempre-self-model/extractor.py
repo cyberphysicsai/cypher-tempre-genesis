@@ -102,7 +102,7 @@ def load_labeler(registry_root=None):
     if not p.exists():
         return None
     try:
-        lb = json.loads(p.read_text())
+        lb = json.loads(p.read_text(encoding="utf-8"))
         return lb if lb.get("status") == "active" and lb.get("labels") else None
     except Exception:
         return None
@@ -293,7 +293,7 @@ def adopt_labeler(root, report, registry_root=None):
     }
     p = labeler_path(registry_root)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(labeler, indent=2))
+    p.write_text(json.dumps(labeler, indent=2), encoding="utf-8")
     ring = seal_adopt(
         tc, "labeler",
         (f"Operator adopted: distilled labeler {version} ({report['faculty_heads']} "

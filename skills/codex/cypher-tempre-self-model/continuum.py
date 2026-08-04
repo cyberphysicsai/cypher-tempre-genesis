@@ -162,7 +162,7 @@ def _git_dir(path):
             if g.is_dir():
                 return g, d
             if g.is_file():
-                line = g.read_text(errors="ignore").strip()
+                line = g.read_text(errors="ignore", encoding="utf-8").strip()
                 if line.startswith("gitdir:"):
                     gd = (d / line.split(":", 1)[1].strip()).resolve()
                     return (gd if gd.exists() else None), d
@@ -175,13 +175,13 @@ def _read_ref(git_dir, ref):
     try:
         loose = git_dir / ref
         if loose.is_file():
-            return loose.read_text(errors="ignore").strip() or None
+            return loose.read_text(errors="ignore", encoding="utf-8").strip() or None
     except Exception:
         pass
     try:
         packed = git_dir / "packed-refs"
         if packed.is_file():
-            for line in packed.read_text(errors="ignore").splitlines():
+            for line in packed.read_text(errors="ignore", encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line or line[0] in "#^":
                     continue
@@ -196,7 +196,7 @@ def _read_ref(git_dir, ref):
 def _git_remote(git_dir):
     try:
         section = None
-        for raw in (git_dir / "config").read_text(errors="ignore").splitlines():
+        for raw in (git_dir / "config").read_text(errors="ignore", encoding="utf-8").splitlines():
             s = raw.strip()
             if s.startswith("[") and s.endswith("]"):
                 section = s[1:-1].strip().lower()
@@ -218,7 +218,7 @@ def _git_info(path):
             return info
         info["git_root"] = str(root) if root else None
         info["git_remote"] = _git_remote(git_dir)
-        head = (git_dir / "HEAD").read_text(errors="ignore").strip()
+        head = (git_dir / "HEAD").read_text(errors="ignore", encoding="utf-8").strip()
         if head.startswith("ref:"):
             ref = head.split(":", 1)[1].strip()
             info["git_branch"] = ref.rsplit("/", 1)[-1]
@@ -518,7 +518,7 @@ class Continuum:
         # (The earlier pre-buffer of every file's text could OOM on large trees.)
         for file_index, f in enumerate(files, start=1):
             try:
-                text = f.read_text(errors="replace")
+                text = f.read_text(errors="replace", encoding="utf-8")
             except Exception:
                 continue                 # unreadable/special file — skip, don't abort the walk
             rel = f.relative_to(path).as_posix()
@@ -571,7 +571,7 @@ def cmd_open(args):
 
 
 def cmd_ingest(args):
-    source = Path(args.file).read_text(errors="replace") if args.file else args.text
+    source = Path(args.file).read_text(errors="replace", encoding="utf-8") if args.file else args.text
     content, redaction_count = redact_secrets(source) if not args.no_redact else (source, 0)
     metadata = {
         "relative_path": args.name,

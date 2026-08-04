@@ -488,7 +488,7 @@ def load_grown_ops(registry_root):
     try:
         p = _grown_ops_path(registry_root)
         if p.is_file():
-            for name, spec in (json.loads(p.read_text()).get("ops") or {}).items():
+            for name, spec in (json.loads(p.read_text(encoding="utf-8")).get("ops") or {}).items():
                 op = build_op(spec)
                 if op is not None:
                     out[name] = op
@@ -511,11 +511,11 @@ def register_grown_op(registry_root, name, spec):
         ticket = epochs.begin_mutation(Path(registry_root))
         p = _grown_ops_path(registry_root)
         p.parent.mkdir(parents=True, exist_ok=True)
-        data = json.loads(p.read_text()) if p.is_file() else {}
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
         if "ops" not in data or not isinstance(data.get("ops"), dict):
             data = {"registry": "grown_ops", "ops": {}}
         data["ops"][name] = spec
-        p.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         epochs.commit_mutation(Path(registry_root), ticket,
                                reason=f"grown op registration: {name[:80]}")
         return True

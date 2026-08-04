@@ -177,11 +177,11 @@ def _verify_full(root_hex: str, md: bytes, sig: dict) -> bool:
 # --------------------------------------------------------------------------- #
 
 def _load(p):
-    return json.loads(Path(p).read_text())
+    return json.loads(Path(p).read_text(encoding="utf-8"))
 
 
 def _save(p, d):
-    Path(p).write_text(json.dumps(d, indent=1))
+    Path(p).write_text(json.dumps(d, indent=1), encoding="utf-8")
 
 
 def cmd_keygen(a):

@@ -551,13 +551,13 @@ def _auto_maintenance(root):
         st = {}
         if state_p.exists():
             try:
-                st = json.loads(state_p.read_text())
+                st = json.loads(state_p.read_text(encoding="utf-8"))
             except Exception:
                 st = {}
         head = 0
         rings_p = root / "chain" / "rings.jsonl"
         if rings_p.exists():
-            with rings_p.open() as fh:
+            with rings_p.open(encoding="utf-8") as fh:
                 head = sum(1 for _ in fh) - 1
         did = []
         # 1. hippocampus: rebuild when > 50 rings behind
@@ -565,7 +565,7 @@ def _auto_maintenance(root):
             meta_p = root / "chain" / "hippocampus" / "meta.json"
             ih = -1
             if meta_p.exists():
-                m = json.loads(meta_p.read_text())
+                m = json.loads(meta_p.read_text(encoding="utf-8"))
                 ih = m.get("head_index", -1)
             if head - ih > 50:
                 # In-process rebuild (no interpreter spawn); output is discarded
@@ -603,7 +603,7 @@ def _auto_maintenance(root):
         except Exception:
             pass
         if did:
-            state_p.write_text(json.dumps(st))
+            state_p.write_text(json.dumps(st), encoding="utf-8")
             try:
                 telem.record(str(root), "auto_maintenance", {"ran": did, "head": head})
             except Exception:

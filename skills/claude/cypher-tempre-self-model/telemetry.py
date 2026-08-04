@@ -130,7 +130,7 @@ class Telemetry:
             "data": data or {},
         }
         try:
-            with self.path.open("a") as f:
+            with self.path.open("a", encoding="utf-8", newline="\n") as f:
                 f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
         except OSError:
             return None
@@ -268,7 +268,7 @@ class Telemetry:
     def _state(self):
         if self.state_path.exists():
             try:
-                return json.loads(self.state_path.read_text())
+                return json.loads(self.state_path.read_text(encoding="utf-8"))
             except Exception:
                 return {}
         return {}
@@ -309,7 +309,7 @@ class Telemetry:
             try:
                 self.state_path.write_text(json.dumps(
                     {"digested_to": size, "ring_index": ring["index"],
-                     "segment_sha256": seg_hash}))
+                     "segment_sha256": seg_hash}), encoding="utf-8")
             except OSError:
                 pass                              # state is derived; digests may overlap
             result.update({"sealed": True, "ring_index": ring["index"],

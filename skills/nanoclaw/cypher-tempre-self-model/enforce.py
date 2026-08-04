@@ -71,7 +71,7 @@ def _state_path(root):
 
 def _load_state(root):
     try:
-        return json.loads(_state_path(root).read_text())
+        return json.loads(_state_path(root).read_text(encoding="utf-8"))
     except Exception:
         return {}
 
@@ -80,7 +80,7 @@ def _save_state(root, st):
     try:
         p = _state_path(root)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(st))
+        p.write_text(json.dumps(st), encoding="utf-8")
     except Exception:
         pass  # fail-open: never break a turn over bookkeeping
 
@@ -119,7 +119,7 @@ def _active_audit_root(root):
     try:
         ptr = Path(root) / "chain" / ".active_audit"
         if ptr.is_file():
-            return (json.loads(ptr.read_text()) or {}).get("root")
+            return (json.loads(ptr.read_text(encoding="utf-8")) or {}).get("root")
     except Exception:
         pass
     return None

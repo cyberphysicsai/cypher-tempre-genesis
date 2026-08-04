@@ -21,7 +21,11 @@ several patch releases. The zips are built **once** and used for **both**.
 3. **Sync the live installs** you maintain (code only — never touch their `chain/`):
    `~/.claude/skills/...`, `~/.codex/skills/...`, `~/.openclaw/workspace/skills/...`.
 
-4. **Run the test suite** — `python3 tests/selftest.py` from the repo root must print `PASS` (it tests the canonical `claude` bundle; engine code is identical across the five). The suite is NOT shipped in the bundles.
+4. **Run the test suites** — `python3 tests/selftest.py`,
+   `python3 tests/test_smoke.py`, `python3 tests/test_gate_discrimination.py`, and
+   `python3 tests/test_utf8_io.py` from the repo root must all pass (they test the
+   canonical `claude` bundle; engine code is identical across the five). The suites are
+   NOT shipped in the bundles.
 
 5. **SkillSpector all five** — run `bash tools/scan.sh` (scans each **bundle** — the
    canonical target, i.e. exactly what installs). Each must report **SAFE** (only the

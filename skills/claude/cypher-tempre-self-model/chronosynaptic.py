@@ -193,7 +193,7 @@ def normalize_perspective_note(note, index):
 def load_notes_file(path):
     if str(path) == "-":
         return json.load(sys.stdin)
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def public_perspective(perspective, decision=None):
@@ -773,7 +773,7 @@ def cmd_think(args):
                               "add ones the ranking missed; set top-level `synthesis`. Then: "
                               "python3 chronosynaptic.py collapse-notes <this-file> --seal"),
         }
-        Path(args.worksheet).write_text(json.dumps(skeleton, indent=1))
+        Path(args.worksheet).write_text(json.dumps(skeleton, indent=1), encoding="utf-8")
         print(f"\n  WORKSHEET -> {args.worksheet}")
         print("  (fill summaries + scores with real semantic judgment, then collapse-notes --seal)")
 

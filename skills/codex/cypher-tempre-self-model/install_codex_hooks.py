@@ -77,7 +77,7 @@ def load_hooks(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"hooks": {}}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise SystemExit(f"{path} is not valid JSON; refusing to modify it: {exc}") from exc
     if not isinstance(data, dict):
@@ -131,7 +131,7 @@ def write_atomic(path: Path, data: dict[str, Any], backup: bool) -> Path | None:
         backup_path = path.with_name(f"{path.name}.bak-{stamp}")
         backup_path.write_bytes(path.read_bytes())
     tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     tmp.replace(path)
     return backup_path
 

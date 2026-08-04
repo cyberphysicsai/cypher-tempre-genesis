@@ -69,7 +69,7 @@ class Dormancy:
         if not self.flag.exists():
             return None
         try:
-            return json.loads(self.flag.read_text())
+            return json.loads(self.flag.read_text(encoding="utf-8"))
         except Exception:
             return {"since": None, "reason": None, "paused_at_height": None}
 
@@ -103,7 +103,7 @@ class Dormancy:
         rec = {"since": _now(), "reason": reason,
                "paused_at_height": head.get("index") if head else None,
                "paused_at_hash": head.get("ring_hash") if head else None}
-        self.flag.write_text(json.dumps(rec, indent=2))
+        self.flag.write_text(json.dumps(rec, indent=2), encoding="utf-8")
         return rec, True
 
     def resume(self, note=None, seal: bool = False, difficulty: int = 0):

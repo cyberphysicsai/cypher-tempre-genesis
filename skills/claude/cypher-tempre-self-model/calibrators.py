@@ -88,7 +88,7 @@ def load(root: Path) -> dict:
     reg = {}
     if p.exists():
         try:
-            reg = json.loads(p.read_text())
+            reg = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             reg = {}
     # merge: file values win, DEFAULTS supply anything new
@@ -102,7 +102,7 @@ def save(root: Path, reg: dict):
     p = _path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(reg, indent=1, sort_keys=True))
+    tmp.write_text(json.dumps(reg, indent=1, sort_keys=True), encoding="utf-8")
     tmp.replace(p)
 
 

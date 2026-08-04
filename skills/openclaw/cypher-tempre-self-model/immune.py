@@ -94,11 +94,11 @@ class Immune:
     # ---- state ----
     def state(self):
         if self.state_path.exists():
-            return json.loads(self.state_path.read_text())
+            return json.loads(self.state_path.read_text(encoding="utf-8"))
         return {"locked": False, "safe_height": None, "quarantine": [], "scars": []}
 
     def _save(self, s):
-        self.state_path.write_text(json.dumps(s, indent=2, ensure_ascii=False))
+        self.state_path.write_text(json.dumps(s, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def _summary(self, ring):
         p = ring.get("payload", {})
@@ -264,7 +264,7 @@ class Immune:
         s = self.state()
         s["locked"] = True
         self._save(s)
-        self.lock_path.write_text("immune lockdown — recover before sealing\n")
+        self.lock_path.write_text("immune lockdown — recover before sealing\n", encoding="utf-8")
         return s
 
     def rollback(self, first_bad_height, lesson="covenant drift", difficulty=0,

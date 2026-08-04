@@ -84,7 +84,7 @@ def _iter(tc: Timechain):
     path = tc.rings_path
     if not path.exists():
         return
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if line:

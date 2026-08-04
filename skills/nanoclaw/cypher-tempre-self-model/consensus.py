@@ -52,11 +52,11 @@ class Quorum:
         self.dir.mkdir(parents=True, exist_ok=True)
         cfg = {"n": n, "quorum": quorum,
                "witnesses": [{"id": f"w{i}", "key": secrets.token_hex(16)} for i in range(n)]}
-        self.cfg_path.write_text(json.dumps(cfg, indent=2))
+        self.cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         return cfg
 
     def _cfg(self):
-        return json.loads(self.cfg_path.read_text())
+        return json.loads(self.cfg_path.read_text(encoding="utf-8"))
 
     def attest(self):
         cfg = self._cfg()
@@ -65,7 +65,7 @@ class Quorum:
             raise RuntimeError("no chain head to attest")
         h, rh = head["index"], head["ring_hash"]
         msg = f"{h}:{rh}"
-        with self.att_path.open("a") as f:
+        with self.att_path.open("a", encoding="utf-8", newline="\n") as f:
             for w in cfg["witnesses"]:
                 f.write(json.dumps({"height": h, "ring_hash": rh, "witness": w["id"],
                                     "mac": _mac(w["key"], msg)}) + "\n")
@@ -74,7 +74,7 @@ class Quorum:
     def _attestations(self):
         if not self.att_path.exists():
             return []
-        return [json.loads(l) for l in self.att_path.read_text().splitlines() if l.strip()]
+        return [json.loads(l) for l in self.att_path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
     def verify(self):
         cfg = self._cfg()

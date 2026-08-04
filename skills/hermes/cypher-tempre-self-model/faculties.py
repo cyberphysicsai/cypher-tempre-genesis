@@ -103,7 +103,7 @@ def export_pack(root, name, domain="", version="0.1", author=None,
     if include_emergent:
         ep = root / "registry" / "emergent.json"
         if ep.exists():
-            for e in json.loads(ep.read_text()).get("faculties", []):
+            for e in json.loads(ep.read_text(encoding="utf-8")).get("faculties", []):
                 if e.get("kind") not in kinds or e.get("promoted_to_id"):
                     continue
                 if only_names and e["name"] not in only_names:
@@ -183,7 +183,7 @@ def author_pack(root, spec, do_seal=True):
     if do_seal:
         tc = Timechain(root)
         tmp = root / "chain" / f"{spec.get('name', 'pack')}@{spec.get('version', '0')}.design.json"
-        tmp.write_text(json.dumps(spec, indent=2, ensure_ascii=False))
+        tmp.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
         try:
             ring = tc.seal("faculty-design", {
                 "summary": (f"Designed faculty pack: {report['pack']} — "
@@ -270,7 +270,7 @@ def import_pack(root, pack, dry_run=False, dedup_floor=DEDUP_FLOOR,
             report["imported"].append({"name": fname, "kind": f.get("kind"), "dry_run": True})
             continue
         key = "modalities" if f.get("kind") == "modality" else "senses"
-        base = json.loads((root / "registry" / f"{key}.json").read_text()).get(key, [])
+        base = json.loads((root / "registry" / f"{key}.json").read_text(encoding="utf-8")).get(key, [])
         grown = load_grown(registry_home(root))
         existing_ids = [it["id"] for it in base] + [it["id"] for it in grown.get(key, [])]
         new_id = (max(existing_ids) if existing_ids else 0) + 1
@@ -314,7 +314,7 @@ def cmd_export(args):
               + ("" if args.include_emergent else " (add --include-emergent for unpromoted ones)"))
         sys.exit(1)
     out = Path(args.out)
-    out.write_text(json.dumps(pack, indent=2, ensure_ascii=False))
+    out.write_text(json.dumps(pack, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"pack written: {out}  ({len(pack['faculties'])} faculties, sha256 {pack['pack_sha256'][:16]}..)")
     for f in pack["faculties"]:
         print(f"  [{f['kind']:<8}] {f['name']}  ({f['status']})")
@@ -330,7 +330,7 @@ def cmd_export(args):
 
 
 def cmd_import(args):
-    pack = json.loads(Path(args.pack).read_text())
+    pack = json.loads(Path(args.pack).read_text(encoding="utf-8"))
     report = import_pack(args.root, pack, dry_run=args.dry_run,
                          dedup_floor=args.dedup_floor, force=args.force,
                          do_seal=not args.no_seal)
@@ -351,7 +351,7 @@ def cmd_import(args):
 
 
 def cmd_author(args):
-    spec = json.loads(Path(args.spec).read_text())
+    spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
     report = author_pack(args.root, spec, do_seal=not args.no_seal)
     print(f"pack: {report['pack']}")
     for e in report["errors"]:
@@ -368,7 +368,7 @@ def cmd_author(args):
 
 
 def cmd_show(args):
-    pack = json.loads(Path(args.pack).read_text())
+    pack = json.loads(Path(args.pack).read_text(encoding="utf-8"))
     ok = pack_hash(pack) == pack.get("pack_sha256")
     d = pack.get("donor") or {}
     print(f"{pack.get('name')}@{pack.get('version')}  domain: {pack.get('domain') or '-'}  "

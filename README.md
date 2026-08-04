@@ -24,6 +24,11 @@ revision metadata, path-aware recall, neighboring chunks, and sealed audit rings
 Agents should use it for long-horizon orientation, then validate retrieved hits
 against live source before making conclusions.
 
+As of v3.30.05, every runtime text store is explicit UTF-8 across Windows, macOS,
+and Linux. Legacy cp1252 JSON/JSONL can be inspected and recovered with the bundled
+`encoding_recovery.py`; conversion is confirmation-gated, creates a byte-exact backup,
+and never re-anchors registry state until a separate reviewed command.
+
 ## Public share links
 
 | Runtime | Skill file | Raw file | Bundle folder |
@@ -38,11 +43,11 @@ against live source before making conclusions.
 
 | Runtime | Drag-and-drop ZIP |
 |---|---|
-| Claude Code | [cypher-tempre-claude-skill-v3.30.04.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-claude-skill-v3.30.04.zip) |
-| Codex | [cypher-tempre-codex-skill-v3.30.04.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-codex-skill-v3.30.04.zip) |
-| OpenClaw | [cypher-tempre-openclaw-skill-v3.30.04.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-openclaw-skill-v3.30.04.zip) |
-| Hermes | [cypher-tempre-hermes-skill-v3.30.04.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-hermes-skill-v3.30.04.zip) |
-| NanoClaw | [cypher-tempre-nanoclaw-skill-v3.30.04.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-nanoclaw-skill-v3.30.04.zip) |
+| Claude Code | [cypher-tempre-claude-skill-v3.30.05.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-claude-skill-v3.30.05.zip) |
+| Codex | [cypher-tempre-codex-skill-v3.30.05.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-codex-skill-v3.30.05.zip) |
+| OpenClaw | [cypher-tempre-openclaw-skill-v3.30.05.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-openclaw-skill-v3.30.05.zip) |
+| Hermes | [cypher-tempre-hermes-skill-v3.30.05.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-hermes-skill-v3.30.05.zip) |
+| NanoClaw | [cypher-tempre-nanoclaw-skill-v3.30.05.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-nanoclaw-skill-v3.30.05.zip) |
 
 ## Timechain Dashboard
 
@@ -90,7 +95,7 @@ Copy that folder into my Codex skills directory as cypher-tempre-self-model, the
 ```
 
 The current Codex bundle is also mirrored in `downloads/` as
-`cypher-tempre-codex-skill-v3.30.04.zip`. After installing hooks, open `/hooks`
+`cypher-tempre-codex-skill-v3.30.05.zip`. After installing hooks, open `/hooks`
 in Codex to review and trust the new command hooks, then restart or start a
 new session.
 

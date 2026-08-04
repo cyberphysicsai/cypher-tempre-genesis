@@ -93,7 +93,7 @@ def _set_active(root):
     try:
         p = _pointer_path()
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"root": str(Path(root).resolve())}))
+        p.write_text(json.dumps({"root": str(Path(root).resolve())}), encoding="utf-8")
     except Exception:
         pass
 
@@ -106,7 +106,7 @@ def _clear_active(root=None):
         if root is None:
             p.unlink()
             return
-        cur = (json.loads(p.read_text()) or {}).get("root")
+        cur = (json.loads(p.read_text(encoding="utf-8")) or {}).get("root")
         if cur and Path(cur).resolve() == Path(root).resolve():
             p.unlink()
     except Exception:

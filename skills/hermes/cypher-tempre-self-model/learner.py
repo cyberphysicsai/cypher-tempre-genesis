@@ -95,7 +95,7 @@ def load_scorer(registry_root=None):
     if not p.exists():
         return None
     try:
-        s = json.loads(p.read_text())
+        s = json.loads(p.read_text(encoding="utf-8"))
         return s if s.get("status") == "active" and s.get("weights") else None
     except Exception:
         return None
@@ -213,7 +213,7 @@ def adopt_scorer(root, report, registry_root=None):
     }
     sp = scorer_path(registry_root)
     sp.parent.mkdir(parents=True, exist_ok=True)
-    sp.write_text(json.dumps(scorer, indent=2))
+    sp.write_text(json.dumps(scorer, indent=2), encoding="utf-8")
     ring = seal_adopt(
         tc, "scorer",
         (f"Operator adopted: retrieval scorer {version} (logistic over "
@@ -235,7 +235,7 @@ def rollback_scorer(root, registry_root=None):
     sp = scorer_path(registry_root)
     if len(adopts) >= 2:
         prev = adopts[-2]["payload"]["scorer"]
-        sp.write_text(json.dumps(prev, indent=2))
+        sp.write_text(json.dumps(prev, indent=2), encoding="utf-8")
         target = prev["scorer_version"]
     else:
         if sp.exists():

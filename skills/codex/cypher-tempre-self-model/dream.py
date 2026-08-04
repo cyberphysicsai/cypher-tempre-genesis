@@ -66,14 +66,14 @@ class Dream:
     def _state(self):
         if self.state_path.exists():
             try:
-                return json.loads(self.state_path.read_text())
+                return json.loads(self.state_path.read_text(encoding="utf-8"))
             except Exception:
                 return {}
         return {}
 
     def _save_state(self, s):
         try:
-            self.state_path.write_text(json.dumps(s))
+            self.state_path.write_text(json.dumps(s), encoding="utf-8")
         except OSError:
             pass
 
@@ -275,7 +275,7 @@ class Dream:
                 bump(d.get("ring_index"), -4)
         overlay = {k: v for k, v in scores.items() if v != 0}
         try:
-            (self.tc.dir / "salience.json").write_text(json.dumps(overlay, sort_keys=True))
+            (self.tc.dir / "salience.json").write_text(json.dumps(overlay, sort_keys=True), encoding="utf-8")
         except OSError:
             pass
         top = sorted(overlay.items(), key=lambda kv: kv[1], reverse=True)[:5]

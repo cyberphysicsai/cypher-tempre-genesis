@@ -33,7 +33,8 @@ MODULES = ["timechain", "poq", "recall", "recall_cli", "cambium", "immune",
            "dream", "learner", "lens", "extractor", "hippocampus", "epochs",
            "modality_ops", "faculties", "guard", "task", "policy", "bench",
            "router", "conjecture", "autobiography", "calibrators",
-           "cphy", "recall_overlay", "keystore", "pqsign"]
+           "cphy", "recall_overlay", "keystore", "pqsign",
+           "encoding_recovery"]
 
 
 def _result(name, status, detail):
@@ -60,7 +61,7 @@ def run_checks(root: Path) -> list:
         from timechain import Timechain
         tc = Timechain(root)
         ok, report = tc.verify()
-        head = sum(1 for _ in open(tc.rings_path)) - 1 if tc.rings_path.exists() else -1
+        head = sum(1 for _ in open(tc.rings_path, encoding="utf-8")) - 1 if tc.rings_path.exists() else -1
         out.append(_result("chain", "OK" if ok else "COMPROMISED",
                            f"{head+1} rings, verify {'PASS' if ok else 'FAIL'}"))
     except Exception as exc:
@@ -100,7 +101,7 @@ def run_checks(root: Path) -> list:
             idx_dir = root / "chain" / "hippocampus"
             meta = idx_dir / "meta.json"
             if meta.exists():
-                m = json.loads(meta.read_text())
+                m = json.loads(meta.read_text(encoding="utf-8"))
                 ih = m.get("head_index", m.get("indexed_head"))
                 # fresh enough when within a few rings of head (rings sealed
                 # after the last build are found by the non-indexed fallback)
@@ -132,7 +133,7 @@ def run_checks(root: Path) -> list:
         from timechain import Timechain
         tc = Timechain(root)
         if tc.rings_path.exists():
-            with tc.rings_path.open() as fh:
+            with tc.rings_path.open(encoding="utf-8") as fh:
                 for line in fh:
                     if '"ring_type": "dream' in line or '"ring_type":"dream' in line:
                         dreamt = True
@@ -148,13 +149,13 @@ def run_checks(root: Path) -> list:
     # overgrowth — they left the working set precisely so they stop costing.
     try:
         reg = root / "registry"
-        grown = json.loads((reg / "grown.json").read_text()) if (reg / "grown.json").exists() else {}
+        grown = json.loads((reg / "grown.json").read_text(encoding="utf-8")) if (reg / "grown.json").exists() else {}
         allg = grown.get("senses", []) + grown.get("modalities", [])
         active = [f["name"] for f in allg if f.get("status") != "dormant"]
         dormant = [f["name"] for f in allg if f.get("status") == "dormant"]
         fire = {}
         if tc.rings_path.exists():
-            with tc.rings_path.open() as fh:
+            with tc.rings_path.open(encoding="utf-8") as fh:
                 for line in fh:
                     try:
                         r = json.loads(line)

@@ -1,5 +1,36 @@
 # Changelog
 
+## v3.30.05 - 2026-08-04
+
+Closes the cross-platform storage-encoding defect found after v3.30.04. Managed
+text is now deterministic across Windows, macOS, and Linux.
+
+### Fixed
+- **Every runtime text-file operation now declares UTF-8 explicitly.** The audit found
+  126 platform-default `read_text`, `write_text`, and text-mode `open` operations across
+  canonical stores, derived state, registries, ledgers, checkpoints, telemetry, and
+  external text ingestion. A permanent AST regression gate refuses any recurrence.
+- **Non-ASCII rings no longer produce false tamper reports on Windows.** Full and fast
+  verification decode physical JSONL records as strict UTF-8 before recomputing hashes.
+  JSONL writers also pin physical LF delimiters, so emitted bytes do not vary by host.
+- **Legacy non-UTF-8 stores fail closed with a recovery-specific diagnosis.** Readers no
+  longer silently skip or locale-decode affected records and then report a misleading hash
+  mismatch.
+- **Explicit cp1252 recovery is available without silent rewriting.**
+  `encoding_recovery.py` inspects or scans read-only by default. Conversion requires
+  `recover PATH --confirm`, creates and verifies a byte-exact backup before validation,
+  checks semantic JSON/JSONL equality and ring hashes, and performs an atomic UTF-8
+  replacement. Root scans validate active stores while leaving inactive quarantine
+  evidence out of the re-anchor gate. Registry re-anchoring is a separate
+  `reanchor --confirm-reviewed` step.
+
+### Verification
+- Added 20 encoding/recovery checks: exact UTF-8 bytes, UTF-8 mode disabled, non-ASCII
+  full/fast verification, legacy failure classification, confirmation gates, backup-first
+  refusal, semantic preservation, no automatic epoch seal, and reviewed re-anchoring.
+- Added a GitHub Actions matrix that runs the self-test, smoke suite, gate-discrimination
+  suite, and encoding suite on Windows, macOS, and Linux.
+
 ## v3.30.04 - 2026-08-03
 
 Closes the six operational-integrity defects explicitly enumerated in the full

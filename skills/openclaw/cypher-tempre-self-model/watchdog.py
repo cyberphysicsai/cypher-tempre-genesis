@@ -33,7 +33,7 @@ def _head(root: Path) -> int:
     p = root / "chain" / "rings.jsonl"
     if not p.exists():
         return -1
-    with p.open() as fh:
+    with p.open(encoding="utf-8") as fh:
         return sum(1 for line in fh if line.strip()) - 1
 
 
@@ -49,7 +49,7 @@ def check(root: Path, nudge_file=None) -> dict:
     sp = _state_path(root)
     if sp.exists():
         try:
-            st = json.loads(sp.read_text())
+            st = json.loads(sp.read_text(encoding="utf-8"))
         except Exception:
             st = {}
     head = _head(root)
@@ -58,7 +58,7 @@ def check(root: Path, nudge_file=None) -> dict:
     ep = root / "chain" / ".enforce.json"
     if ep.exists():
         try:
-            est = json.loads(ep.read_text())
+            est = json.loads(ep.read_text(encoding="utf-8"))
         except Exception:
             est = {}
     marked = est.get("turn_head")
@@ -74,7 +74,7 @@ def check(root: Path, nudge_file=None) -> dict:
             Path(nudge_file).write_text(
                 "[Cypher Tempre watchdog] The current turn has not sealed a ring. "
                 "Run: python3 " + str(SKILL_DIR / "recall.py") +
-                ' turn "<thought>" --input "<request>"')
+                ' turn "<thought>" --input "<request>"', encoding="utf-8")
     elif nudge_file and Path(nudge_file).exists():
         try:
             Path(nudge_file).unlink()
@@ -83,7 +83,7 @@ def check(root: Path, nudge_file=None) -> dict:
     st["last"] = result
     st["checks"] = int(st.get("checks", 0)) + 1
     st["unsealed_seen"] = int(st.get("unsealed_seen", 0)) + (1 if unsealed else 0)
-    sp.write_text(json.dumps(st))
+    sp.write_text(json.dumps(st), encoding="utf-8")
     return result
 
 
@@ -106,7 +106,7 @@ def cmd_status(args):
     if not sp.exists():
         print("no watchdog state yet - run: python3 watchdog.py check")
         return
-    st = json.loads(sp.read_text())
+    st = json.loads(sp.read_text(encoding="utf-8"))
     last = st.get("last") or {}
     print(f"checks: {st.get('checks', 0)}   unsealed seen: {st.get('unsealed_seen', 0)}")
     print(f"last: {last.get('ts')}  head {last.get('head')}  "

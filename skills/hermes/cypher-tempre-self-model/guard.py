@@ -183,7 +183,7 @@ def cmd_audit(args):
     if getattr(args, "evidence_file", None):
         for fp in args.evidence_file:
             try:
-                extra_ctx += "\n" + Path(fp).read_text()[:20000]
+                extra_ctx += "\n" + Path(fp).read_text(encoding="utf-8")[:20000]
             except Exception:
                 pass
     args.context = extra_ctx
