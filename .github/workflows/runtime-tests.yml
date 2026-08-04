@@ -27,7 +27,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python tests/selftest.py
-      - run: python tests/test_smoke.py
-      - run: python tests/test_gate_discrimination.py
-      - run: python tests/test_utf8_io.py
+      - name: Run full runtime self-test (POSIX hook wrappers)
+        if: runner.os != 'Windows'
+        run: python tests/selftest.py
+      - name: Run cross-platform smoke suite
+        run: python tests/test_smoke.py
+      - name: Run cross-platform gate-discrimination suite
+        run: python tests/test_gate_discrimination.py
+      - name: Run cross-platform UTF-8 and recovery suite
+        run: python tests/test_utf8_io.py

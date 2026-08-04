@@ -28,8 +28,9 @@ text is now deterministic across Windows, macOS, and Linux.
 - Added 20 encoding/recovery checks: exact UTF-8 bytes, UTF-8 mode disabled, non-ASCII
   full/fast verification, legacy failure classification, confirmation gates, backup-first
   refusal, semantic preservation, no automatic epoch seal, and reviewed re-anchoring.
-- Added a GitHub Actions matrix that runs the self-test, smoke suite, gate-discrimination
-  suite, and encoding suite on Windows, macOS, and Linux.
+- Added a GitHub Actions matrix that runs the smoke, gate-discrimination, and encoding
+  suites on Windows, macOS, and Linux. The full self-test also runs on macOS and Linux;
+  its POSIX hook-wrapper checks deliberately require `/bin/bash`.
 
 ## v3.30.04 - 2026-08-03
 
