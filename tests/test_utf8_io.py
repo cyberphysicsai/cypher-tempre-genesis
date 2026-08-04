@@ -126,7 +126,7 @@ def test_locale_independent_subprocess():
             "from timechain import Timechain; "
             "t=Timechain(Path(sys.argv[1])); t.CHECKPOINT_EVERY=1; "
             "t.genesis(name='Windows codepage'); "
-            "t.seal('experience', {'summary':'faculty — perceptual gap'}); "
+            "t.seal('experience', {'summary':'faculty \\u2014 perceptual gap'}); "
             "assert t.verify()[0] and t.verify_fast()[0]; "
             "assert b'\\xe2\\x80\\x94' in t.rings_path.read_bytes()"
         )

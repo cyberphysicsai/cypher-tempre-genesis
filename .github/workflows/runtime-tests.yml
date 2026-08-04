@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keep test diagnostics printable on legacy Windows consoles. This affects
+  # stdio only; the regression suite still disables UTF-8 mode and locale
+  # coercion in its child process to exercise platform-default file handling.
+  PYTHONIOENCODING: utf-8
+
 jobs:
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
