@@ -1,5 +1,34 @@
 # Changelog
 
+## v3.30.06 - 2026-08-04
+
+Closes the remaining Windows self-test portability gap and makes adherence
+statistics turn-accurate without rewriting historical telemetry.
+
+### Fixed
+- **The full Python runtime self-test now runs on Windows, macOS, and Linux.** The
+  root-mismatch assertion parses the Stop decision JSON before examining native paths,
+  so JSON-escaped Windows backslashes no longer create a false failure. Only the four
+  POSIX `.sh` wrapper integrations are conditionally exercised on POSIX; the rest of
+  the full suite is no longer skipped on Windows.
+- **Every new adherence event carries a persistent per-turn identifier.** Prompt hooks,
+  repeated Stop/SubagentStop checks, the one-call loop, watchdog events, and Codex notify
+  observations share the identifier stored in `.enforce.json`.
+- **Terminal outcomes are idempotent.** Repeated Stop checks emit at most one satisfied
+  or violation result and one seal-debt record for a logical turn. A later notify event
+  consumes the same turn instead of adding a second numerator.
+- **Historical adherence reports are repaired by derivation, not mutation.** Legacy
+  id-less events are grouped under their preceding turn-start, duplicate outcomes are
+  reduced once, and outcomes with no defensible denominator are reported as orphans and
+  excluded. Wear, accounted, adherence, nudge, and daily trend rates therefore cannot
+  exceed 100%. Raw nudge events remain visible separately from turns nudged.
+
+### Verification
+- Added phase12 regressions for native-path JSON decoding, stable turn IDs, repeated Stop
+  plus mixed-channel deduplication, and legacy duplicate telemetry reduction.
+- GitHub Actions now executes `tests/selftest.py` on all three operating systems while
+  retaining real shell-wrapper integration coverage on Ubuntu and macOS.
+
 ## v3.30.05 - 2026-08-04
 
 Closes the cross-platform storage-encoding defect found after v3.30.04. Managed

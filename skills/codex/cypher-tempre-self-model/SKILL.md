@@ -301,6 +301,24 @@ only the named file, and never seals or re-anchors anything. The separate `reanc
 command requires the human-review confirmation and refuses while any active JSON/JSONL
 store under the chosen root remains non-UTF-8 or semantically invalid.
 
+## Turn-accurate adherence and cross-platform validation (v3.30.06)
+
+Adherence is measured per logical turn. Each new prompt mark creates an opaque
+`turn_id` in `chain/.enforce.json`; the loop, Stop/SubagentStop, watchdog, and
+Codex-notify channels attach that same id to their telemetry. Repeated Stop checks emit
+at most one terminal outcome, and a later observer channel consumes the existing turn
+instead of counting it again.
+
+`telemetry.py adherence` also reduces pre-v3.30.06 id-less logs by their recorded
+turn-start boundaries. Duplicate satisfied/violation/waiver outcomes count once; an
+outcome that cannot be tied to any start is surfaced as a legacy orphan and excluded
+from ratios. Wear, accounted, adherence, nudge, and daily trend rates are therefore
+bounded at 100%. The report distinguishes unique turns nudged from raw nudge events.
+
+The repository's complete Python self-test runs on Windows, macOS, and Linux. Only
+the direct `.sh` wrapper integration checks are POSIX-specific; Python enforcement,
+telemetry, chain, recovery, and every other runtime phase execute on all three.
+
 ## Growth (Cambium) — when you hit your limits
 
 When an input reveals a gap your existing faculties cannot cover (cognitive

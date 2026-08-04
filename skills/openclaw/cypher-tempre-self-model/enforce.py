@@ -27,6 +27,7 @@ turn start and the nudge counter for the current turn.
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -153,6 +154,38 @@ def _emit(root, event_type, data):
             telemetry.record(str(root), event_type, data)
     except Exception:
         pass
+
+
+def _new_turn_id():
+    """Opaque per-turn identity shared by every enforcement/observer channel."""
+    return uuid.uuid4().hex
+
+
+def _turn_data(st, data=None):
+    out = dict(data or {})
+    if st.get("turn_id") and not out.get("turn_id"):
+        out["turn_id"] = st["turn_id"]
+    return out
+
+
+def _emit_turn(root, st, event_type, data=None):
+    _emit(root, event_type, _turn_data(st, data))
+
+
+def _finish_turn(root, st, event_type, data=None):
+    """Record one terminal outcome for a turn, at most once.
+
+    Stop/SubagentStop may be called repeatedly and Codex notify may observe the
+    same completion afterward. Persist the outcome before emitting telemetry so
+    every later channel is idempotent even if telemetry itself is unavailable.
+    """
+    if st.get("turn_outcome"):
+        return False
+    st["turn_outcome"] = event_type
+    st["turn_open"] = False
+    _save_state(root, st)
+    _emit_turn(root, st, event_type, data)
+    return True
 
 
 def _read_stdin():
@@ -337,6 +370,10 @@ def cmd_mark(_data):
     per-turn nudge counter. Prints nothing that would disturb the prompt."""
     root = _root_from(_data)
     st = _load_state(root)
+    st["turn_id"] = _new_turn_id()
+    st["turn_open"] = True
+    st["turn_notify_pending"] = True
+    st["turn_outcome"] = None
     st["turn_head"] = _head_index(root)
     st["nudges"] = 0
     # Snapshot the active audit and its review cursor at turn start so stop-check
@@ -353,7 +390,8 @@ def cmd_mark(_data):
             st["turn_audit_deep"] = s[2]  # deep_reviews at turn start
     _save_state(root, st)
     if not _dormant(root):
-        _emit(root, "adherence_turn_start", {"head": st["turn_head"]})
+        _emit_turn(root, st, "adherence_turn_start",
+                   {"head": st["turn_head"], "via": "prompt-hook"})
     # mark stays silent (no stdout) for back-compat; cmd_user_prompt emits the reminder.
 
 
@@ -463,28 +501,27 @@ def cmd_stop_check(data):
     if not tar and sealed_this_turn:
         st["nudges"] = 0
         st.pop("seal_debt", None)          # v3.15 governor: debt repaid
-        _save_state(root, st)
-        _emit(root, "adherence_satisfied", {"audit_progress": False,
-                                            "deep_progress": False,
-                                            "sealed": sealed_this_turn})
+        _finish_turn(root, st, "adherence_satisfied",
+                     {"audit_progress": False, "deep_progress": False,
+                      "sealed": sealed_this_turn, "via": "stop-hook"})
         return
 
     if tar and audit_deep_progressed:
         st["nudges"] = 0
-        _save_state(root, st)
-        _emit(root, "adherence_satisfied", {"audit_progress": audit_progressed,
-                                            "deep_progress": audit_deep_progressed,
-                                            "sealed": sealed_this_turn})
+        _finish_turn(root, st, "adherence_satisfied",
+                     {"audit_progress": audit_progressed,
+                      "deep_progress": audit_deep_progressed,
+                      "sealed": sealed_this_turn, "via": "stop-hook"})
         return
 
     # If an audit was open at turn start but is no longer active (completed),
     # and the identity chain has a sealed ring, allow it.
     if tar and not audit_active and sealed_this_turn:
         st["nudges"] = 0
-        _save_state(root, st)
-        _emit(root, "adherence_satisfied", {"audit_progress": audit_progressed,
-                                            "deep_progress": audit_deep_progressed,
-                                            "sealed": sealed_this_turn})
+        _finish_turn(root, st, "adherence_satisfied",
+                     {"audit_progress": audit_progressed,
+                      "deep_progress": audit_deep_progressed,
+                      "sealed": sealed_this_turn, "via": "stop-hook"})
         return
 
     if audit_active:
@@ -559,18 +596,21 @@ def _bump_or_release(root, st, violation_event):
     recorded as SEAL DEBT carried to the NEXT turn, where cmd_user_prompt
     escalates from advisory to a structured demand (seal or explicitly waive).
     Adherence becomes closed-loop instead of exhortative."""
+    if st.get("turn_outcome"):
+        return False
     nudges = int(st.get("nudges", 0))
     if nudges >= MAX_NUDGES:
-        _emit(root, violation_event, {"nudges": nudges})
         st["seal_debt"] = {"head": _head_index(root),
-                           "turns": int((st.get("seal_debt") or {}).get("turns", 0)) + 1}
-        _save_state(root, st)
-        _emit(root, "adherence_debt", {"head": st["seal_debt"]["head"],
-                                       "turns": st["seal_debt"]["turns"]})
+                           "turns": int((st.get("seal_debt") or {}).get("turns", 0)) + 1,
+                           "turn_id": st.get("turn_id")}
+        _finish_turn(root, st, violation_event, {"nudges": nudges})
+        _emit_turn(root, st, "adherence_debt",
+                   {"head": st["seal_debt"]["head"],
+                    "turns": st["seal_debt"]["turns"]})
         return False
     st["nudges"] = nudges + 1
     _save_state(root, st)
-    _emit(root, "adherence_nudge", {"nudge": st["nudges"]})
+    _emit_turn(root, st, "adherence_nudge", {"nudge": st["nudges"]})
     return True
 
 
@@ -589,8 +629,10 @@ def cmd_waive(argv):
     debt = st.pop("seal_debt", None)
     st["nudges"] = 0
     _save_state(root, st)
-    _emit(root, "adherence_waiver", {"reason": reason[:300],
-                                     "debt": debt})
+    waiver_data = {"reason": reason[:300], "debt": debt}
+    if isinstance(debt, dict) and debt.get("turn_id"):
+        waiver_data["turn_id"] = debt["turn_id"]
+    _emit(root, "adherence_waiver", _turn_data(st, waiver_data))
     print(f"seal debt waived (recorded): {reason[:120]}")
 
 
@@ -696,18 +738,51 @@ def cmd_codex_notify(argv):
     audit_head = _head_index(ar) if ar else None
     last_head = st.get("last_turn_end_head")
     last_audit = st.get("last_turn_end_audit_head")
+    pending = bool(st.get("turn_notify_pending") and st.get("turn_id"))
+    if pending:
+        start = st.get("turn_head")
+        progressed = start is not None and head > start
+        tar, base = st.get("turn_audit_root"), st.get("turn_audit_cursor")
+        if tar and base is not None:
+            status = _audit_status(tar)
+            progressed = progressed or (status is not None and status[0] > base)
+        st["turn_notify_pending"] = False
+    else:
+        # A notify-only harness observes a completed interval between successive
+        # notifications. The first call establishes the baseline; later calls
+        # create one explicit turn denominator before recording its outcome.
+        if last_head is None and last_audit is None:
+            st["last_turn_end_head"] = head
+            st["last_turn_end_audit_head"] = audit_head
+            _save_state(root, st)
+            return
+        st["turn_id"] = _new_turn_id()
+        st["turn_open"] = True
+        st["turn_notify_pending"] = False
+        st["turn_outcome"] = None
+        st["turn_head"] = last_head
+        progressed = (head > (last_head if last_head is not None else head)) or \
+                     (audit_head is not None and last_audit is not None and
+                      audit_head > last_audit)
     st["last_turn_end_head"] = head
     st["last_turn_end_audit_head"] = audit_head
     _save_state(root, st)
-    _emit(root, "adherence_turn_end", {"type": evt.get("type"), "head": head})
-    if last_head is None and last_audit is None:
-        return  # first observation = baseline only
-    progressed = (head > (last_head if last_head is not None else head)) or \
-                 (audit_head is not None and last_audit is not None and audit_head > last_audit)
-    if progressed:
-        _emit(root, "adherence_satisfied", {"via": "codex-notify", "head": head})
-    else:
-        _emit(root, "adherence_nudge", {"via": "codex-notify", "head": head})
+    if not pending:
+        _emit_turn(root, st, "adherence_turn_start",
+                   {"head": last_head, "via": "codex-notify"})
+    if not st.get("turn_outcome"):
+        if progressed:
+            _finish_turn(root, st, "adherence_satisfied",
+                         {"via": "codex-notify", "head": head})
+        else:
+            st["turn_outcome"] = "unsealed"
+            st["turn_open"] = False
+            _save_state(root, st)
+            _emit_turn(root, st, "adherence_nudge",
+                       {"via": "codex-notify", "head": head})
+    _emit_turn(root, st, "adherence_turn_end",
+               {"type": evt.get("type"), "head": head,
+                "via": "codex-notify"})
 
 
 HANDLERS = {

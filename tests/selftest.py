@@ -1158,11 +1158,15 @@ def main():
                 _enf.cmd_stop_check({})
                 _root_out = "".join(_enf._STDOUT)
                 _enf._STDOUT.clear()
+                try:
+                    _root_reason = json.loads(_root_out).get("reason", "")
+                except Exception:
+                    _root_reason = ""
                 check("phase12 enforce: root-mismatch Stop names task root and identity root",
-                      "Root mismatch detected" in _root_out
-                      and str(_task_root.resolve()) in _root_out
-                      and str(eroot.resolve()) in _root_out
-                      and "task.py complete" in _root_out)
+                      "Root mismatch detected" in _root_reason
+                      and str(_task_root.resolve()) in _root_reason
+                      and str(eroot.resolve()) in _root_reason
+                      and "task.py complete" in _root_reason)
             finally:
                 if _old_task_root is None:
                     os.environ.pop("CT_TASK_ROOT", None)
@@ -1304,36 +1308,38 @@ def main():
             # wrapper boolean logic: CT_ENFORCE_DEBUG=0 re-enabled stderr for
             # SessionStart/UserPromptSubmit even though enforce.py itself parsed
             # the flag correctly.
-            _hook_env = os.environ.copy()
-            _hook_env["CT_ENFORCE_ROOT"] = str(eroot)
-            _hook_env["CT_ENFORCE_DEBUG"] = "0"
-            _hook_env["PYTHONDONTWRITEBYTECODE"] = "1"
-            for _script, _ev in [("session_start_hook.sh", "SessionStart"),
-                                 ("loop_hook.sh", "UserPromptSubmit")]:
-                _proc = subprocess.run(["/bin/bash", str(SKILL / _script)], input="{}",
-                                       text=True, capture_output=True, env=_hook_env,
-                                       timeout=10)
-                try:
-                    _hj = json.loads(_proc.stdout)["hookSpecificOutput"]
-                    _ok_hj = (_proc.returncode == 0 and _proc.stderr == "" and
-                              _hj["hookEventName"] == _ev and bool(_hj["additionalContext"]))
-                except Exception:
-                    _ok_hj = False
-                check(f"phase12 wrapper: {_script} CT_ENFORCE_DEBUG=0 emits clean hook JSON",
-                      _ok_hj)
+            if os.name == "posix":
+                _hook_env = os.environ.copy()
+                _hook_env["CT_ENFORCE_ROOT"] = str(eroot)
+                _hook_env["CT_ENFORCE_DEBUG"] = "0"
+                _hook_env["PYTHONDONTWRITEBYTECODE"] = "1"
+                for _script, _ev in [("session_start_hook.sh", "SessionStart"),
+                                     ("loop_hook.sh", "UserPromptSubmit")]:
+                    _proc = subprocess.run(["/bin/bash", str(SKILL / _script)], input="{}",
+                                           text=True, capture_output=True, env=_hook_env,
+                                           timeout=10)
+                    try:
+                        _hj = json.loads(_proc.stdout)["hookSpecificOutput"]
+                        _ok_hj = (_proc.returncode == 0 and _proc.stderr == "" and
+                                  _hj["hookEventName"] == _ev and bool(_hj["additionalContext"]))
+                    except Exception:
+                        _ok_hj = False
+                    check(f"phase12 wrapper: {_script} CT_ENFORCE_DEBUG=0 emits clean hook JSON",
+                          _ok_hj)
 
-            for _script in ["stop_hook.sh", "subagent_stop_hook.sh"]:
-                _enf.cmd_mark({})
-                _proc = subprocess.run(["/bin/bash", str(SKILL / _script)], input="{}",
-                                       text=True, capture_output=True, env=_hook_env,
-                                       timeout=10)
-                try:
-                    _decision = json.loads(_proc.stdout).get("decision")
-                    _ok_decision = _proc.returncode == 0 and _proc.stderr == "" and _decision == "block"
-                except Exception:
-                    _ok_decision = False
-                check(f"phase12 wrapper: {_script} CT_ENFORCE_DEBUG=0 emits clean Stop JSON",
-                      _ok_decision)
+                for _script in ["stop_hook.sh", "subagent_stop_hook.sh"]:
+                    _enf.cmd_mark({})
+                    _proc = subprocess.run(["/bin/bash", str(SKILL / _script)], input="{}",
+                                           text=True, capture_output=True, env=_hook_env,
+                                           timeout=10)
+                    try:
+                        _decision = json.loads(_proc.stdout).get("decision")
+                        _ok_decision = (_proc.returncode == 0 and _proc.stderr == "" and
+                                        _decision == "block")
+                    except Exception:
+                        _ok_decision = False
+                    check(f"phase12 wrapper: {_script} CT_ENFORCE_DEBUG=0 emits clean Stop JSON",
+                          _ok_decision)
 
             with contextlib.redirect_stdout(io.StringIO()):
                 recall.cmd_turn(_ns("Tentatively this might be the cause; I'm not certain."))
@@ -1365,6 +1371,65 @@ def main():
                   and adh["adherence_rate"] is not None)
             check("phase12 adherence: uncertainty-led reseal is recorded",
                   adh["counts"]["resealed"] >= 1)
+
+            # v3.30.06: every adherence outcome is keyed to a turn. Repeated Stop
+            # checks and a later notify observation of the same turn must not create
+            # a second numerator, and historical id-less logs are reduced by their
+            # turn boundaries instead of yielding impossible percentages.
+            _metric_root = Path(tempfile.mkdtemp(prefix="ct_adherence_turn_"))
+            _legacy_root = Path(tempfile.mkdtemp(prefix="ct_adherence_legacy_"))
+            try:
+                timechain.Timechain(_metric_root).genesis(name="adherence-turn-id")
+                os.environ["CT_ENFORCE_ROOT"] = str(_metric_root)
+                _enf.cmd_mark({})
+                _metric_state = json.loads(
+                    (_metric_root / "chain" / ".enforce.json").read_text(encoding="utf-8"))
+                _metric_id = _metric_state.get("turn_id")
+                timechain.Timechain(_metric_root).seal(
+                    "experience", {"summary": "one logical honored turn"})
+                _enf.cmd_stop_check({})
+                _enf.cmd_stop_check({})
+                _enf.cmd_codex_notify(["{}"])
+                _metric_tel = telemetry.Telemetry(_metric_root)
+                _metric_adh = _metric_tel.adherence()
+                _metric_events = [e for _, e in _metric_tel.events()
+                                  if e.get("event", "").startswith("adherence_")]
+                check("phase12 adherence: repeated Stop + notify count one honored turn",
+                      _metric_adh["counts"]["turns"] == 1
+                      and _metric_adh["counts"]["satisfied"] == 1
+                      and _metric_adh["wear_rate"] == 1.0
+                      and sum(e["event"] == "adherence_satisfied"
+                              for e in _metric_events) == 1)
+                check("phase12 adherence: every new turn event carries one stable id",
+                      bool(_metric_id) and all(
+                          e.get("data", {}).get("turn_id") == _metric_id
+                          for e in _metric_events
+                          if e["event"] != "adherence_session_start"))
+
+                timechain.Timechain(_legacy_root).genesis(name="legacy-adherence")
+                _legacy_tel = telemetry.Telemetry(_legacy_root)
+                _legacy_rows = [
+                    {"schema": 1, "event": "adherence_turn_start",
+                     "ts": "2026-08-04T00:00:00+00:00", "data": {}},
+                    {"schema": 1, "event": "adherence_satisfied",
+                     "ts": "2026-08-04T00:00:01+00:00", "data": {}},
+                    {"schema": 1, "event": "adherence_satisfied",
+                     "ts": "2026-08-04T00:00:02+00:00",
+                     "data": {"via": "codex-notify"}},
+                ]
+                with _legacy_tel.path.open("w", encoding="utf-8", newline="\n") as _lf:
+                    for _row in _legacy_rows:
+                        _lf.write(json.dumps(_row, separators=(",", ":")) + "\n")
+                _legacy_adh = _legacy_tel.adherence()
+                check("phase12 adherence: legacy duplicate outcomes deduplicate by turn",
+                      _legacy_adh["counts"]["turns"] == 1
+                      and _legacy_adh["counts"]["satisfied"] == 1
+                      and _legacy_adh["wear_rate"] == 1.0
+                      and _legacy_adh["accounted_rate"] == 1.0)
+            finally:
+                os.environ["CT_ENFORCE_ROOT"] = str(eroot)
+                shutil.rmtree(_metric_root, ignore_errors=True)
+                shutil.rmtree(_legacy_root, ignore_errors=True)
             check("phase12: enforce-test chain verifies", etc.verify()[0])
         finally:
             os.environ.pop("CT_AUTOGROW", None)

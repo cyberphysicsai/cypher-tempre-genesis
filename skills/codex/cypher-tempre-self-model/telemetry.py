@@ -70,8 +70,9 @@ EVENT_TYPES = (
     # V6 adherence layer: the hook-driven enforcement of the per-turn loop. These
     # let `telemetry.py adherence` measure whether the skill is actually being WORN
     # (turns that sealed vs. turns that needed nudging or fell open).
-    "adherence_session_start", "adherence_turn_start", "adherence_loop_ran",
-    "adherence_satisfied", "adherence_nudge", "adherence_violation",
+    "adherence_session_start", "adherence_turn_start", "adherence_turn_end",
+    "adherence_loop_ran", "adherence_satisfied", "adherence_nudge",
+    "adherence_violation", "adherence_audit_stalled", "adherence_root_mismatch",
     # v3.15 depth-completing governor: unmet seal obligations become recorded
     # DEBT carried across turns; a turn that truly cannot seal must WAIVE with a
     # reason. Plus regret-scored routing and calibrator adjustments.
@@ -119,6 +120,17 @@ class Telemetry:
         if (self.tc.dir / "PAUSED").exists():       # dormant = the machinery sleeps
             return None
         head = self.tc._tail_ring()
+        event_data = dict(data or {})
+        # v3.30.06: adherence is a per-turn metric, so every new adherence event
+        # carries the durable id created by enforce.cmd_mark/codex-notify. Keep
+        # this fallback in the recorder so loop/watchdog callers cannot forget it.
+        if event_type.startswith("adherence_") and not event_data.get("turn_id"):
+            try:
+                state = json.loads((self.tc.dir / ".enforce.json").read_text(encoding="utf-8"))
+                if state.get("turn_id"):
+                    event_data["turn_id"] = state["turn_id"]
+            except Exception:
+                pass
         event = {
             "schema": SCHEMA,
             "event": event_type,
@@ -127,7 +139,7 @@ class Telemetry:
             "head_hash": head.get("ring_hash") if head else None,
             "embedder_fingerprint": embedder_fingerprint,
             "scorer_version": scorer_version,
-            "data": data or {},
+            "data": event_data,
         }
         try:
             with self.path.open("a", encoding="utf-8", newline="\n") as f:
@@ -171,57 +183,110 @@ class Telemetry:
                 "last_digest_ring": state.get("ring_index"),
                 "path": str(self.path)}
 
-    def adherence(self):
-        """Is the skill actually being WORN? Reads the adherence_* events the hooks
-        and the `turn` loop emit and reduces them to a few honest ratios. Pure
-        derivation over telemetry.jsonl — no chain scan, O(events)."""
-        c = {k: 0 for k in ("sessions", "turns", "loops", "satisfied", "nudges",
-                             "violations", "resealed", "blocked")}
-        loop_decisions, last_ts = {}, None
-        for _, e in self.events():
-            ev, d = e.get("event", ""), e.get("data", {})
+    def _adherence_rollup(self):
+        """Reduce adherence events into one record per logical turn.
+
+        New events carry ``data.turn_id``. Pre-v3.30.06 events are associated with
+        the most recent legacy turn-start, which also repairs historical logs where
+        repeated Stop checks or a second hook channel emitted duplicate outcomes.
+        Orphan outcomes are reported but never invented into the denominator.
+        """
+        turns, loops = {}, {}
+        sessions, last_ts, legacy_current = 0, None, None
+        orphan_outcomes = raw_nudges = 0
+        outcome_events = {
+            "adherence_satisfied", "adherence_nudge", "adherence_violation",
+            "adherence_audit_stalled", "adherence_debt", "adherence_waiver",
+        }
+        for offset, e in self.events():
+            ev, d = e.get("event", ""), e.get("data", {}) or {}
             if not ev.startswith("adherence_"):
                 continue
             last_ts = e.get("ts", last_ts)
             if ev == "adherence_session_start":
-                c["sessions"] += 1
-            elif ev == "adherence_turn_start":
-                c["turns"] += 1
-            elif ev == "adherence_satisfied":
-                c["satisfied"] += 1
+                sessions += 1
+                legacy_current = None
+                continue
+            if ev == "adherence_turn_start":
+                turn_id = d.get("turn_id") or f"legacy:{offset}"
+                legacy_current = turn_id
+                rec = turns.setdefault(turn_id, {})
+                rec["started"] = True
+                rec.setdefault("ts", e.get("ts"))
+                continue
+            if ev == "adherence_loop_ran":
+                turn_id = d.get("turn_id")
+                key = turn_id or f"legacy-loop:{offset}"
+                loops[key] = d
+                continue
+            if ev == "adherence_turn_end":
+                if not d.get("turn_id"):
+                    legacy_current = None
+                continue
+            if ev not in outcome_events:
+                continue
+            if ev == "adherence_nudge":
+                raw_nudges += 1
+            turn_id = d.get("turn_id") or legacy_current
+            if not turn_id:
+                orphan_outcomes += 1
+                continue
+            rec = turns.setdefault(turn_id, {})
+            if ev == "adherence_satisfied":
+                rec["satisfied"] = True
             elif ev == "adherence_nudge":
-                c["nudges"] += 1
-            elif ev == "adherence_violation":
-                c["violations"] += 1
+                rec["nudged"] = True
+            elif ev in ("adherence_violation", "adherence_audit_stalled"):
+                rec["violated"] = True
             elif ev == "adherence_debt":
-                c["debt"] = c.get("debt", 0) + 1
+                rec["debt"] = True
             elif ev == "adherence_waiver":
-                c["waivers"] = c.get("waivers", 0) + 1
-            elif ev == "adherence_loop_ran":
-                c["loops"] += 1
-                dec = d.get("decision", "?")
-                loop_decisions[dec] = loop_decisions.get(dec, 0) + 1
-                if d.get("resealed"):
-                    c["resealed"] += 1
-                if dec == "BLOCKED":
-                    c["blocked"] += 1
-        # A turn is "honored" if it ended with a fresh ring (satisfied). The Stop
-        # hook records satisfied at most once per turn; violations are turns that
-        # exhausted the nudge budget without sealing.
-        decided = c["satisfied"] + c["violations"]
-        rate = (c["satisfied"] / decided) if decided else None
-        nudge_rate = (c["nudges"] / c["turns"]) if c["turns"] else None
+                rec["waived"] = True
+        return {"turns": turns, "loops": loops, "sessions": sessions,
+                "last_ts": last_ts, "orphan_outcomes": orphan_outcomes,
+                "raw_nudges": raw_nudges}
+
+    def adherence(self):
+        """Is the skill actually being WORN? Ratios are deduplicated by turn id,
+        so repeated Stop checks and mixed hook channels can never exceed 100%."""
+        roll = self._adherence_rollup()
+        started = {k: v for k, v in roll["turns"].items() if v.get("started")}
+        satisfied = {k for k, v in started.items() if v.get("satisfied")}
+        violated = {k for k, v in started.items() if v.get("violated")}
+        nudged = {k for k, v in started.items() if v.get("nudged")}
+        debt = {k for k, v in started.items() if v.get("debt")}
+        waived = {k for k, v in started.items() if v.get("waived")}
+        loop_decisions = {}
+        for d in roll["loops"].values():
+            dec = d.get("decision", "?")
+            loop_decisions[dec] = loop_decisions.get(dec, 0) + 1
+        c = {
+            "sessions": roll["sessions"], "turns": len(started),
+            "loops": len(roll["loops"]), "satisfied": len(satisfied),
+            "nudges": len(nudged), "nudge_events": roll["raw_nudges"],
+            "violations": len(violated), "debt": len(debt),
+            "waivers": len(waived),
+            "resealed": sum(1 for d in roll["loops"].values() if d.get("resealed")),
+            "blocked": sum(1 for d in roll["loops"].values()
+                           if d.get("decision") == "BLOCKED"),
+            "orphan_outcomes": roll["orphan_outcomes"],
+        }
+        decided = satisfied | violated
+        rate = (len(satisfied) / len(decided)) if decided else None
+        nudge_rate = (len(nudged) / len(started)) if started else None
         reseal_rate = (c["resealed"] / c["loops"]) if c["loops"] else None
         # v3.12 honest metric: wear rate = honored turns / ALL turns started.
         # The old headline (honored/(honored+violations)) hid the nudging — a
         # 99.8% "adherence" over turns that mostly had to be forced. Both are
         # published now; the covenant demands the unflattering one too.
-        wear_rate = (c["satisfied"] / c["turns"]) if c["turns"] else None
+        wear_rate = (len(satisfied) / len(started)) if started else None
         # v3.15 accounted rate: sealed OR reasoned-waiver turns / all turns —
         # the governor's target is 100% ACCOUNTED (no silent skips), while
         # wear_rate stays the raw discipline number.
-        accounted = ((c["satisfied"] + c.get("waivers", 0)) / c["turns"]) if c["turns"] else None
-        return {"counts": c, "loop_decisions": loop_decisions, "last_ts": last_ts,
+        accounted_turns = satisfied | waived
+        accounted = (len(accounted_turns) / len(started)) if started else None
+        return {"counts": c, "loop_decisions": loop_decisions,
+                "last_ts": roll["last_ts"],
                 "adherence_rate": rate, "nudge_rate": nudge_rate,
                 "reseal_rate": reseal_rate, "wear_rate": wear_rate,
                 "accounted_rate": accounted}
@@ -233,11 +298,11 @@ class Telemetry:
         from datetime import datetime, timedelta, timezone
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         per = {}
-        for _, e in self.events():
-            ev = e.get("event", "")
-            if ev not in ("adherence_turn_start", "adherence_satisfied"):
+        roll = self._adherence_rollup()
+        for rec in roll["turns"].values():
+            if not rec.get("started"):
                 continue
-            ts = e.get("ts", "")
+            ts = rec.get("ts", "")
             try:
                 when = datetime.fromisoformat(ts)
                 if when.tzinfo is None:
@@ -248,9 +313,8 @@ class Telemetry:
                 continue
             day = when.date().isoformat()
             d = per.setdefault(day, {"turns": 0, "honored": 0})
-            if ev == "adherence_turn_start":
-                d["turns"] += 1
-            else:
+            d["turns"] += 1
+            if rec.get("satisfied"):
                 d["honored"] += 1
         rows = [(day, (v["honored"] / v["turns"]) if v["turns"] else None)
                 for day, v in sorted(per.items())]
@@ -444,14 +508,16 @@ def cmd_adherence(args):
     print(f"  turns honored   : {c['satisfied']}   (sealed a ring before turn-end)")
     print(f"  violations      : {c['violations']}   (exhausted nudges, failed open)")
     print(f"  adherence rate  : {_pct(a['adherence_rate'])}   "
-          f"(honored / (honored+violations))")
+          f"(unique honored / unique decided turns)")
     print(f"  wear rate       : {_pct(a.get('wear_rate'))}   "
           f"(honored / ALL turns started — the unflattering, honest number)")
     print(f"  accounted rate  : {_pct(a.get('accounted_rate'))}   "
           f"(sealed OR reasoned-waiver — the governor target is 100%)")
     print(f"  seal debt       : {c.get('debt', 0)} recorded   "
           f"waivers: {c.get('waivers', 0)}")
-    print(f"  nudges issued   : {c['nudges']}   nudge rate: {_pct(a['nudge_rate'])} per turn")
+    print(f"  turns nudged    : {c['nudges']}   nudge rate: {_pct(a['nudge_rate'])}")
+    print(f"  nudge events    : {c.get('nudge_events', c['nudges'])}   "
+          f"(repeated pressure within a turn; not a second turn)")
     print(f"  one-call loops  : {c['loops']}   "
           f"(of which immune-blocked: {c['blocked']})")
     print(f"  uncertainty-led : {c['resealed']}   reseal rate: {_pct(a['reseal_rate'])}   "
@@ -459,6 +525,9 @@ def cmd_adherence(args):
     if a["loop_decisions"]:
         decs = "  ".join(f"{k}:{v}" for k, v in sorted(a["loop_decisions"].items()))
         print(f"  loop verdicts   : {decs}")
+    if c.get("orphan_outcomes"):
+        print(f"  legacy orphans  : {c['orphan_outcomes']} outcome event(s) excluded "
+              f"because no turn-start could be identified")
     print(f"  last adherence event: {a['last_ts'] or '-'}")
     try:
         tr = Telemetry(args.root).wear_trend()
