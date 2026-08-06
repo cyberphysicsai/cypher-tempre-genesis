@@ -24,6 +24,10 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from registry_store import load_registry, validate_registry_object
+from timechain import (RegistryIntegrityError, StorageEncodingError,
+                       atomic_write_json)
+
 # --------------------------------------------------------------------------- #
 # lexicons & regexes
 # --------------------------------------------------------------------------- #
@@ -483,17 +487,13 @@ def _grown_ops_path(registry_root):
 
 
 def load_grown_ops(registry_root):
-    """Build the local {name: callable} ops for Cambium-grown faculties. Best-effort."""
+    """Build local grown ops; existing corrupt stores fail closed."""
     out = {}
-    try:
-        p = _grown_ops_path(registry_root)
-        if p.is_file():
-            for name, spec in (json.loads(p.read_text(encoding="utf-8")).get("ops") or {}).items():
-                op = build_op(spec)
-                if op is not None:
-                    out[name] = op
-    except Exception:
-        pass
+    data = load_registry(Path(registry_root), "grown_ops.json", missing_ok=True)
+    for name, spec in data["ops"].items():
+        op = build_op(spec)
+        if op is not None:
+            out[name] = op
     return out
 
 
@@ -511,14 +511,15 @@ def register_grown_op(registry_root, name, spec):
         ticket = epochs.begin_mutation(Path(registry_root))
         p = _grown_ops_path(registry_root)
         p.parent.mkdir(parents=True, exist_ok=True)
-        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
-        if "ops" not in data or not isinstance(data.get("ops"), dict):
-            data = {"registry": "grown_ops", "ops": {}}
+        data = load_registry(Path(registry_root), "grown_ops.json", missing_ok=True)
         data["ops"][name] = spec
-        p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        validate_registry_object("grown_ops.json", data, p)
+        atomic_write_json(p, data)
         epochs.commit_mutation(Path(registry_root), ticket,
                                reason=f"grown op registration: {name[:80]}")
         return True
+    except (StorageEncodingError, RegistryIntegrityError):
+        raise
     except Exception:
         return False
 

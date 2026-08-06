@@ -23,13 +23,19 @@ several patch releases. The zips are built **once** and used for **both**.
 
 4. **Run the test suites** — `python3 tests/selftest.py`,
    `python3 tests/test_smoke.py`, `python3 tests/test_gate_discrimination.py`, and
-   `python3 tests/test_utf8_io.py` from the repo root must all pass (they test the
+   `python3 tests/test_utf8_io.py`, `python3 tests/test_registry_integrity.py`, and
+   `python3 tests/test_smol_lm.py` from the repo root must all pass (they test the
    canonical `claude` bundle; engine code is identical across the five). The suites are
    NOT shipped in the bundles.
 
-5. **SkillSpector all five** — run `bash tools/scan.sh` (scans each **bundle** — the
-   canonical target, i.e. exactly what installs). Each must report **SAFE** (only the
-   MIT-`LICENSE` "NOT LIMITED TO" EA3 false-positive is acceptable). Do **not** judge the
+5. **SkillSpector every shipped packet** — run `bash tools/scan.sh` (scans each
+   production **bundle** plus the separately versioned Smol LM packet — the canonical
+   targets, i.e. exactly what installs). Production packets must report **SAFE**. The
+   MIT-`LICENSE` "NOT LIMITED TO" EA3 false-positive is acceptable. The Smol LM
+   controller also has one reviewed AST4 finding because its entire purpose is to invoke
+   the allowlisted `timechain.py` / `recall.py` engine surface; verify that the call still
+   uses an explicit argument list, `shell=False`, and the executable/path checks directly
+   above it. Do **not** judge the
    release by a repo-ROOT scan: that intentionally reads non-shipped files (the test suite
    and its adversarial fixtures, `tools/`/`site/` scripts, the `downloads/` zips it
    re-extracts) and will score high by design. **Scan after the changelog is final** — a
@@ -39,7 +45,10 @@ several patch releases. The zips are built **once** and used for **both**.
 
 6. **Rebuild the zips — ONE source of truth:** `bash tools/build_zips.sh`. This
    refreshes `downloads/` from current source and removes stale-version zips. **Do
-   not hand-build a second set for the release** — upload these exact files.
+   not hand-build a second set for the release** — upload these exact files. The
+   separately versioned Smol LM experiment is also built by this command; use
+   `bash tools/build_zips.sh --smol-only` while iterating without touching the five
+   production archives.
 
 7. **Update the version-pinned links** in `README.md` and `downloads/README.md` to
    the new `vX.Y.Z` zip names.

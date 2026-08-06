@@ -8,6 +8,9 @@ such as 0x97 for an em dash.  This tool never repairs anything implicitly:
     python3 encoding_recovery.py inspect PATH
     python3 encoding_recovery.py scan --root ROOT
     python3 encoding_recovery.py recover PATH --confirm
+    python3 encoding_recovery.py registry-snapshots --root ROOT --name grown.json
+    python3 encoding_recovery.py restore-registry --root ROOT --name grown.json \
+      --ring RING --confirm
     # Review PATH and the byte-exact backup, then explicitly re-anchor:
     python3 encoding_recovery.py reanchor --root ROOT \
       --confirm-reviewed --reason "reviewed cp1252-to-UTF-8 recovery"
@@ -34,7 +37,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from timechain import GENESIS_PREV, compute_ring_hash
+from timechain import GENESIS_PREV, Timechain, compute_ring_hash
+from registry_store import (CANONICAL_REGISTRIES, validate_registry_object,
+                            validate_registry_set)
 
 
 SUPPORTED_SUFFIXES = {".json", ".jsonl"}
@@ -289,8 +294,166 @@ def reanchor_after_review(root: Path, reason: str,
         raise RecoveryError(
             f"refusing to re-anchor while invalid stores remain: {invalid[0]['path']}"
         )
+    try:
+        validate_registry_set(Path(root))
+    except Exception as exc:
+        raise RecoveryError(f"refusing to re-anchor an invalid registry: {exc}") from exc
     import epochs
     return epochs.seal_epoch(Path(root), reason=reason, accept_current=True)
+
+
+def _verified_timechain(root: Path) -> Timechain:
+    tc = Timechain(Path(root).expanduser().resolve())
+    ok, report = tc.verify()
+    if not ok:
+        raise RecoveryError(
+            "Timechain or blockspace verification failed; refusing recovery: "
+            + " | ".join(report[:3]))
+    return tc
+
+
+def _registry_snapshot(tc: Timechain, name: str, ring_index: int):
+    if name not in CANONICAL_REGISTRIES:
+        raise RecoveryError(f"unsupported canonical registry: {name}")
+    match = None
+    for ring in tc.iter_rings():
+        if ring.get("index") != ring_index:
+            continue
+        refs = [ref for ref in ring.get("blockspace_refs", [])
+                if ref.get("role") in (name, f"registry/{name}")]
+        if len(refs) != 1:
+            raise RecoveryError(
+                f"ring {ring_index} contains {len(refs)} snapshots for {name}; expected exactly one")
+        match = (ring, refs[0])
+        break
+    if match is None:
+        raise RecoveryError(f"ring {ring_index} does not exist")
+    ring, ref = match
+    digest = ref.get("hash")
+    if not isinstance(digest, str) or not tc.blockspace.verify_blob(digest):
+        raise RecoveryError(f"ring {ring_index} references a missing or corrupt blockspace blob")
+    return ring, ref, tc.blockspace.get(digest)
+
+
+def _decode_registry_snapshot(name: str, raw: bytes, source_encoding: str,
+                              display_path: Path):
+    try:
+        text = raw.decode("utf-8")
+        used = "utf-8"
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode(source_encoding)
+            used = source_encoding
+        except UnicodeDecodeError as exc:
+            raise RecoveryError(
+                f"snapshot is neither strict UTF-8 nor strict {source_encoding}: {exc}") from exc
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RecoveryError(f"snapshot JSON is malformed: {exc}") from exc
+    try:
+        validate_registry_object(name, data, display_path)
+    except Exception as exc:
+        raise RecoveryError(f"snapshot registry schema is invalid: {exc}") from exc
+    return data, used
+
+
+def list_registry_snapshots(root: Path, name: str,
+                            source_encoding: str = "cp1252") -> list:
+    """List chain-attached snapshots, including schema/encoding validity."""
+    tc = _verified_timechain(root)
+    rows, seen = [], set()
+    for ring in tc.iter_rings():
+        for ref in ring.get("blockspace_refs", []):
+            if ref.get("role") not in (name, f"registry/{name}"):
+                continue
+            digest = ref.get("hash")
+            key = (ring.get("index"), digest)
+            if key in seen:
+                continue
+            seen.add(key)
+            row = {"ring": ring.get("index"), "ring_type": ring.get("ring_type"),
+                   "timestamp": ring.get("timestamp"), "hash": digest}
+            try:
+                if not isinstance(digest, str) or not tc.blockspace.verify_blob(digest):
+                    raise RecoveryError("missing or corrupt blockspace blob")
+                data, used = _decode_registry_snapshot(
+                    name, tc.blockspace.get(digest), source_encoding,
+                    Path(root) / "registry" / name)
+                row.update({"valid": True, "encoding": used})
+                if name == "grown.json":
+                    row["modalities"] = len(data["modalities"])
+                    row["senses"] = len(data["senses"])
+            except RecoveryError as exc:
+                row.update({"valid": False, "error": str(exc)})
+            rows.append(row)
+    return rows
+
+
+def restore_registry_snapshot(root: Path, name: str, ring_index: int,
+                              source_encoding: str = "cp1252",
+                              confirmed: bool = False) -> dict:
+    """Backup the live registry, then restore one reviewed blockspace snapshot."""
+    if not confirmed:
+        raise RecoveryError("registry restore is write-capable; rerun with --confirm")
+    root = Path(root).expanduser().resolve()
+    target = root / "registry" / name
+    if target.is_symlink():
+        raise RecoveryError(f"target must not be a symlink: {target}")
+    if not target.is_file():
+        raise RecoveryError(
+            f"target must already be a regular file so it can be backed up first: {target}")
+
+    tc = _verified_timechain(root)
+    ring, ref, snapshot_raw = _registry_snapshot(tc, name, int(ring_index))
+
+    # Preserve current evidence before interpreting the candidate snapshot.
+    current_raw = target.read_bytes()
+    backup = _create_verified_backup(target, current_raw)
+    try:
+        data, used = _decode_registry_snapshot(name, snapshot_raw, source_encoding, target)
+    except RecoveryError as exc:
+        raise RecoveryError(f"backup created at {backup}, but restore refused: {exc}") from exc
+
+    converted = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+    # Re-parse the exact candidate bytes before replacement.
+    try:
+        validate_registry_object(name, json.loads(converted.decode("utf-8")), target)
+    except Exception as exc:
+        raise RecoveryError(
+            f"backup created at {backup}, but canonical UTF-8 validation failed: {exc}") from exc
+
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="wb", prefix=f"{target.name}.", suffix=".restore.tmp",
+                dir=str(target.parent), delete=False) as fh:
+            tmp = Path(fh.name)
+            fh.write(converted)
+            fh.flush()
+            os.fsync(fh.fileno())
+        shutil.copymode(str(target), str(tmp))
+        tmp.replace(target)
+    finally:
+        if tmp is not None and tmp.exists():
+            tmp.unlink()
+
+    try:
+        validate_registry_object(name, json.loads(target.read_text(encoding="utf-8")), target)
+    except Exception as exc:
+        raise RecoveryError(
+            f"restore replacement failed final validation; recover from backup {backup}: {exc}") from exc
+    return {
+        "path": str(target), "backup": str(backup), "source_ring": ring["index"],
+        "source_ring_type": ring.get("ring_type"), "source_blob": ref["hash"],
+        "source_encoding": used, "before_sha256": _sha256(current_raw),
+        "after_sha256": _sha256(target.read_bytes()), "semantic_validation": "pass",
+        "schema_validation": "pass", "reanchored": False,
+        "next_step": (
+            "review the restored file and backup, then run: "
+            f"python3 encoding_recovery.py reanchor --root {shlex.quote(str(root))} "
+            "--confirm-reviewed --reason 'reviewed blockspace registry recovery'")
+    }
 
 
 def _print_json(obj) -> None:
@@ -319,6 +482,20 @@ def main(argv=None) -> int:
     reanchor_p.add_argument("--reason", required=True)
     reanchor_p.add_argument("--confirm-reviewed", action="store_true")
 
+    snapshots_p = sub.add_parser(
+        "registry-snapshots", help="list verified blockspace snapshots for one registry")
+    snapshots_p.add_argument("--root", required=True)
+    snapshots_p.add_argument("--name", choices=CANONICAL_REGISTRIES, default="grown.json")
+    snapshots_p.add_argument("--from-encoding", choices=("cp1252",), default="cp1252")
+
+    restore_p = sub.add_parser(
+        "restore-registry", help="backup live registry and restore one reviewed snapshot")
+    restore_p.add_argument("--root", required=True)
+    restore_p.add_argument("--name", choices=CANONICAL_REGISTRIES, default="grown.json")
+    restore_p.add_argument("--ring", required=True, type=int)
+    restore_p.add_argument("--from-encoding", choices=("cp1252",), default="cp1252")
+    restore_p.add_argument("--confirm", action="store_true")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "inspect":
@@ -334,13 +511,21 @@ def main(argv=None) -> int:
                             for r in results) else 0
         elif args.command == "recover":
             _print_json(recover_path(args.path, args.from_encoding, args.confirm))
-        else:
+        elif args.command == "reanchor":
             ring = reanchor_after_review(args.root, args.reason, args.confirm_reviewed)
             if ring is None:
                 print("no change — registries already match the latest epoch")
             else:
                 print(f"sealed reviewed registry epoch Ring {ring['index']}  "
                       f"{ring['ring_hash'][:16]}..")
+        elif args.command == "registry-snapshots":
+            rows = list_registry_snapshots(args.root, args.name, args.from_encoding)
+            _print_json({"root": str(Path(args.root).expanduser().resolve()),
+                         "registry": args.name, "snapshots": rows})
+            return 0 if rows else 2
+        else:
+            _print_json(restore_registry_snapshot(
+                args.root, args.name, args.ring, args.from_encoding, args.confirm))
     except (OSError, RecoveryError, UnicodeError, ValueError) as exc:
         print(f"RECOVERY REFUSED: {exc}", file=sys.stderr)
         return 1

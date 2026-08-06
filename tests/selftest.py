@@ -1142,7 +1142,54 @@ def main():
 
             # enforce: mark a fresh turn, then Stop must BLOCK until a ring is sealed
             _enf.cmd_mark({})
-            check("phase12 enforce: Stop blocks a turn that sealed nothing", _stop_blocks())
+            _state_file = eroot / "chain" / ".enforce.json"
+            _telemetry_file = eroot / "telemetry" / "events.jsonl"
+            _state_before_status = _state_file.read_bytes()
+            _telemetry_before_status = (_telemetry_file.read_bytes()
+                                        if _telemetry_file.is_file() else b"")
+            _status_cap, _status_real = io.StringIO(), sys.stdout
+            try:
+                sys.stdout = _status_cap
+                _enf.main(["status", "--json", "--root", str(eroot)])
+            finally:
+                sys.stdout = _status_real
+            try:
+                _pending_report = json.loads(_status_cap.getvalue())
+                _pending_ok = (_pending_report["state"] == "pending-no-seal"
+                               and _pending_report["baseline_head"] == h0 + 1
+                               and _pending_report["current_head"] == h0 + 1
+                               and _pending_report["head_delta"] == 0
+                               and _pending_report["root"] == str(eroot.resolve())
+                               and bool(_pending_report["turn_id"]))
+            except Exception:
+                _pending_ok = False
+            check("phase12 report: status JSON names a pending unsealed turn", _pending_ok)
+            check("phase12 report: status is read-only for state and telemetry",
+                  _state_file.read_bytes() == _state_before_status
+                  and (_telemetry_file.read_bytes() if _telemetry_file.is_file() else b"")
+                      == _telemetry_before_status)
+
+            _enf._STDOUT.clear()
+            _enf.cmd_stop_check({})
+            _unsealed_out = "".join(_enf._STDOUT)
+            _enf._STDOUT.clear()
+            try:
+                _unsealed_decision = json.loads(_unsealed_out)
+                _unsealed_reason = _unsealed_decision.get("reason", "")
+                _unsealed_ok = _unsealed_decision.get("decision") == "block"
+            except Exception:
+                _unsealed_reason, _unsealed_ok = "", False
+            _blocked_state = json.loads(_state_file.read_text(encoding="utf-8"))
+            _blocked_check = _blocked_state.get("last_stop_check") or {}
+            check("phase12 enforce: Stop blocks a turn that sealed nothing", _unsealed_ok)
+            check("phase12 report: Stop block self-reports exact observed state",
+                  "cause=no-seal" in _unsealed_reason
+                  and f"baseline ring #{h0 + 1}" in _unsealed_reason
+                  and f"observed head #{h0 + 1}" in _unsealed_reason
+                  and "status --json" in _unsealed_reason
+                  and _blocked_check.get("decision") == "block"
+                  and _blocked_check.get("reason") == "no-seal"
+                  and _blocked_check.get("head_delta") == 0)
 
             # A seal to a separate task root is still blocked, but now the nudge
             # diagnoses the root mismatch explicitly instead of pretending no work
@@ -1299,7 +1346,10 @@ def main():
                     sys.stdout = _jr
                 try:
                     _hj = json.loads(_jc.getvalue())["hookSpecificOutput"]
-                    _ok_hj = _hj["hookEventName"] == _ev and bool(_hj["additionalContext"])
+                    _ok_hj = (_hj["hookEventName"] == _ev
+                              and "[Cypher Tempre status]" in _hj["additionalContext"]
+                              and "Successful Stop checks remain silent"
+                                  in _hj["additionalContext"])
                 except Exception:
                     _ok_hj = False
                 check(f"phase12 hook: {_cmd} emits valid hook-JSON context (Codex-CLI safe)", _ok_hj)
@@ -1341,9 +1391,45 @@ def main():
                     check(f"phase12 wrapper: {_script} CT_ENFORCE_DEBUG=0 emits clean Stop JSON",
                           _ok_decision)
 
+            # Reproduce the real timing-race sequence: one early Stop observes no
+            # committed ring, the seal lands afterward, and the next Stop allows.
+            # The current result and the earlier blocked observation must both remain
+            # inspectable so an operator can explain feedback after the turn succeeds.
+            _enf.cmd_mark({})
+            check("phase12 report: early Stop race setup blocks before seal", _stop_blocks())
             with contextlib.redirect_stdout(io.StringIO()):
                 recall.cmd_turn(_ns("Tentatively this might be the cause; I'm not certain."))
             check("phase12 enforce: Stop allows once a ring is sealed", not _stop_blocks())
+            _satisfied_cap, _satisfied_real = io.StringIO(), sys.stdout
+            try:
+                sys.stdout = _satisfied_cap
+                _enf.main(["status", "--json"])
+            finally:
+                sys.stdout = _satisfied_real
+            try:
+                _satisfied_report = json.loads(_satisfied_cap.getvalue())
+                _satisfied_last = _satisfied_report.get("last_stop_check") or {}
+                _satisfied_block = _satisfied_report.get("last_blocked_stop") or {}
+                _satisfied_ok = (_satisfied_report["state"] == "satisfied"
+                                 and _satisfied_report["head_delta"] >= 1
+                                 and _satisfied_last.get("decision") == "allow"
+                                 and _satisfied_last.get("reason") == "sealed"
+                                 and _satisfied_block.get("decision") == "block"
+                                 and _satisfied_block.get("reason") == "no-seal")
+            except Exception:
+                _satisfied_ok = False
+            check("phase12 report: successful silent Stop remains inspectable", _satisfied_ok)
+
+            _line_cap, _line_real = io.StringIO(), sys.stdout
+            try:
+                sys.stdout = _line_cap
+                _enf.main(["status", "--line"])
+            finally:
+                sys.stdout = _line_real
+            check("phase12 report: compact status is one troubleshooting line",
+                  _line_cap.getvalue().count("\n") == 1
+                  and "state=satisfied" in _line_cap.getvalue()
+                  and "last-stop=allow/sealed" in _line_cap.getvalue())
 
             # immune membrane: covenant-violating input is refused AND a ring is sealed
             hb = _enf._head_index(eroot)

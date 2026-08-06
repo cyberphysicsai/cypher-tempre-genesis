@@ -1,0 +1,4 @@
+interface:
+  display_name: "Smol LM Version"
+  short_description: "Strict Timechain turns for tiny models"
+  default_prompt: "Use $cypher-tempre-smol-lm to answer through a controller-gated, receipt-verified Timechain turn."

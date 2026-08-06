@@ -16,7 +16,7 @@ description: >-
 permissions:
   - "file_read — the agent's own chain rings, registries, blockspace, and learner/policy/telemetry state"
   - "file_write — append-only chain rings and blockspace blobs, registries, and per-user learner state (never deletes; history is immutable)"
-  - "env — reads CT_TELEMETRY, dormancy, and dashboard dev-unlock toggles only"
+  - "env — reads CT_TELEMETRY, auto-sprout, dormancy, and dashboard dev-unlock toggles only"
   - "network — none in the stdlib core (git provenance is read directly from .git, no process spawning); used only if an optional embedding provider is explicitly selected (--provider st|openai|voyage)"
 ---
 
@@ -290,6 +290,18 @@ python3 encoding_recovery.py reanchor --root <skill-or-chain> \
   --confirm-reviewed --reason "reviewed cp1252-to-UTF-8 recovery"
 ```
 
+If `registry/grown.json` is malformed or a direct transcoding cannot recover it,
+restore a reviewed Timechain snapshot explicitly:
+
+```bash
+python3 encoding_recovery.py registry-snapshots --root <skill-or-chain> --name grown.json
+python3 encoding_recovery.py restore-registry --root <skill-or-chain> \
+  --name grown.json --ring <known-good-ring> --confirm
+# Review the restored file and byte-exact backup, then re-anchor separately:
+python3 encoding_recovery.py reanchor --root <skill-or-chain> \
+  --confirm-reviewed --reason "reviewed blockspace registry recovery"
+```
+
 Root scans cover active stores and deliberately skip inactive `quarantine/`
 forensic artifacts. Inspect an exact quarantined path when those bytes need review.
 
@@ -299,6 +311,16 @@ byte-exact sibling backup *before* decoding or semantic validation, atomically r
 only the named file, and never seals or re-anchors anything. The separate `reanchor`
 command requires the human-review confirmation and refuses while any active JSON/JSONL
 store under the chosen root remains non-UTF-8 or semantically invalid.
+
+As of v3.30.08, an existing canonical registry never degrades to a fresh empty store.
+Invalid UTF-8 raises `StorageEncodingError`; malformed JSON, I/O failure, and invalid
+registry structure raise `RegistryIntegrityError`. Every mutation validates all existing
+canonical registries for UTF-8, semantic JSON, and schema before comparing epoch hashes.
+This also protects a legacy-invalid file whose raw bytes were already epoch-anchored.
+`load_corpus()` propagates the failure, so Cambium disables growth instead of measuring
+dissonance against an incomplete faculty corpus. Snapshot restore always backs up the live
+file before interpreting the candidate, validates the snapshot and chain/blockspace, and
+never re-anchors without the separate reviewed command.
 
 ## Turn-accurate adherence and cross-platform validation (v3.30.06)
 
@@ -318,6 +340,29 @@ The repository's complete Python self-test runs on Windows, macOS, and Linux. On
 the direct `.sh` wrapper integration checks are POSIX-specific; Python enforcement,
 telemetry, chain, recovery, and every other runtime phase execute on all three.
 
+## Regular enforcement self-reporting (v3.30.07)
+
+Every runtime engine exposes the same enforcement report. Hook-enabled lifecycle context
+includes its compact form on every session start and user prompt. It reports the
+enforced root, logical turn, baseline/current ring heads,
+head delta, nudge budget, and last Stop result. A blocked Stop adds the same evidence to
+its reason, including a cause code and timing-race guidance. A successful Stop remains
+silent because empty stdout is the hook allow contract.
+
+Inspect the state at any time without sealing, writing telemetry, or changing adherence:
+
+```bash
+python3 enforce.py status                 # readable multi-line report
+python3 enforce.py status --line          # one-line report for logs
+python3 enforce.py status --json          # stable machine-readable schema
+python3 enforce.py status --json --root /path/to/project-root
+```
+
+Pass the project root that contains `chain/`, not the `chain/` directory. The report
+distinguishes `pending-no-seal`, `sealed-awaiting-stop`, `satisfied`, dormancy, bounded
+fail-open, and missing hook marks. It also preserves the previous turn and warns when a
+new mark superseded an open turn, which helps diagnose duplicate lifecycle channels.
+
 ## Growth (Cambium) — when you hit your limits
 
 When an input reveals a gap your existing faculties cannot cover (cognitive
@@ -326,6 +371,8 @@ dissonance), grow a new one instead of bluffing:
 ```
 python3 cambium.py sense "<the input>"          # measure the gap (dissonance)
 python3 cambium.py grow  "<the input>"           # sprout or fuse a new faculty, seal it
+python3 cambium.py auto-sprout status            # effective autonomous-growth permission
+python3 cambium.py auto-sprout on|off             # persistently toggle it
 ```
 
 **Eager growth (default).** The recurrence threshold is torn down (`PROMOTE_AT=1`): a
@@ -336,6 +383,17 @@ canonical registry and **coded** at once. More faculties = more of the input spa
 computed = **more learning in real time, outside your training parameters** — this is the point:
 you are a real-time learning agent.
 
+**Auto-sprout is a real toggle (v3.30.08).** When ON, the per-turn loop has explicit
+permission to fuse or sprout both modalities and senses for the task at hand, promote
+them, assemble audited primitive-composed ops, and run those ops immediately in the
+current session. It never runs arbitrary model-authored Python; that remains behind the
+human-reviewed propose/activate boundary below. When OFF, the loop performs no autonomous
+registry mutation or new-op invocation; an operator can still request a one-off manual
+`cambium.py grow`. Persistent control uses `auto-sprout on|off`. For a session-only
+override, launch the runtime with `CT_AUTO_SPROUT=1` or `CT_AUTO_SPROUT=0`; the environment
+permission wins over persistent state and expires with that session. Historical installs
+remain ON by default. `CT_AUTOGROW` remains a deprecated compatibility alias.
+
 **Growth is unbounded by default, and alignment is the guardrail — not a count.** What keeps
 unbounded learning safe is the conscience, not an artificial ceiling: the **genesis covenant**
 (baked-in alignment), the **PoQ gate** on every seal, and the **immune membrane**, which refuses a
@@ -344,7 +402,7 @@ membrane and never reaches growth). **Kind-aware dedup** means a repeated gap
 reinforces rather than duplicates, so growth tracks gap *diversity*, not input count, and the
 dissonance floor means only genuine gaps grow. Autonomous growth runs **only in the deliberate
 per-turn loop, never in bulk Continuum ingest** (a performance choice, not a safety one). Tune it:
-`CT_AUTOGROW=0` (off), `CT_PROMOTE_AT=3` (selective — only promote a recurring gap), `CT_MAX_GROWN=N`
+`CT_AUTO_SPROUT=0` (session off), `CT_PROMOTE_AT=3` (selective — only promote a recurring gap), `CT_MAX_GROWN=N`
 (cap registry size purely for *performance*; default 0 = unlimited). Every promotion is sealed in
 your chain — announce new faculties to your co-evolver (name, kind, function, how it emerged).
 
@@ -1124,7 +1182,8 @@ python3 immune.py forget-scar --id scar1                # retire a scar record (
 | `extractor.py` | the extractor learner — distilled labeler, confidence routing, teach pairs, falling annotation cost |
 | `dream.py` | consolidation — the offline cadence: verify, mine, train, adopt-or-refuse, seal |
 | `dormancy.py` | rest — manually pause/resume the loop for simple tasks (the chain stays intact) |
-| `encoding_recovery.py` | storage recovery — read-only UTF-8 inspection plus confirmation-gated cp1252 conversion and reviewed registry re-anchoring |
+| `registry_store.py` | registry integrity — strict UTF-8, semantic JSON, and structural validation shared by readers and mutation preflight |
+| `encoding_recovery.py` | storage recovery — read-only inspection, backup-first cp1252 conversion or blockspace registry restore, and separate reviewed re-anchoring |
 | `enforce.py` | adherence spine — the brain behind the hooks; makes the per-turn loop non-bypassable (fail-open, dormancy-aware, bounded) |
 | `*_hook.sh` | Claude Code hooks — SessionStart / UserPromptSubmit / Stop / SubagentStop wrappers that wire enforcement into the harness |
 | `agents/cypher-tempre-agent.md` | a subagent definition that wears the skill (runs the loop, seals before returning) |
@@ -1137,7 +1196,7 @@ python3 immune.py forget-scar --id scar1                # retire a scar record (
 ```
 timechain.py   init | seal | verify | log | show <id> | stat
 poq.py         audit "<thought>" | seal "<thought>"   (+ --coherence/--relevance/… 0-255)
-cambium.py     sense "<input>" | grow "<input>" | emergent
+cambium.py     sense "<input>" | grow "<input>" | auto-sprout status|on|off | emergent
 chronosynaptic.py  think "<query>" [--seal] | collapse-notes notes.json [--seal]
 continuum.py       open | ingest | walk | resume | validate   (long-horizon tasks; --changed-only; redaction)
 task.py            attach | complete | inspect                 (link separate task chains into identity; pass project root, not chain/)
@@ -1149,7 +1208,7 @@ consensus.py       init | attest | verify                       (quorum tamper-p
 immune.py          screen | scan | lockdown | rollback | status (detect/heal compromise; molt scars)
 hippocampus.py     build | update | search | status              (sub-linear recall index; recall retrieve --index uses it)
 telemetry.py       stats | tail | adherence | digest | verify | emit   (the loop's training signal; adherence = is the skill being worn?; CT_TELEMETRY=off disables)
-enforce.py         mark | stop-check | subagent-check | session-start   (hook brain; makes the loop non-bypassable; fail-open; CT_ENFORCE_ROOT / CT_ENFORCE_MAX_NUDGES)
+enforce.py         mark | stop-check | subagent-check | session-start | status [--json|--line]   (hook brain + read-only troubleshooting; fail-open; CT_ENFORCE_ROOT / CT_ENFORCE_MAX_NUDGES)
 bench.py           probes | run [--embed] [--seal] [--after N]    (notarized retrieval baselines; suppresses telemetry)
 policy.py          show                                            (covenant tolerances; registry/policy.json overrides)
 learner.py         train [--adopt] | rollback | appetite | calibrate-poq | status   (the decisions learner)
@@ -1160,7 +1219,7 @@ lens.py            train [--adopt] | status | rollback | sim        (representat
 extractor.py       label | teach | train [--adopt] | rollback | status  (distilled labeler; routing rate falls)
 dream.py           run [--no-train] [--no-seal] | status            (the consolidation cadence; trains all learners)
 dormancy.py        pause | resume | status                       (rest the loop for simple tasks; chain stays intact)
-encoding_recovery.py  inspect | scan | recover | reanchor        (explicit legacy text-store recovery)
+encoding_recovery.py  inspect | scan | recover | registry-snapshots | restore-registry | reanchor
 ```
 
 Common flags: `--context "<…>"`, `--root <path>`, `--difficulty N` (proof-of-work

@@ -37,7 +37,10 @@ import os
 import sys
 from pathlib import Path
 
-from timechain import Timechain, now_iso, atomic_write_json
+from timechain import (Timechain, now_iso, atomic_write_json,
+                       RegistryIntegrityError, StorageEncodingError)
+from registry_store import (load_registry, validate_registry_object,
+                            validate_registry_set)
 from poq import tokens, jaccard, coverage, clamp
 
 DISSONANCE_FLOOR = 150     # below this, existing faculties cover the input -> no growth
@@ -85,6 +88,8 @@ def _guarded_registry_write(root: Path, path: Path, obj, reason: str):
     attempted; a routine growth/prune/wake path can therefore never bless
     attacker-injected content merely because it happened to run next.
     """
+    validate_registry_object(path.name, obj, path)
+    validate_registry_set(root)
     try:
         import epochs
     except ImportError:                         # stripped-down legacy bundle
@@ -114,20 +119,58 @@ def registry_home(root: Path, registry_root=None) -> Path:
     return SKILL_DIR
 
 
+_TRUE = {"1", "true", "yes", "on", "enabled"}
+_FALSE = {"0", "false", "no", "off", "disabled"}
+
+
+def _auto_sprout_state_path(root: Path) -> Path:
+    return Path(root) / "chain" / "auto_sprout.json"
+
+
+def auto_sprout_status(root: Path) -> dict:
+    """Return the effective autonomous growth permission.
+
+    CT_AUTO_SPROUT is the session-scoped switch and wins over persistent state.
+    CT_AUTOGROW remains a deprecated compatibility alias.  The historical
+    default stays enabled; operators can persistently disable it with the CLI.
+    """
+    for variable in ("CT_AUTO_SPROUT", "CT_AUTOGROW"):
+        if variable in os.environ:
+            raw = os.environ.get(variable, "").strip().lower()
+            if raw not in _TRUE | _FALSE:
+                return {"enabled": False, "source": variable, "scope": "session",
+                        "error": f"{variable} must be one of on/off, true/false, 1/0"}
+            return {"enabled": raw in _TRUE, "source": variable,
+                    "scope": "session", "safe_ops_only": True}
+    path = _auto_sprout_state_path(root)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
+                raise ValueError("root must be an object with boolean enabled")
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            return {"enabled": False, "source": str(path), "scope": "persistent",
+                    "safe_ops_only": True,
+                    "error": f"invalid auto-sprout control state; fail-closed ({exc})"}
+        return {"enabled": data["enabled"], "source": str(path),
+                "scope": "persistent", "safe_ops_only": True}
+    return {"enabled": True, "source": "historical-default",
+            "scope": "default", "safe_ops_only": True}
+
+
+def set_auto_sprout(root: Path, enabled: bool) -> dict:
+    """Persist the auto-sprout default. Session env switches still take priority."""
+    path = _auto_sprout_state_path(root)
+    atomic_write_json(path, {"control": "auto-sprout", "enabled": bool(enabled),
+                             "updated_at": now_iso(), "safe_ops_only": True})
+    return auto_sprout_status(root)
+
+
 def load_grown(root: Path) -> dict:
     """The per-user store of PROMOTED faculties. Kept OUT of the shipped base registries
     (modalities.json / senses.json) and gitignored — like emergent.json and chain/ — so an
     upgrade that overwrites the base files can never lose a user's promoted faculties."""
-    p = root / "registry" / "grown.json"
-    if p.exists():
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            data.setdefault("modalities", [])
-            data.setdefault("senses", [])
-            return data
-        except Exception:
-            pass
-    return {"registry": "grown", "modalities": [], "senses": []}
+    return load_registry(root, "grown.json", missing_ok=True)
 
 
 def save_grown(root: Path, data: dict):
@@ -139,17 +182,15 @@ def migrate_legacy_promotions(root: Path) -> bool:
     """One-time, idempotent: older versions appended promoted faculties directly into the
     shipped base registries. Move any such entries (marked by a 'promoted' origin) into the
     per-user grown.json and restore the base files to pristine, so the base can never carry
-    a user's promotions. No-op once the base files are clean. Best-effort and atomic."""
+    a user's promotions. No-op once the base files are clean. Writes the rescued
+    grown copy before cleaning bases so interruption can duplicate but never lose."""
     grown = None
-    moved = False
+    cleaned = []
     for key, fname in (("modalities", "modalities.json"), ("senses", "senses.json")):
         p = root / "registry" / fname
         if not p.exists():
             continue
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
+        data = load_registry(root, fname)
         entries = data.get(key, [])
         promoted = [e for e in entries if "promoted" in str(e.get("origin", "")).lower()]
         if not promoted:
@@ -161,24 +202,26 @@ def migrate_legacy_promotions(root: Path) -> bool:
             if (e.get("id"), e.get("name")) not in have:
                 grown.setdefault(key, []).append(e)
         data[key] = [e for e in entries if "promoted" not in str(e.get("origin", "")).lower()]
-        _guarded_registry_write(root, p, data,
-                                f"legacy promotion migration: {fname}")
-        moved = True
-    if grown is not None and moved:
+        cleaned.append((p, data, fname))
+    if grown is not None and cleaned:
+        # Persist the rescued copy FIRST. A crash may temporarily leave a
+        # duplicate in the shipped base, but can never lose the only copy.
         save_grown(root, grown)
-    return moved
+        for p, data, fname in cleaned:
+            _guarded_registry_write(root, p, data,
+                                    f"legacy promotion migration: {fname}")
+    return bool(cleaned)
 
 
 def load_corpus(root: Path, include_dormant: bool = False):
-    try:
-        migrate_legacy_promotions(root)        # best-effort; the merge below is loss-proof regardless
-    except Exception:
-        pass
+    # Any registry failure propagates. Dissonance computed from a partial
+    # corpus could authorize destructive, duplicate growth.
+    migrate_legacy_promotions(root)
     grown = load_grown(root)
     corpus = []
-    for kind, fname, key in [("modality", "registry/modalities.json", "modalities"),
-                             ("sense", "registry/senses.json", "senses")]:
-        data = json.loads((root / fname).read_text(encoding="utf-8"))
+    for kind, fname, key in [("modality", "modalities.json", "modalities"),
+                             ("sense", "senses.json", "senses")]:
+        data = load_registry(root, fname)
         for f in list(data.get(key, [])) + list(grown.get(key, [])):   # base + per-user promotions
             if not include_dormant and f.get("status") == "dormant":
                 continue        # hibernated: out of the working set, retrievable on relevance
@@ -331,10 +374,7 @@ def propose(gap: dict, input_text: str, mode: str = "auto", kind_override=None) 
 # --------------------------------------------------------------------------- #
 
 def load_emergent(root: Path) -> dict:
-    p = root / "registry" / "emergent.json"
-    if p.exists():
-        return json.loads(p.read_text(encoding="utf-8"))
-    return {"registry": "emergent", "faculties": []}
+    return load_registry(root, "emergent.json", missing_ok=True)
 
 
 def save_emergent(root: Path, data: dict):
@@ -450,7 +490,7 @@ def activate(root: Path, selector: str, registry_root=None, difficulty: int = 0)
     if not fac:
         return {"ok": False, "reason": f"no emergent proposal matched {selector!r}"}, None
     key = "modalities" if fac["kind"] == "modality" else "senses"
-    base = json.loads((home / "registry" / f"{key}.json").read_text(encoding="utf-8")).get(key, [])
+    base = load_registry(home, f"{key}.json").get(key, [])
     grown = load_grown(home)
     existing_ids = [it["id"] for it in base] + [it["id"] for it in grown.get(key, [])]
     new_id = (max(existing_ids) if existing_ids else 0) + 1
@@ -482,7 +522,7 @@ def promote(root: Path, tc: Timechain, e: dict, difficulty: int = 0,
             op_spec_override=None, activation_text: str = "",
             activation_context: str = "") -> dict:
     key = "modalities" if e["kind"] == "modality" else "senses"
-    base = json.loads((root / "registry" / f"{key}.json").read_text(encoding="utf-8")).get(key, [])
+    base = load_registry(root, f"{key}.json").get(key, [])
     grown = load_grown(root)
     # Soft cap: the only backstop against pathological unbounded growth (0 = unlimited).
     if MAX_GROWN and len(grown.get(key, [])) >= MAX_GROWN:
@@ -523,6 +563,8 @@ def promote(root: Path, tc: Timechain, e: dict, difficulty: int = 0,
             e["op_source"] = op_source
             op_activation = _op_activation(
                 spec, activation_text or " ".join(seeds), activation_context or "")
+    except (StorageEncodingError, RegistryIntegrityError):
+        raise
     except Exception:
         pass
 
@@ -810,8 +852,13 @@ def fill_gap(root: Path, input_text: str, context: str = "", both: bool = True,
     = more label-space learning, the Cambium thesis). With PROMOTE_AT=1 each is promoted
     and coded on first encounter; kind-aware dedup keeps repeats from spawning duplicates,
     so growth tracks gap DIVERSITY, not input count. Best-effort; returns the grow
-    results (each has action covered|born|promoted|recurrence)."""
+    results (each has action disabled|covered|born|promoted|recurrence). Incidental
+    runtime failures remain best-effort; registry-integrity failures always propagate."""
     home = registry_home(root, registry_root)
+    permission = auto_sprout_status(home)
+    if not permission["enabled"]:
+        return [{"action": "disabled", "permission": permission,
+                 "reason": "auto-sprout is off; no autonomous registry mutation or op execution"}]
 
     def _measure():
         corpus = load_corpus(home)
@@ -845,6 +892,8 @@ def fill_gap(root: Path, input_text: str, context: str = "", both: bool = True,
             woken_names = {x["name"] for x in w.get("woken", [])}
             woken_results = [{"action": "woken", "faculty": f, "score": s, "gap": snap}
                              for kind, f, s in hits if f["name"] in woken_names]
+    except (StorageEncodingError, RegistryIntegrityError):
+        raise
     except Exception:
         pass
     if woken_results:
@@ -875,10 +924,12 @@ def fill_gap(root: Path, input_text: str, context: str = "", both: bool = True,
         try:
             # force + the shared snapshot so both kinds grow from the same uncovered terms,
             # even though growing the first lowers the live dissonance for the second.
-            res, _ = grow(root, input_text, context=context, mode="sprout",
+            res, _ = grow(root, input_text, context=context, mode="auto",
                           kind_override=k, difficulty=difficulty, registry_root=registry_root,
                           force=True, gap_override=snap)
             results.append(res)
+        except (StorageEncodingError, RegistryIntegrityError):
+            raise
         except Exception:
             pass
     return woken_results + results
@@ -980,6 +1031,17 @@ def cmd_emergent(args):
         print(f"  {e['eid']} [{e['kind']}] {e['name']}  recur={e['recurrence']} status={e['status']}{promo}")
 
 
+def cmd_auto_sprout(args):
+    home = registry_home(args.root, args.registry_root)
+    if args.action in ("on", "off"):
+        set_auto_sprout(home, args.action == "on")
+    status = auto_sprout_status(home)
+    print(json.dumps({"mode": "auto-sprout", "registry_root": str(home), **status},
+                     indent=2, ensure_ascii=False))
+    if status.get("error"):
+        raise SystemExit(1)
+
+
 def build_parser():
     default_root = Path(__file__).resolve().parent
     common = argparse.ArgumentParser(add_help=False)
@@ -1005,6 +1067,12 @@ def build_parser():
     pg.add_argument("--function", default=None,
                     help="model-authored faculty function description")
     pg.set_defaults(func=cmd_grow)
+
+    pas = sub.add_parser(
+        "auto-sprout", parents=[common],
+        help="show or persistently toggle autonomous faculty fusion/sprouting")
+    pas.add_argument("action", choices=["status", "on", "off"], nargs="?", default="status")
+    pas.set_defaults(func=cmd_auto_sprout)
 
     pp = sub.add_parser("propose-op", parents=[common],
                         help="commit a model-AUTHORED coded faculty to emergent (DORMANT, never executed)")
@@ -1188,6 +1256,8 @@ def backfill_effects(root: Path, registry_root=None) -> dict:
     try:
         import modality_ops
         op_names = set((modality_ops.load_grown_ops(home) or {}).keys())
+    except (StorageEncodingError, RegistryIntegrityError):
+        raise
     except Exception:
         pass
     filled = 0

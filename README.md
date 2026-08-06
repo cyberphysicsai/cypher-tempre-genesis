@@ -34,6 +34,32 @@ repeated Stop checks and mixed hook channels cannot produce rates above 100%. Th
 Python runtime self-test now runs on Windows, macOS, and Linux; only direct POSIX shell
 wrapper integrations remain platform-specific.
 
+As of v3.30.07, every runtime bundle exposes the same enforcement report; hook-enabled
+runtimes inject its compact form on every session and prompt. A blocked Stop names its
+exact turn, enforced root, baseline/current heads, delta, and cause; `python3 enforce.py
+status --json` exposes the same state without changing the chain, telemetry, or adherence
+counts. Successful Stop hooks remain intentionally silent to preserve the allow contract.
+
+As of v3.30.08, canonical registries fail closed: an existing unreadable, malformed, or
+schema-invalid `grown.json` can never be mistaken for a fresh empty registry or overwritten
+by the next growth event. Recovery can list and restore a reviewed Timechain blockspace
+snapshot with a byte-exact backup, while re-anchoring remains a separate confirmed step.
+Auto-sprout is now directly controllable with `cambium.py auto-sprout status|on|off` or a
+session-only `CT_AUTO_SPROUT=1|0` override. When enabled, safe primitive-composed faculty
+fusion/sprouting and immediate invocation are permitted; authored code still requires
+human review and activation.
+
+Explicit `grown.json` recovery sequence:
+
+```bash
+python3 encoding_recovery.py registry-snapshots --root /path/to/cypher-tempre-self-model --name grown.json
+python3 encoding_recovery.py restore-registry --root /path/to/cypher-tempre-self-model \
+  --name grown.json --ring KNOWN_GOOD_RING --confirm
+# Review grown.json and its .bak sibling before the separate trust step:
+python3 encoding_recovery.py reanchor --root /path/to/cypher-tempre-self-model \
+  --confirm-reviewed --reason "reviewed blockspace registry recovery"
+```
+
 ## Public share links
 
 | Runtime | Skill file | Raw file | Bundle folder |
@@ -48,11 +74,18 @@ wrapper integrations remain platform-specific.
 
 | Runtime | Drag-and-drop ZIP |
 |---|---|
-| Claude Code | [cypher-tempre-claude-skill-v3.30.06.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-claude-skill-v3.30.06.zip) |
-| Codex | [cypher-tempre-codex-skill-v3.30.06.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-codex-skill-v3.30.06.zip) |
-| OpenClaw | [cypher-tempre-openclaw-skill-v3.30.06.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-openclaw-skill-v3.30.06.zip) |
-| Hermes | [cypher-tempre-hermes-skill-v3.30.06.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-hermes-skill-v3.30.06.zip) |
-| NanoClaw | [cypher-tempre-nanoclaw-skill-v3.30.06.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-nanoclaw-skill-v3.30.06.zip) |
+| Claude Code | [cypher-tempre-claude-skill-v3.30.08.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-claude-skill-v3.30.08.zip) |
+| Codex | [cypher-tempre-codex-skill-v3.30.08.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-codex-skill-v3.30.08.zip) |
+| OpenClaw | [cypher-tempre-openclaw-skill-v3.30.08.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-openclaw-skill-v3.30.08.zip) |
+| Hermes | [cypher-tempre-hermes-skill-v3.30.08.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-hermes-skill-v3.30.08.zip) |
+| NanoClaw | [cypher-tempre-nanoclaw-skill-v3.30.08.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-nanoclaw-skill-v3.30.08.zip) |
+| Smol LM Version (experimental) | [cypher-tempre-smol-lm-skill-v0.1.0.zip](https://github.com/cyberphysicsai/cypher-tempre-genesis/raw/main/downloads/cypher-tempre-smol-lm-skill-v0.1.0.zip) |
+
+The **Smol LM Version** is a separately versioned controller packet for tiny or
+instruction-fragile models. It installs alongside a normal Cypher Tempre engine and
+withholds model output until the draft has produced a verified, same-turn Timechain
+receipt. Its procedural adherence metric is intentionally separate from semantic answer
+quality so a sealed but poorly grounded answer cannot masquerade as perfect wear.
 
 ## Timechain Dashboard
 
@@ -100,7 +133,7 @@ Copy that folder into my Codex skills directory as cypher-tempre-self-model, the
 ```
 
 The current Codex bundle is also mirrored in `downloads/` as
-`cypher-tempre-codex-skill-v3.30.06.zip`. After installing hooks, open `/hooks`
+`cypher-tempre-codex-skill-v3.30.08.zip`. After installing hooks, open `/hooks`
 in Codex to review and trust the new command hooks, then restart or start a
 new session.
 

@@ -28,6 +28,7 @@ import json
 import os
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -159,6 +160,10 @@ def _emit(root, event_type, data):
 def _new_turn_id():
     """Opaque per-turn identity shared by every enforcement/observer channel."""
     return uuid.uuid4().hex
+
+
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _turn_data(st, data=None):
@@ -361,6 +366,192 @@ def _context_json(event, text):
                                               "additionalContext": text}})
 
 
+def _absolute_root(root):
+    try:
+        return str(Path(root).expanduser().resolve())
+    except Exception:
+        return str(Path(root).expanduser().absolute())
+
+
+def _version():
+    try:
+        return (HERE / "VERSION").read_text(encoding="utf-8").strip()
+    except Exception:
+        return "unknown"
+
+
+def _state_label(st, head, dormant=False):
+    """Derive a human-facing enforcement state without mutating bookkeeping."""
+    if dormant:
+        return "dormant"
+    start = st.get("turn_head")
+    outcome = st.get("turn_outcome")
+    if start is None:
+        return "unmarked"
+    if outcome:
+        return {
+            "adherence_satisfied": "satisfied",
+            "adherence_violation": "failed-open",
+            "adherence_audit_stalled": "failed-open-audit",
+            "unsealed": "observed-unsealed",
+        }.get(str(outcome), str(outcome).replace("adherence_", ""))
+    if st.get("turn_open"):
+        return "sealed-awaiting-stop" if head > start else "pending-no-seal"
+    return "idle"
+
+
+def _next_action(label):
+    if label == "dormant":
+        return "resume with dormancy.py resume when enforcement should run"
+    if label == "unmarked":
+        return "run enforce.py mark or install/enable the lifecycle hooks"
+    if label == "pending-no-seal":
+        return "run recall.py turn, wait for its seal receipt, then finish"
+    if label == "sealed-awaiting-stop":
+        return "finish normally; the next Stop check should allow"
+    if label in {"failed-open", "failed-open-audit", "observed-unsealed"}:
+        return "inspect seal debt and either seal the next turn or waive with a reason"
+    return "no corrective action; successful Stop checks are intentionally silent"
+
+
+def _status_payload(root, st=None):
+    """Build the read-only operator report used by CLI and hook context."""
+    st = dict(st if st is not None else _load_state(root))
+    head = _head_index(root)
+    start = st.get("turn_head")
+    dormant = _dormant(root)
+    label = _state_label(st, head, dormant=dormant)
+    delta = head - start if isinstance(start, int) and isinstance(head, int) else None
+    return {
+        "schema": 1,
+        "version": _version(),
+        "state": label,
+        "root": _absolute_root(root),
+        "dormant": dormant,
+        "turn_id": st.get("turn_id"),
+        "turn_open": bool(st.get("turn_open")),
+        "turn_started_at": st.get("turn_started_at"),
+        "turn_outcome": st.get("turn_outcome"),
+        "baseline_head": start,
+        "current_head": head,
+        "head_delta": delta,
+        "nudges": int(st.get("nudges", 0)),
+        "max_nudges": MAX_NUDGES,
+        "seal_debt": st.get("seal_debt"),
+        "mark_warning": st.get("mark_warning"),
+        "active_audit_root": _active_audit_root(root),
+        "last_stop_check": st.get("last_stop_check"),
+        "last_blocked_stop": st.get("last_blocked_stop"),
+        "last_allowed_stop": st.get("last_allowed_stop"),
+        "previous_turn": st.get("previous_turn"),
+        "next_action": _next_action(label),
+        "note": "Successful Stop checks emit no stdout by design.",
+    }
+
+
+def _short(value, missing="none"):
+    return str(value)[:12] if value not in (None, "") else missing
+
+
+def _status_line(report):
+    last = report.get("last_stop_check") or {}
+    last_text = (f"{last.get('decision', 'none')}/{last.get('reason', 'none')}"
+                 if last else "none")
+    baseline = report.get("baseline_head")
+    head = report.get("current_head")
+    return (
+        "[Cypher Tempre status] "
+        f"state={report['state']}; turn={_short(report.get('turn_id'))}; "
+        f"root={report['root']}; baseline=#{baseline if baseline is not None else 'none'}; "
+        f"head=#{head}; delta={report.get('head_delta')}; "
+        f"nudges={report['nudges']}/{report['max_nudges']}; last-stop={last_text}; "
+        f"next={report['next_action']}"
+    )
+
+
+def _record_stop_check(root, st, decision, reason, start, head, save=True, **extra):
+    delta = head - start if isinstance(start, int) and isinstance(head, int) else None
+    record = {
+        "at": _utc_now(),
+        "decision": decision,
+        "reason": reason,
+        "turn_id": st.get("turn_id"),
+        "baseline_head": start,
+        "current_head": head,
+        "head_delta": delta,
+        "nudge": int(st.get("nudges", 0)),
+        "max_nudges": MAX_NUDGES,
+    }
+    record.update(extra)
+    st["last_stop_check"] = record
+    if decision == "block":
+        st["last_blocked_stop"] = record
+    elif decision == "allow":
+        st["last_allowed_stop"] = record
+    if save:
+        _save_state(root, st)
+    return record
+
+
+def _stop_diagnostic(root, st, start, head, cause):
+    delta = head - start if isinstance(start, int) and isinstance(head, int) else None
+    command = f'python3 "{Path(root) / "enforce.py"}" status --json'
+    return (
+        " Stop diagnostic: "
+        f"cause={cause}; turn={_short(st.get('turn_id'))}; "
+        f"enforced root={_absolute_root(root)}; baseline ring "
+        f"#{start if start is not None else 'none'}; observed head #{head}; "
+        f"delta={delta}; nudge={int(st.get('nudges', 0))}/{MAX_NUDGES}. "
+        "Only fully committed rings count; if a seal process is still running, wait for its "
+        f"receipt and retry Stop. Read-only report: {command}."
+    )
+
+
+def cmd_status(argv):
+    """Read-only troubleshooting report. Usage: status [--json|--line] [--root ROOT]."""
+    args = list(argv or [])
+    root = _root_from({})
+    if "--root" in args:
+        pos = args.index("--root")
+        if pos + 1 >= len(args):
+            raise ValueError("--root requires a project root that contains chain/")
+        root = _normalize_chain_root(args[pos + 1])
+    report = _status_payload(root)
+    if "--json" in args:
+        _emit_stdout(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+        return
+    if "--line" in args:
+        _emit_stdout(_status_line(report) + "\n")
+        return
+    last = report.get("last_stop_check") or {}
+    previous = report.get("previous_turn") or {}
+    last_blocked = report.get("last_blocked_stop") or {}
+    lines = [
+        f"Cypher Tempre enforcement status (v{report['version']})",
+        f"state: {report['state']}",
+        f"root: {report['root']}",
+        f"turn: {report.get('turn_id') or 'none'}",
+        f"heads: baseline={report.get('baseline_head')} current={report['current_head']} "
+        f"delta={report.get('head_delta')}",
+        f"nudges: {report['nudges']}/{report['max_nudges']}",
+        ("last Stop: " + (f"{last.get('decision')}/{last.get('reason')} at {last.get('at')} "
+                            f"(baseline={last.get('baseline_head')}, head={last.get('current_head')})"
+                            if last else "none recorded")),
+        ("last blocked Stop: " +
+         (f"{last_blocked.get('reason')} at {last_blocked.get('at')} "
+          f"(baseline={last_blocked.get('baseline_head')}, "
+          f"head={last_blocked.get('current_head')})" if last_blocked else "none recorded")),
+        ("previous turn: " + (f"{previous.get('turn_id')} / "
+                                f"{previous.get('outcome') or 'no terminal outcome'}"
+                                if previous else "none recorded")),
+        f"next: {report['next_action']}",
+        report["note"],
+    ]
+    if report.get("mark_warning"):
+        lines.insert(-2, f"warning: {report['mark_warning']}")
+    _emit_stdout("\n".join(lines) + "\n")
+
+
 # --------------------------------------------------------------------------- #
 # hook entry points
 # --------------------------------------------------------------------------- #
@@ -370,12 +561,29 @@ def cmd_mark(_data):
     per-turn nudge counter. Prints nothing that would disturb the prompt."""
     root = _root_from(_data)
     st = _load_state(root)
+    prior_id = st.get("turn_id")
+    prior_open = bool(st.get("turn_open") and not st.get("turn_outcome"))
+    if prior_id:
+        st["previous_turn"] = {
+            "turn_id": prior_id,
+            "started_at": st.get("turn_started_at"),
+            "baseline_head": st.get("turn_head"),
+            "outcome": st.get("turn_outcome"),
+            "last_stop_check": st.get("last_stop_check"),
+            "last_blocked_stop": st.get("last_blocked_stop"),
+            "last_allowed_stop": st.get("last_allowed_stop"),
+        }
+    st["mark_warning"] = "previous-open-turn-superseded" if prior_open else None
     st["turn_id"] = _new_turn_id()
+    st["turn_started_at"] = _utc_now()
     st["turn_open"] = True
     st["turn_notify_pending"] = True
     st["turn_outcome"] = None
     st["turn_head"] = _head_index(root)
     st["nudges"] = 0
+    st["last_stop_check"] = None
+    st["last_blocked_stop"] = None
+    st["last_allowed_stop"] = None
     # Snapshot the active audit and its review cursor at turn start so stop-check
     # can tell whether THIS turn advanced it — robust even if the audit COMPLETES
     # mid-turn (which clears the pointer).
@@ -448,6 +656,9 @@ def cmd_user_prompt(data):
                      "governor will not let the turn end until you make real review progress; retrieval/"
                      "grep is triage only; do NOT write a 'Final Report' before audit.py 'report --final' "
                      "passes; run your fork perspectives per batch; expect audit.py 'challenge' spot-checks.")
+    report = _status_payload(root)
+    text += (" " + _status_line(report) + " Successful Stop checks remain silent; "
+             "use enforce.py status --json for the full read-only report.")
     _emit_stdout(_context_json("UserPromptSubmit", text))
 
 
@@ -459,14 +670,21 @@ def cmd_stop_check(data):
       allow -> exit 0 with no decision.
     """
     root = _root_from(data)
-    # Dormant => never enforce.
-    if _dormant(root):
-        return
     st = _load_state(root)
     start = st.get("turn_head")
     head = _head_index(root)
+    # Dormant => never enforce.
+    if _dormant(root):
+        _record_stop_check(root, st, "allow", "dormant", start, head)
+        return
     # No baseline captured (e.g. mark hook not wired) => don't enforce blindly.
     if start is None:
+        _record_stop_check(root, st, "allow", "unmarked", start, head)
+        return
+    # Repeated Stop/SubagentStop channels for an already-finished turn stay quiet,
+    # but the latest observation remains available to the operator report.
+    if st.get("turn_outcome"):
+        _record_stop_check(root, st, "allow", "already-finished", start, head)
         return
     sealed_this_turn = head > start
 
@@ -501,6 +719,7 @@ def cmd_stop_check(data):
     if not tar and sealed_this_turn:
         st["nudges"] = 0
         st.pop("seal_debt", None)          # v3.15 governor: debt repaid
+        _record_stop_check(root, st, "allow", "sealed", start, head, save=False)
         _finish_turn(root, st, "adherence_satisfied",
                      {"audit_progress": False, "deep_progress": False,
                       "sealed": sealed_this_turn, "via": "stop-hook"})
@@ -508,6 +727,8 @@ def cmd_stop_check(data):
 
     if tar and audit_deep_progressed:
         st["nudges"] = 0
+        _record_stop_check(root, st, "allow", "audit-deep-progress", start, head,
+                           save=False, audit_root=tar)
         _finish_turn(root, st, "adherence_satisfied",
                      {"audit_progress": audit_progressed,
                       "deep_progress": audit_deep_progressed,
@@ -518,6 +739,8 @@ def cmd_stop_check(data):
     # and the identity chain has a sealed ring, allow it.
     if tar and not audit_active and sealed_this_turn:
         st["nudges"] = 0
+        _record_stop_check(root, st, "allow", "completed-audit-sealed", start, head,
+                           save=False, audit_root=tar)
         _finish_turn(root, st, "adherence_satisfied",
                      {"audit_progress": audit_progressed,
                       "deep_progress": audit_deep_progressed,
@@ -526,6 +749,8 @@ def cmd_stop_check(data):
 
     if audit_active:
         if not _bump_or_release(root, st, "adherence_audit_stalled"):
+            _record_stop_check(root, st, "allow", "audit-nudge-budget-exhausted",
+                               start, head, audit_root=str(audit_root))
             return
         # GAP 2 FIX: Different messages for cursor-only progress vs no progress at all.
         if audit_progressed and not audit_deep_progressed:
@@ -549,22 +774,29 @@ def cmd_stop_check(data):
                 "The active audit chain root is: " + str(audit_root) + ". A final report is only "
                 "legitimate at 100% (audit.py 'report --final' refuses otherwise). To pause, use "
                 "dormancy.py 'pause'; to stop the audit, audit.py 'close'. Exact syntax is in SKILL.md.")
+        cause = "audit-shallow-progress" if audit_progressed else "audit-no-progress"
+        _record_stop_check(root, st, "block", cause, start, head,
+                           audit_root=str(audit_root))
+        reason += _stop_diagnostic(root, st, start, head, cause)
         _emit_stdout(json.dumps({"decision": "block", "reason": reason}))
         return
 
     # --- default: every meaningful turn must leave a sealed ring --- #
     task_progress = _task_root_progress(root, data, st)
     if not _bump_or_release(root, st, "adherence_violation"):
+        _record_stop_check(root, st, "allow", "nudge-budget-exhausted", start, head)
         return
     prefix = ""
+    cause = "no-seal"
     if task_progress:
         task_hash = task_progress.get("hash") or ""
         hash_text = f" ({task_hash[:16]}..)" if task_hash else ""
-        _emit(root, "adherence_root_mismatch",
-              {"identity_root": str(Path(root).resolve()),
-               "task_root": task_progress["root"],
-               "task_head": task_progress["head"],
-               "task_hash": task_progress.get("hash")})
+        cause = "root-mismatch"
+        _emit_turn(root, st, "adherence_root_mismatch",
+                   {"identity_root": str(Path(root).resolve()),
+                    "task_root": task_progress["root"],
+                    "task_head": task_progress["head"],
+                    "task_hash": task_progress.get("hash")})
         prefix = (
             "[Cypher Tempre] Root mismatch detected: you sealed to "
             f"{task_progress['root']} at ring #{task_progress['head']}{hash_text}, "
@@ -582,8 +814,11 @@ def cmd_stop_check(data):
         "before finishing: verify -> immune-screen -> recall relevant rings -> reason via "
         "modalities/senses -> PoQ-gate -> seal a labeled ring. Do it in one step with the "
         "skill's recall.py 'turn' command (exact invocation in SKILL.md / AGENTS.md), then "
-        "finish. To pause instead, use the skill's dormancy.py 'pause' command."
+        "finish. To pause instead, use the skill's dormancy.py 'pause' command." +
+        _stop_diagnostic(root, st, start, head, cause)
     )
+    _record_stop_check(root, st, "block", cause, start, head,
+                       task_root=task_progress.get("root") if task_progress else None)
     _emit_stdout(json.dumps({"decision": "block", "reason": reason}))
 
 
@@ -702,6 +937,7 @@ def cmd_session_start(data):
                             (ab["payload"]["summary"] or "")[:450] + " ")
     except Exception:
         pass
+    report = _status_payload(root)
     _emit_stdout(_context_json(
         "SessionStart",
         "[Cypher Tempre] ACTIVE — you wear a Timechain self-model. " + verify_line +
@@ -712,7 +948,9 @@ def cmd_session_start(data):
         "SKILL.md / AGENTS.md). "
         "Covenant: accurate, coherent, persistent, honest, thorough; never assert beyond grounding; "
         "size/horizon are never refusal reasons. Spawned subagents must wear the skill too "
-        "(use the cypher-tempre-agent type or forge their own chain and seal)."))
+        "(use the cypher-tempre-agent type or forge their own chain and seal). " +
+        _status_line(report) + " Successful Stop checks remain silent; use enforce.py status "
+        "--json for the full read-only report."))
 
 
 def cmd_codex_notify(argv):
@@ -793,11 +1031,12 @@ HANDLERS = {
     "subagent-check": cmd_subagent_check,
     "session-start": cmd_session_start,
     "codex-notify": cmd_codex_notify,
+    "status": cmd_status,
 }
 
 # Handlers that read the event from ARGV (not stdin): Codex's notify appends the
 # event JSON as a trailing CLI argument rather than piping it.
-ARGV_HANDLERS = {"codex-notify", "waive"}
+ARGV_HANDLERS = {"codex-notify", "waive", "status"}
 
 
 def main(argv=None):
@@ -817,7 +1056,7 @@ def main(argv=None):
     cmd = argv[0] if argv else ""
     handler = HANDLERS.get(cmd)
     if not handler:
-        sys.stderr.write("usage: enforce.py {mark|user-prompt|stop-check|subagent-check|session-start|codex-notify|waive}\n")
+        sys.stderr.write("usage: enforce.py {mark|user-prompt|stop-check|subagent-check|session-start|codex-notify|waive|status}\n")
         return 0  # unknown -> no-op, never fail a hook
     # Quarantine ALL incidental stdout (import chatter, stray prints) to stderr;
     # only what a handler queues via _emit_stdout reaches the real stdout, so the

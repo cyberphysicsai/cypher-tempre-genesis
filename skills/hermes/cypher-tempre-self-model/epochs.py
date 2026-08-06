@@ -37,7 +37,9 @@ import json
 import sys
 from pathlib import Path
 
-from timechain import Timechain
+from timechain import (Timechain, RegistryIntegrityError,
+                       StorageEncodingError)
+from registry_store import validate_registry_set
 
 REGISTRY_FILES = ("senses.json", "modalities.json", "grown.json",
                   "grown_ops.json", "emergent.json")
@@ -114,6 +116,10 @@ def begin_mutation(root: Path):
     later commit to that exact authenticated epoch.
     """
     root = Path(root)
+    # Hash equality is necessary but not sufficient: a malformed legacy file
+    # may itself have been epoch-anchored. Authenticate UTF-8, semantic JSON,
+    # and registry schema before authorizing any overwrite.
+    validate_registry_set(root)
     tc = Timechain(root)
     live = registry_hashes(root)
     prev = latest_epoch(tc)
@@ -144,6 +150,7 @@ def seal_epoch(root: Path, reason: str = "registry mutation",
     - a manual re-anchor after human review requires ``accept_current=True``.
     """
     root = Path(root)
+    validate_registry_set(root)
     tc = Timechain(root)
     hashes = registry_hashes(root)
     prev = latest_epoch(tc)
@@ -181,6 +188,13 @@ def check_epoch(root: Path):
     root = Path(root)
     tc = Timechain(root)
     prev = latest_epoch(tc)
+    validation_error = None
+    try:
+        validate_registry_set(root)
+    except (StorageEncodingError, RegistryIntegrityError) as exc:
+        validation_error = str(exc)
+    if validation_error:
+        return False, [f"registry integrity failure: {validation_error}"]
     if prev is None:
         return True, ["no registry epoch sealed yet (pre-3.12 chain) — "
                       "run: python3 epochs.py seal"]
@@ -202,7 +216,7 @@ def cmd_seal(args):
     try:
         ring = seal_epoch(args.root, reason=args.reason,
                           accept_current=args.accept_current)
-    except EpochMismatchError as exc:
+    except (EpochMismatchError, StorageEncodingError, RegistryIntegrityError) as exc:
         print(f"EPOCH SEAL REFUSED: {exc}")
         sys.exit(1)
     if ring is None:

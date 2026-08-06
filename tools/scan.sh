@@ -8,7 +8,7 @@
 # the scanner at a bundle to assess what actually runs.
 #
 # Usage:
-#   bash tools/scan.sh           # static scan of all five bundles (fast)
+#   bash tools/scan.sh           # static scan of all shipped skill packets (fast)
 #   bash tools/scan.sh --llm     # include the model-assisted analysis pass
 #
 # Override the scanner binary with SKILLSPECTOR=/path/to/skillspector.
@@ -24,4 +24,6 @@ for r in claude codex hermes nanoclaw openclaw; do
     echo "=== scanning ${r} bundle ==="
     "$SKILLSPECTOR" scan "skills/${r}/cypher-tempre-self-model" $LLM_FLAG || rc=$?
 done
+echo "=== scanning Smol LM Version packet ==="
+"$SKILLSPECTOR" scan "skills/smol-lm/cypher-tempre-smol-lm" $LLM_FLAG || rc=$?
 exit "$rc"

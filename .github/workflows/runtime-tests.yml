@@ -35,3 +35,7 @@ jobs:
         run: python tests/test_gate_discrimination.py
       - name: Run cross-platform UTF-8 and recovery suite
         run: python tests/test_utf8_io.py
+      - name: Run registry integrity and auto-sprout suite
+        run: python tests/test_registry_integrity.py
+      - name: Run Smol LM strict-gateway suite
+        run: python tests/test_smol_lm.py

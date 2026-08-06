@@ -1,8 +1,9 @@
 # Skills Directory
 
-This directory contains five labeled, self-contained Cypher Tempre skill
-variants. Each variant includes the same reusable stdlib Python helpers and
-registries, plus a runtime-specific `SKILL.md`.
+This directory contains five labeled, self-contained Cypher Tempre runtime skill
+variants plus one separately versioned experimental controller skill. Each runtime
+variant includes the same reusable stdlib Python helpers and registries, plus a
+runtime-specific `SKILL.md`.
 
 | Runtime label | Path | Notes |
 |---|---|---|
@@ -11,6 +12,7 @@ registries, plus a runtime-specific `SKILL.md`.
 | OpenClaw skill version | `openclaw/cypher-tempre-self-model/` | OpenClaw compatible bundle with OpenClaw frontmatter, `.clawhubignore`, native plugin enforcement, and self-enforcement fallback. |
 | Hermes skill version | `hermes/cypher-tempre-self-model/` | Hermes-discoverable bundle with explicit mark/seal/stop-check self-enforcement plus Hermes subagent notes. |
 | NanoClaw skill version | `nanoclaw/cypher-tempre-self-model/` | NanoClaw-discoverable bundle copied from the OpenClaw implementation. |
+| Smol LM Version | `smol-lm/cypher-tempre-smol-lm/` | Compact model contract and strict receipt/release controller; depends on an installed runtime engine. |
 
 ## Shared file set
 

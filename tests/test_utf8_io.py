@@ -169,13 +169,15 @@ def test_explicit_recovery_and_reviewed_reanchor():
         registry.mkdir()
         target = registry / "grown.json"
         intended = {"registry": "grown", "senses": [], "modalities": [
-            {"name": "Legacy", "function": "sense — data-facing gap"}]}
+            {"id": 22, "name": "Legacy", "function": "sense — data-facing gap",
+             "category": "structural"}]}
         legacy = json.dumps(intended, ensure_ascii=False, indent=2).encode("cp1252")
         target.write_bytes(legacy)
 
         tc = timechain.Timechain(root)
         tc.genesis(name="recovery test")
-        epochs.seal_epoch(root, "legacy baseline", accept_current=True)
+        tc.seal("epoch", {"summary": "legacy baseline",
+                          "registry_hashes": epochs.registry_hashes(root)}, files=[str(target)])
         head_before = tc._tail_ring()["ring_hash"]
 
         inspection = encoding_recovery.inspect_path(target)

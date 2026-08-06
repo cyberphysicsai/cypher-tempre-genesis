@@ -6,15 +6,18 @@ These files support the public Timechain dashboard at `https://cyphertempre.ai`.
   `public_html`.
 - `cyphertempre-dashboard-local-bridge.zip` is the local bridge
   package users run on their own machines.
-- `cypher-tempre-claude-skill-v3.30.06.zip` is the Claude Code skill bundle with
+- `cypher-tempre-claude-skill-v3.30.08.zip` is the Claude Code skill bundle with
   lifecycle hooks.
-- `cypher-tempre-codex-skill-v3.30.06.zip` is the Codex skill bundle with
+- `cypher-tempre-codex-skill-v3.30.08.zip` is the Codex skill bundle with
   the Codex lifecycle hook installer and reviewable hook template.
-- `cypher-tempre-openclaw-skill-v3.30.06.zip` is the OpenClaw skill bundle with
+- `cypher-tempre-openclaw-skill-v3.30.08.zip` is the OpenClaw skill bundle with
   native plugin enforcement and explicit mark/seal/stop-check fallback.
-- `cypher-tempre-hermes-skill-v3.30.06.zip` is the Hermes skill bundle with
+- `cypher-tempre-hermes-skill-v3.30.08.zip` is the Hermes skill bundle with
   explicit Hermes self-enforcement instructions and subagent definition.
-- `cypher-tempre-nanoclaw-skill-v3.30.06.zip` is the NanoClaw skill bundle.
+- `cypher-tempre-nanoclaw-skill-v3.30.08.zip` is the NanoClaw skill bundle.
+- `cypher-tempre-smol-lm-skill-v0.1.0.zip` is the separately versioned experimental
+  **Smol LM Version** controller packet. It requires one of the normal runtime engines
+  and gates tiny-model drafts behind verified Timechain receipts before release.
 
 The hosted site is only a static UI. The local bridge reads the user's own
 `cypher-tempre-self-model` files, requires a one-time pairing code for hosted

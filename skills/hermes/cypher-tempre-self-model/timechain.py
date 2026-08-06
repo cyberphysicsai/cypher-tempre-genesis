@@ -68,6 +68,10 @@ class StorageEncodingError(RuntimeError):
     """A managed text store is not valid UTF-8 and needs explicit recovery."""
 
 
+class RegistryIntegrityError(RuntimeError):
+    """A canonical registry is unreadable, malformed, or schema-invalid."""
+
+
 def _encoding_error(path: Path, line_no, exc: UnicodeDecodeError) -> StorageEncodingError:
     location = (f"physical line {line_no}, byte-in-line {exc.start}"
                 if line_no is not None else f"chain-tail byte {exc.start}")

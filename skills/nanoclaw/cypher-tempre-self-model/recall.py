@@ -45,7 +45,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from timechain import Timechain
+from timechain import Timechain, RegistryIntegrityError, StorageEncodingError
 from cambium import load_corpus, detect_gap
 from poq import tokens, jaccard, clamp, gate_and_seal, POQ_WINDOW
 import embed as embmod
@@ -733,6 +733,8 @@ class Recall:
                                       "retrieved": score})
                     del target[6:]
                 retrieved.append(f["name"])
+        except (StorageEncodingError, RegistryIntegrityError):
+            raise
         except Exception:
             pass
         ents = entities(content)
@@ -761,6 +763,8 @@ class Recall:
                       and f["effect"].get("text")][:4]
             if frames:
                 lab["frames"] = frames
+        except (StorageEncodingError, RegistryIntegrityError):
+            raise
         except Exception:
             pass
         # V5 facets: speaker roles + assertion provenance, only where the
@@ -783,6 +787,8 @@ class Recall:
             computed = modality_ops.run_all(fired, content, context, extra_ops=self._grown_ops)
             if computed:
                 lab["computed"] = computed
+        except (StorageEncodingError, RegistryIntegrityError):
+            raise
         except Exception:
             pass            # an executable op must never break labeling
         if self.embedder is not None:          # self-embed at ingest -> instant cosine recall later

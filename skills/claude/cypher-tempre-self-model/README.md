@@ -24,6 +24,21 @@ python3 timechain.py verify
 
 See `SKILL.md` for the full per-turn protocol.
 
+## Enforcement troubleshooting
+
+Every bundle exposes the same enforcement status. Hook-enabled session/prompt context
+contains its compact form; blocked Stop feedback includes the exact cause, turn id,
+enforced root, baseline/current heads, delta, and nudge count. Healthy Stop checks
+remain silent by contract.
+
+```bash
+python3 enforce.py status
+python3 enforce.py status --line
+python3 enforce.py status --json
+```
+
+These commands are read-only: they do not seal, append telemetry, or change adherence.
+
 ## Data retention & third-party transmission
 
 This skill is a **persistent memory system**. By design it records each turn — your

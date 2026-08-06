@@ -33,7 +33,7 @@ MODULES = ["timechain", "poq", "recall", "cambium", "immune", "continuum",
            "consensus", "embed", "almanac", "operators", "audit", "router",
            "conjecture", "autobiography", "watchdog", "calibrators",
            "recall_core", "recall_query", "recall_evidence", "recall_cli",
-           "encoding_recovery"]
+           "encoding_recovery", "registry_store"]
 
 CLI = ["timechain", "poq", "recall", "cambium", "immune", "continuum",
        "chronosynaptic", "telemetry", "dormancy", "replay", "dream",

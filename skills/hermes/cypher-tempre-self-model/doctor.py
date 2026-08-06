@@ -34,7 +34,7 @@ MODULES = ["timechain", "poq", "recall", "recall_cli", "cambium", "immune",
            "modality_ops", "faculties", "guard", "task", "policy", "bench",
            "router", "conjecture", "autobiography", "calibrators",
            "cphy", "recall_overlay", "keystore", "pqsign",
-           "encoding_recovery"]
+           "encoding_recovery", "registry_store"]
 
 
 def _result(name, status, detail):
@@ -148,8 +148,8 @@ def run_checks(root: Path) -> list:
     # v3.16: dormant (hibernated) faculties are a healthy retrievable pool, not
     # overgrowth — they left the working set precisely so they stop costing.
     try:
-        reg = root / "registry"
-        grown = json.loads((reg / "grown.json").read_text(encoding="utf-8")) if (reg / "grown.json").exists() else {}
+        from cambium import load_grown, registry_home
+        grown = load_grown(registry_home(root))
         allg = grown.get("senses", []) + grown.get("modalities", [])
         active = [f["name"] for f in allg if f.get("status") != "dormant"]
         dormant = [f["name"] for f in allg if f.get("status") == "dormant"]

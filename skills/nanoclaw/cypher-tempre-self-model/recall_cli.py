@@ -22,7 +22,8 @@ SKILL_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SKILL_DIR))
 
 import telemetry as telem                                     # noqa: E402
-from timechain import Timechain                               # noqa: E402
+from timechain import (Timechain, RegistryIntegrityError,
+                       StorageEncodingError)                  # noqa: E402
 from poq import tokens, POQ_WINDOW                            # noqa: E402
 from recall import (                                          # noqa: E402
     Recall, approx_tokens, block_text, entities, keywords, quantities,
@@ -504,13 +505,15 @@ def cmd_turn(args):
     except Exception:
         pass
     _auto_maintenance(root)
-    # 6. Eager autonomous growth: if this turn revealed a gap the faculties don't cover,
-    # fill it — grow a coded sense AND modality (deduped). Tunable via CT_AUTOGROW=0.
-    # Only in the deliberate per-turn loop, never in bulk Continuum ingest (label()).
+    # 6. Auto-sprout: when explicitly enabled by effective policy, fill a real
+    # gap with fused/sprouted faculties and audited primitive-composed ops. This
+    # never executes arbitrary model-authored Python. Only the deliberate turn
+    # loop may auto-grow; bulk Continuum ingest remains read-only here.
     import os as _os
-    if _os.environ.get("CT_AUTOGROW", "1").lower() not in ("0", "false", "no", "off"):
-        try:
-            import cambium
+    try:
+        import cambium
+        _auto_sprout = cambium.auto_sprout_status(reg)
+        if _auto_sprout["enabled"]:
             # v3.12: pass this turn's salience so routine turns don't grow weeds
             try:
                 _os.environ["CT_TURN_SALIENCE"] = str(int((labels or {}).get("salience", 0)))
@@ -533,8 +536,12 @@ def cmd_turn(args):
                     _epochs.seal_epoch(root, reason="autogrow: " + ", ".join(names)[:80])
                 except Exception:
                     pass
-        except Exception:
-            pass
+        elif _auto_sprout.get("error"):
+            print(f"AUTO-SPROUT REFUSED: {_auto_sprout['error']}", file=sys.stderr)
+    except (StorageEncodingError, RegistryIntegrityError) as exc:
+        print(f"AUTO-SPROUT REFUSED: {exc}", file=sys.stderr)
+    except Exception:
+        pass
 
 
 def _auto_maintenance(root):

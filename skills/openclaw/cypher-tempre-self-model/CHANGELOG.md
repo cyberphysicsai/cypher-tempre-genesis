@@ -1,5 +1,73 @@
 # Changelog
 
+## v3.30.08 - 2026-08-05
+
+Prevents an unreadable promoted-faculty registry from degrading to an empty
+registry and adds explicit control over autonomous faculty evolution.
+
+### Fixed
+- **Existing canonical registries now fail closed.** Only a genuinely absent optional
+  store returns a fresh structure. Invalid UTF-8 raises the storage-encoding error;
+  malformed JSON, I/O failures, and invalid registry structure raise a distinct
+  integrity error with a read-only inspection command.
+- **Registry structure is validated before use or mutation.** Roots, faculty arrays,
+  faculty entries, emergent entries, and primitive-op specifications are checked. Epoch
+  mutation preflight validates every existing canonical registry before hash comparison,
+  closing the case where invalid raw bytes were already anchored by an older epoch.
+- **Corpus construction propagates registry failures.** Cambium, executable grown-op
+  loading, recall labeling, and faculty export no longer calculate or continue from a
+  silently incomplete promoted-faculty corpus.
+- **Legacy promotion migration is loss-ordered.** Rescued faculties are persisted before
+  promoted entries are removed from shipped base registries, so an interruption can leave
+  a temporary duplicate but cannot remove the only copy.
+
+### Added
+- **Backup-first blockspace registry recovery.** `registry-snapshots` lists verified,
+  schema-valid chain attachments. `restore-registry --ring N --confirm` backs up the live
+  file before interpreting the candidate, verifies the Timechain and blob, validates
+  decoding, semantic JSON, and schema, then atomically restores canonical UTF-8. It never
+  re-anchors; the existing reviewed `reanchor` command remains a separate second phase.
+- **Auto-sprout control.** `cambium.py auto-sprout status|on|off` persists the autonomous
+  growth default. `CT_AUTO_SPROUT=1|0` overrides it for one runtime session. When enabled,
+  the turn loop may fuse or sprout task-relevant modalities and senses and immediately run
+  their audited primitive-composed ops. The human gate for authored code is unchanged.
+
+### Verification
+- Added cross-platform regressions for absent-vs-corrupt behavior, UTF-8/JSON/I/O/schema
+  error classification, invalid-but-epoch-matching stores, grown-op overwrite refusal,
+  backup-first snapshot restore, no implicit re-anchor, session/persistent auto-sprout
+  control, dual-faculty growth, and immediate primitive-op activation.
+
+## v3.30.07 - 2026-08-04
+
+Makes lifecycle enforcement routinely observable without changing the strict hook
+stdout contract or counting diagnostics as adherence events.
+
+### Added
+- **Every SessionStart and UserPromptSubmit context now carries a compact enforcement
+  report.** It names the enforced root, logical turn, baseline and current chain heads,
+  head delta, nudge budget, latest Stop result, and the correct next action.
+- **`enforce.py status` is a read-only troubleshooting command.** The default human
+  report, `--line` summary, and stable `--json` schema expose the current and previous
+  turns, seal debt, active audit, superseded-mark warning, and latest allowed and blocked
+  Stop observations. An early block remains explainable after a later Stop succeeds.
+  `--root <project-root>` inspects a task or identity chain without changing it.
+- **Blocked Stop decisions are self-diagnosing.** The reason now includes a cause code,
+  turn identifier, exact enforced root, observed baseline/current heads, delta, nudge
+  count, timing-race guidance, and the exact status command to run.
+
+### Preserved
+- Successful Stop/SubagentStop checks still emit no stdout, because hook runtimes use
+  empty output as the allow contract. Regular reporting is injected through context and
+  available on demand instead of making healthy Stop hooks noisy or recursive.
+- Status reads do not seal rings, mutate enforcement state, append telemetry, or affect
+  adherence denominators. The last Stop observation is persisted only by Stop itself.
+
+### Verification
+- Added phase12 regressions for pending, blocked, and satisfied reports; exact observed
+  head diagnostics; context visibility; read-only state/telemetry behavior; machine JSON;
+  and one-line output. The complete runtime self-test remains green.
+
 ## v3.30.06 - 2026-08-04
 
 Closes the remaining Windows self-test portability gap and makes adherence

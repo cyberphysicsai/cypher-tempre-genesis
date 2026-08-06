@@ -47,6 +47,7 @@ from timechain import Timechain, now_iso
 from cambium import (load_corpus, load_grown, save_grown, detect_gap, registry_home,
                      load_emergent, save_emergent)
 from immune import Immune
+from registry_store import load_registry
 
 PACK_FORMAT = 1
 MAX_PACK_FACULTIES = 50      # refuse bigger packs without --force (coverage flooding)
@@ -101,21 +102,20 @@ def export_pack(root, name, domain="", version="0.1", author=None,
             })
 
     if include_emergent:
-        ep = root / "registry" / "emergent.json"
-        if ep.exists():
-            for e in json.loads(ep.read_text(encoding="utf-8")).get("faculties", []):
-                if e.get("kind") not in kinds or e.get("promoted_to_id"):
-                    continue
-                if only_names and e["name"] not in only_names:
-                    continue
-                faculties.append({
-                    "kind": e["kind"], "name": e["name"], "function": e["function"],
-                    "category": e.get("category", ""), "seed_terms": e.get("seed_terms") or [],
-                    "status": "emergent",
-                    "provenance": {"origin": e.get("origin", ""), "eid": e.get("eid"),
-                                   "born_ring": e.get("born_ring"), "born_at": e.get("born_at"),
-                                   "recurrence": e.get("recurrence")},
-                })
+        emergent = load_emergent(registry_home(root))
+        for e in emergent.get("faculties", []):
+            if e.get("kind") not in kinds or e.get("promoted_to_id"):
+                continue
+            if only_names and e["name"] not in only_names:
+                continue
+            faculties.append({
+                "kind": e["kind"], "name": e["name"], "function": e["function"],
+                "category": e.get("category", ""), "seed_terms": e.get("seed_terms") or [],
+                "status": "emergent",
+                "provenance": {"origin": e.get("origin", ""), "eid": e.get("eid"),
+                               "born_ring": e.get("born_ring"), "born_at": e.get("born_at"),
+                               "recurrence": e.get("recurrence")},
+            })
 
     pack = {
         "pack_format": PACK_FORMAT,
@@ -270,8 +270,9 @@ def import_pack(root, pack, dry_run=False, dedup_floor=DEDUP_FLOOR,
             report["imported"].append({"name": fname, "kind": f.get("kind"), "dry_run": True})
             continue
         key = "modalities" if f.get("kind") == "modality" else "senses"
-        base = json.loads((root / "registry" / f"{key}.json").read_text(encoding="utf-8")).get(key, [])
-        grown = load_grown(registry_home(root))
+        home = registry_home(root)
+        base = load_registry(home, f"{key}.json").get(key, [])
+        grown = load_grown(home)
         existing_ids = [it["id"] for it in base] + [it["id"] for it in grown.get(key, [])]
         new_id = (max(existing_ids) if existing_ids else 0) + 1
         grown.setdefault(key, []).append({
@@ -281,7 +282,7 @@ def import_pack(root, pack, dry_run=False, dedup_floor=DEDUP_FLOOR,
                            "pack_sha256": pack.get("pack_sha256"),
                            "donor": pack.get("donor"), "status_at_export": f.get("status")},
         })
-        save_grown(registry_home(root), grown)
+        save_grown(home, grown)
         report["imported"].append({"name": fname, "kind": f.get("kind"), "id": new_id})
 
     if do_seal and not dry_run and (report["imported"] or report["blocked"]):
