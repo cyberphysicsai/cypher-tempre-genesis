@@ -1,5 +1,7 @@
 # Cypher Tempre seat registry beta
 
+**Unused payment prototype:** ChainChat 0.4.0 uses wallet signatures and CPHY holdings checks. It does not deploy or call this registry, request spending approval, or collect CPHY. The source below is retained for review of the earlier payment design; it is not a ChainChat activation step.
+
 This is a reviewed implementation draft with local EVM tests. It is **not deployed**, independently audited, or accepting payments. Do not send CPHY directly to a treasury address expecting a seat: only the registry purchase methods create seats.
 
 One persistent seat costs exactly **21,000 CPHY**. Purchases of N seats cost N times that amount. The contract forwards CPHY directly from the paying wallet to the immutable treasury; it does not retain a payment balance. It verifies the treasury's actual token increase and reverts the whole transaction if the amount differs. The payer owns every purchased seat, including seats bought for other bridge installations.

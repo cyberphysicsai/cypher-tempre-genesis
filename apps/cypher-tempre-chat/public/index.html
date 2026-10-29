@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#121212" />
     <meta
       name="description"
-      content="A local-first agentic Timechain metaprogramming interface for your Cypher Tempre agent. Your model. Your faculties. One continuous Timechain."
+      content="Cypher Tempre ChainChat. Your model, your faculties, and one continuous Timechain. Verify 21,000 CPHY held on Base to begin."
     />
-    <title>Cypher Tempre · Agentic Timechain Metaprogramming Interface</title>
+    <title>Cypher Tempre ChainChat</title>
     <link
       rel="preload"
       href="/fonts/orbitron/Orbitron-Variable.ttf"
@@ -93,11 +93,11 @@
     </svg>
 
     <header class="topbar">
-      <a href="/" class="brand" aria-label="Cypher Tempre home"
+      <a href="/" class="brand" aria-label="Cypher Tempre ChainChat home"
         ><span class="brand-symbol"
           ><svg><use href="#i-orbit" /></svg></span
         ><span
-          >CYPHER <b>TEMPRE</b
+          >CYPHER <b>TEMPRE CHAINCHAT</b
           ><small>Agentic Timechain Metaprogramming Interface</small></span
         ></a
       >
@@ -105,7 +105,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.3.0</span>
+        ><span class="mono" id="appVersion">v0.4.0</span>
       </div>
       <div class="top-actions">
         <button
@@ -217,7 +217,7 @@
         <header class="conversation-header">
           <div>
             <span class="section-caption">CONVERSATION</span>
-            <h1 id="conversationTitle">The next ring</h1>
+            <h1 id="conversationTitle"><span class="block-height-label">Current block height</span> <span id="currentBlockHeight" aria-live="polite">—</span></h1>
           </div>
           <div class="conversation-tags">
             <span class="outlined-tag" id="sessionTag">UNPAIRED</span
@@ -272,6 +272,10 @@
               >Your next interaction becomes part of your history.</span
             >
           </div>
+          <button id="holdingsPrompt" class="holdings-prompt" type="button">
+            <span id="holdingsPromptLabel">Hold 21,000 CPHY on Base to use ChainChat</span>
+            <span id="holdingsPromptAction">Verify holdings ↗</span>
+          </button>
           <form class="composer" id="chatForm">
             <label class="sr-only" for="messageInput">Message your agent</label
             ><textarea
@@ -428,23 +432,23 @@
 
     <section class="beta-access" aria-labelledby="betaTitle">
       <div>
-        <span class="eyebrow">CYPHER TEMPRE / LIVE BETA</span>
+        <span class="eyebrow">CYPHER TEMPRE CHAINCHAT / LIVE BETA</span>
         <h2 id="betaTitle">Your agent. Your machine.</h2>
         <p id="licenseSummary">
-          Local testing is open. Paid activation is not open yet.
+          Pair your local bridge, then verify a wallet holding at least 21,000 CPHY on Base.
         </p>
         <p class="fine-print">
-          Planned access: 21,000 CPHY on Base per persistent bridge instance. Do
-          not send tokens directly; a direct transfer does not register a seat.
+          Keep your CPHY in your wallet. Sign in to prove wallet control; no
+          payment, spending approval, or token transfer is requested.
         </p>
       </div>
       <div class="beta-actions">
         <button id="licenseButton" class="primary-button">
-          Instance access
+          Verify CPHY holdings
         </button>
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.3.0"
+          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.4.0"
           target="_blank"
           rel="noopener noreferrer"
           >Download local bridge</a
@@ -489,7 +493,7 @@
 
     <dialog id="licenseDialog" class="modal">
       <div class="dialog-top">
-        <span class="eyebrow">PERSISTENT INSTANCE / BASE</span
+        <span class="eyebrow">HOLDER ACCESS / BASE</span
         ><button
           type="button"
           class="icon-button"
@@ -499,9 +503,9 @@
           <svg><use href="#i-close" /></svg>
         </button>
       </div>
-      <h2>A seat bound to your bridge.</h2>
+      <h2>Hold CPHY. Keep it yours.</h2>
       <p id="licenseStatus" role="status">
-        Pair your local bridge to view its instance key.
+        Pair your local bridge, then verify a wallet holding at least 21,000 CPHY.
       </p>
       <label class="field"
         >Paired bridge key<input
@@ -511,69 +515,41 @@
           placeholder="Pair your local bridge first"
       /></label>
       <label class="field"
-        >Seat owner's public wallet address<input
+        >Verified wallet<input
           id="licenseOwner"
+          readonly
           spellcheck="false"
           autocomplete="off"
-          placeholder="0x… (the wallet that purchased this seat)"
+          placeholder="Connect your wallet to prove control"
       /></label>
       <p class="fine-print">
-        For a seat purchased by someone else, enter their public wallet address.
-        No signature or private key is needed to check an existing binding.
+        Your wallet signs a one-use ChainChat sign-in message for this paired bridge.
+        A wallet address alone cannot unlock access.
       </p>
       <div class="info-box">
-        One seat costs 21,000 CPHY, plus Base network gas. The purchasing wallet
-        owns the seat. A bridge key identifies an installation; it is not a
-        hardware fingerprint. Keep your local bridge identity file private.
+        At least 21,000 CPHY must remain in your wallet on Base. No tokens move,
+        and no token-spending permission is requested. Balance checks continue
+        during use. If eligibility expires, new operations pause and your saved
+        Timechain remains available.
       </div>
-      <form id="purchaseSeatsForm">
-        <label class="field"
-          >Additional bridge keys (optional)<textarea
-            id="additionalDeviceKeys"
-            rows="3"
-            placeholder="One key per line for other people’s paired bridges"
-            spellcheck="false"
-          ></textarea>
-        </label>
-        <p id="seatPurchaseTotal">1 instance / 21,000 CPHY</p>
-        <button
-          id="purchaseSeatsButton"
-          class="primary-button full-width"
-          disabled
-        >
-          Payments are not open
-        </button>
-      </form>
+      <div class="holdings-readout" aria-live="polite">
+        <div><span>CONFIRMED BALANCE</span><strong id="holdingsBalance">—</strong><small>CPHY · 21,000 required</small></div>
+        <div><span>VERIFICATION</span><strong id="holdingsChecked">Not verified</strong><small id="holdingsExpiry">Sign in to begin a session</small></div>
+      </div>
+      <button id="verifyHoldingsButton" class="primary-button full-width" disabled>
+        Connect wallet &amp; verify holdings
+      </button>
       <div class="license-controls">
         <button id="checkLicenseButton" class="secondary-button">
-          Check activation
+          Recheck balance
         </button>
+        <button id="logoutHoldingsButton" class="quiet-button" disabled>Sign out of wallet</button>
       </div>
-      <details class="license-recovery">
-        <summary>Replace a machine</summary>
-        <p>
-          The seat’s owning wallet can rotate its binding to this paired bridge.
-          The old binding then stops working.
-        </p>
-        <form id="rotateSeatForm">
-          <label class="field"
-            >Seat ID<input
-              id="rotateSeatId"
-              type="text"
-              inputmode="numeric"
-              pattern="[1-9][0-9]*"
-              required /></label
-          ><button id="rotateSeatButton" class="secondary-button" disabled>
-            Rebind to this bridge
-          </button>
-        </form>
-      </details>
       <p class="fine-print">
-        No name or email is requested. Wallet addresses, payments, and
-        bridge-key commitments are public on Base. Hosting and RPC providers can
-        observe connection metadata. Activation after two L2 confirmations is
-        provisional, not final settlement. No Timechain content or model key is
-        sent to the license registry.
+        No name or email is requested. Wallet balances are public; hosting and RPC
+        providers can observe connection metadata. Your chain and model API key stay
+        local. A holdings check does not reserve a unique machine, and modified
+        copies of this open-source application can remove local checks.
       </p>
       <p class="dialog-error" id="licenseError" role="alert"></p>
     </dialog>
@@ -759,6 +735,13 @@
           </button>
         </div>
         <h2>Choose your intelligence.</h2>
+        <div class="info-box hidden" id="modelHoldingsNotice">
+          Verify your CPHY holdings to connect a model and enable chat. Your saved
+          Timechain remains available.
+          <button id="modelVerifyHoldings" type="button" class="text-button full-width">
+            Verify CPHY holdings ↗
+          </button>
+        </div>
         <p>
           Switch models whenever you like. Your agent’s identity and Timechain
           stay with you.

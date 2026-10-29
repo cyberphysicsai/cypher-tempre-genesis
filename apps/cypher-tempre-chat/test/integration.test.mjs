@@ -42,6 +42,7 @@ async function start(t, overrides = {}) {
   const generated = [],
     reviewed = [];
   const app = await createApp({
+    licenseConfig: { mode: "holdings", required: false },
     dataDir,
     pairingCode: "INTEGRATION-ONLY",
     engine: overrides.engine,

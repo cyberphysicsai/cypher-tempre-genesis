@@ -1,5 +1,17 @@
 # Preview validation
 
+## ChainChat beta 0.4.0
+
+- Full Node suite with the external original-engine parity reference: **100 passed, 0 failed, 1 Windows-only skip**. This includes 19 holdings backend tests, 9 wallet-flow tests and 3 display/access-routing tests.
+- Python adapter suite: **29 passed**. JavaScript syntax and Git whitespace checks pass. The native Proof of Interaction engine remains unchanged.
+- Holdings tests cover exact/below/above threshold, real EOA signing and recovery, deployed ERC-1271 and delegated EOA verification, scoped single-use SIWE challenges, signed session expiry, origin/session isolation, replay, wrong chain, token decimals, malformed RPC data, canonical-block changes, expiry/cache failure, logout during generation and authorization changes during verification.
+- Native writes are authorized before starting. Tests verify receipt retention for an already-started commit and accurate Continuum committed-block/consumed-byte counts when subsequent work loses authorization.
+- Wallet tests use local providers and fixture signatures; the active interface requests no payment, token approval, permit or transaction. No real wallet signature or paid model request was made during validation.
+- A read-only call to Base mainnet verified chain 8453, the configured CPHY contract's 18 decimals and support for the canonical block-hash query used by this implementation. Test balances and wallet authentication use fixtures; an owner's real wallet sign-in remains to be exercised.
+- Browser inspection on an isolated local bridge verified pairing without holdings, locked new-action controls, the holdings dialog and a disposable chain's actual genesis height **0**. After an external native append, the counter refreshed to **1** without a reload. No personal chain was used.
+- Default desktop and 390×844 mobile views retain the monochrome physics/DNA motif and Orbitron. Mobile content width measured 375px inside a 390px viewport, with no horizontal overflow. Screenshots are separate deliverables, not bundled with runtime state.
+- The official frontend and local bridge must be updated together. Hosted-to-local pairing with the user's installed bridge and an actual wallet remains a live beta verification step after restart.
+
 ## Beta 0.3.0
 
 - Full Node integration suite: 83 passed, 1 Windows-specific skip. Native scoring parity reference was supplied. JavaScript syntax checks pass.

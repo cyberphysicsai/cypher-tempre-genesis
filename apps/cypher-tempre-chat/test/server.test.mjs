@@ -85,6 +85,7 @@ async function fixture(t, overrides = {}) {
     throw new Error("Unsupported fixture operation.");
   };
   const app = await createApp({
+    licenseConfig: { mode: "holdings", required: false },
     dataDir,
     pairingCode: "TEST-CODE",
     engine,
