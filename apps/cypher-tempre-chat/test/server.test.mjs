@@ -305,6 +305,91 @@ test("credentials remain in session memory and model switches preserve the chain
   );
 });
 
+test("perspective orchestration scopes the larger Muse allowance while synthesis and ordinary chat keep their limits", async (t) => {
+  for (const [model, expected] of [
+    ["muse-spark-1.3-contributor", 8192],
+    ["generic-model", 2048],
+  ]) {
+    const f = await fixture(t);
+    await f.ready();
+    assert.equal(
+      (
+        await f.request("/api/provider", {
+          provider: "openai",
+          model,
+          apiKey: "synthetic-candidate-budget-key",
+          baseUrl: "https://opencode.ai/inference/go/openai/v1",
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await f.request("/api/settings", {
+          fork: true,
+          perspectives: 3,
+          archetypes: ["2", "5", "6"],
+        })
+      ).status,
+      200,
+    );
+    const reply = await f.request("/api/chat", {
+      message: "Compare three perspectives.",
+    });
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    assert.deepEqual(
+      f.modelCalls.map((call) => call.args.maxTokens),
+      [expected, expected, expected, 4096],
+    );
+    assert.equal(reply.body.message.perspectives.length, 3);
+    assert.equal(
+      (await f.request("/api/settings", { fork: false })).status,
+      200,
+    );
+    assert.equal(
+      (await f.request("/api/chat", { message: "Now use ordinary chat." }))
+        .status,
+      200,
+    );
+    assert.equal(f.modelCalls.at(-1).args.maxTokens, 4096);
+  }
+});
+
+test("incomplete Muse perspective candidates remain held without native commitment or pending output", async (t) => {
+  const f = await fixture(t, {
+    generate: () => {
+      throw Object.assign(new Error("Fixture output allowance exhausted."), {
+        code: "PROVIDER_INCOMPLETE",
+        status: 502,
+      });
+    },
+  });
+  await f.ready();
+  await f.request("/api/provider", {
+    provider: "openai",
+    model: "muse-spark-1.3-contributor",
+    apiKey: "synthetic-incomplete-key",
+    baseUrl: "https://opencode.ai/inference/go/openai/v1",
+  });
+  await f.request("/api/settings", {
+    fork: true,
+    perspectives: 3,
+    archetypes: ["2", "5", "6"],
+  });
+  const reply = await f.request("/api/chat", {
+    message: "Hold an incomplete candidate.",
+  });
+  assert.equal(reply.status, 502);
+  assert.equal(reply.body.code, "PROVIDER_INCOMPLETE");
+  assert.ok(f.modelCalls.every((call) => call.args.maxTokens === 8192));
+  assert.equal(f.reviewCalls.length, 0);
+  assert.equal(
+    f.calls.some((call) => call.op === "commit"),
+    false,
+  );
+  assert.equal((await f.store.pending(f.store.agents[0])).exchanges.length, 0);
+});
+
 test("reflected credentials from generation or review never reach pending files, native writes, state or response", async (t) => {
   for (const stage of ["generation", "review"]) {
     const secret = "never-persist-this-key";

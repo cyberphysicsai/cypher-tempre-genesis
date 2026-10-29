@@ -16,6 +16,7 @@ import {
   review,
   assertCredentialIsolation,
   validUsedRings,
+  perspectiveTokenAllowance,
 } from "./lib/providers.mjs";
 import { archetypes, chooseArchetypes } from "./lib/archetypes.mjs";
 import { StateStore, validateSettings } from "./lib/state.mjs";
@@ -1102,7 +1103,7 @@ export async function createApp(options = {}) {
                         ...conversation,
                         { role: "user", content: message },
                       ],
-                      maxTokens: 2048,
+                      maxTokens: perspectiveTokenAllowance(config),
                       signal,
                     });
                     const judgment = strictReview(
