@@ -34,6 +34,7 @@ FRUITAGES = ("love", "peace", "joy", "kindness", "mildness", "self-control",
 DIMENSIONS = tuple(d for d in POI_DIMENSIONS if d != "brightness")
 FRUITAGE_FLOOR = 180
 MAX_TEXT_BYTES = 32 * 1024 * 1024
+MAX_EVIDENCE_BYTES = 8192
 
 
 class BridgeError(Exception):
@@ -309,7 +310,7 @@ def validate_assessment(raw_scores, assessment, root):
                     "rationale": rationale, "floor": floor}
 
 
-def assess_exchange(root, tc, request):
+def assess_exchange(root, tc, request, source_evidence=None):
     incoming = text_value(request.get("input"), "input")
     outgoing = text_value(request.get("output"), "output")
     screening = immune.Immune(root).screen(incoming)
@@ -320,13 +321,34 @@ def assess_exchange(root, tc, request):
     grounding_context = request.get("groundingContext", "")
     if not isinstance(grounding_context, str) or len(grounding_context.encode("utf-8")) > MAX_TEXT_BYTES:
         raise BridgeError("INVALID_REQUEST", "groundingContext must be bounded text.")
-    context = incoming + ("\n\nVerified preparation context:\n" + grounding_context if grounding_context else "")
-    verdict = gate.evaluate(outgoing, poi.relevance_window(tc), context=context,
-                            external_scores=scores, span_guard=True)
+    # A retrieval is an offer, not proof that the answer used it. Require the
+    # caller's explicit credit assignment and resolve the texts ourselves.
+    used = request.get("usedRings", [])
+    evidence = declared_evidence(tc, used)
+    source_texts = list(source_evidence or [])
+    # Broad preparation JSON contains faculty IDs, scores, and other prompt
+    # metadata. It is never factual evidence for a candidate's specific claims.
+    context = incoming
+    if evidence:
+        context += "\n\nDeclared canonical evidence:\n" + "\n".join(e["text"] for e in evidence)
+    if source_texts:
+        context += "\n\nUser-selected source data:\n" + "\n".join(source_texts)
+    released = release_hashes(tc)
+    quarantined = set(immune.Immune(root).state().get("quarantine", []))
+    window = [{**r, "payload": {"summary": memory_text(r)}}
+              for r in poi.relevance_window(tc)
+              if r.get("ring_type") != "genesis" and releasable_ring(tc, r, released, quarantined)]
+    verdict = gate.evaluate(outgoing, window, context=context,
+                            external_scores=scores, span_guard=True,
+                            declared_evidence=len(used),
+                            # A truthy empty sentinel activates the native entity
+                            # check even when no historical evidence was declared.
+                            evidence_texts=[e["text"] for e in evidence] + source_texts or [""])
     if verdict["decision"] != "SEAL":
         raise BridgeError("POI_REJECTED", "The Proof of Interaction gate withheld this response.", verdict=verdict)
     return {"input": incoming, "output": outgoing, "scores": scores,
-            "assessment": assessment, "gate": verdict, "groundingContext": grounding_context}
+            "assessment": assessment, "gate": verdict, "groundingContext": grounding_context,
+            "usedRings": list(used), "evidence": [{k: e[k] for k in ("index", "hash", "truncated")} for e in evidence]}
 
 
 def op_init(request):
@@ -415,6 +437,28 @@ def memory_text(ring):
     return recall.block_text(ring)
 
 
+def declared_evidence(tc, indices):
+    if (not isinstance(indices, list) or len(indices) > 40
+            or any(isinstance(i, bool) or not isinstance(i, int) or i < 0 for i in indices)
+            or len(set(indices)) != len(indices)):
+        raise BridgeError("EVIDENCE_INVALID", "usedRings must contain at most 40 unique nonnegative integer ring indices.")
+    wanted = set(indices)
+    released = release_hashes(tc)
+    quarantined = set(immune.Immune(tc.root).state().get("quarantine", []))
+    found = {r["index"]: r for r in tc.iter_rings() if r["index"] in wanted
+             and r.get("ring_type") != "genesis" and releasable_ring(tc, r, released, quarantined)} if wanted else {}
+    if wanted != found.keys():
+        raise BridgeError("EVIDENCE_INVALID", "A declared evidence ring is missing, quarantined, unreleased, or is genesis metadata.")
+    evidence = []
+    for index in indices:
+        ring = found[index]
+        raw = memory_text(ring).encode("utf-8")
+        text = raw[:MAX_EVIDENCE_BYTES].decode("utf-8", errors="ignore")
+        evidence.append({"index": index, "hash": ring["ring_hash"], "text": text,
+                         "truncated": len(raw) > MAX_EVIDENCE_BYTES})
+    return evidence
+
+
 def op_prepare(request):
     root = project_root(request)
     tc, _, _ = verified_chain(root, require_writable=True)
@@ -447,6 +491,9 @@ def op_prepare(request):
                          "score": block.get("score"), "truncated": len(text) < len(full)})
     g = genesis_for(tc)
     recent = recent_history(tc, 6)
+    evidence_ids = list(dict.fromkeys([m["index"] for m in memories if m["index"] != 0]
+                                     + [item["ring"] for item in recent]))
+    available_evidence = declared_evidence(tc, evidence_ids)
     context = json.dumps({"genesis": g, "equipped_faculties": selected,
                           "computed": labels.get("computed", {}), "frames": labels.get("frames", []),
                           "recalled_memories": memories,
@@ -455,7 +502,7 @@ def op_prepare(request):
     return {"head": compact_head(tc), "genesis": g, "context": context, "memories": memories,
             "loadout": selected, "computed": labels.get("computed", {}),
             "frames": labels.get("frames", []), "labels": labels, "screening": screening,
-            "recentHistory": recent}
+            "recentHistory": recent, "availableEvidence": available_evidence}
 
 
 def op_evaluate(request):
@@ -465,7 +512,8 @@ def op_evaluate(request):
         check_expected(tc, request)
     exchange = assess_exchange(root, tc, request)
     return {"accepted": True, "sealed": False, "head": compact_head(tc), "verdict": exchange["gate"],
-            "scores": exchange["scores"], "assessment": exchange["assessment"]}
+            "scores": exchange["scores"], "assessment": exchange["assessment"],
+            "usedRings": exchange["usedRings"], "evidence": exchange["evidence"]}
 
 
 def normalized_perspectives(root, query, outgoing, perspectives):
@@ -489,7 +537,14 @@ def normalized_perspectives(root, query, outgoing, perspectives):
     tree.tc = Timechain(root)
     collapsed, _ = tree.collapse_explicit_notes({"query": query, "synthesis": outgoing,
                                                "perspectives": perspectives}, do_seal=False)
-    return collapsed["payload"]
+    payload = collapsed["payload"]
+    credits = {i: {"usedRings": list(p.get("usedRings", [])),
+                   "evidence": [{k: e[k] for k in ("index", "hash", "truncated")}
+                                for e in declared_evidence(tree.tc, p.get("usedRings", []))]}
+               for i, p in enumerate(perspectives, start=1)}
+    for record in payload["perspectives"] + payload["rejected_perspectives"] + [payload["chosen_perspective"]]:
+        record.update(credits[record["index"]])
+    return payload
 
 
 def commit_identity(request, exchanges):
@@ -601,7 +656,8 @@ def op_commit(request):
         return previous_commit(tc, commit_id, commit_digest)
     rc._emit("use", {"decision": "SEAL", "sealed_ring": ring["index"],
                      "external_scores": True, "brightness": verdict["brightness"],
-                     "used_rings": request.get("usedRings", []), "source": "web_chat"})
+                     "used_rings": sorted({i for exchange in exchanges for i in exchange["usedRings"]}),
+                     "source": "web_chat"})
     # This tripwire verifies the just-sealed outcome against the native covenant.
     outcome = immune.guard_turn(root, ring["index"], input_text=context)
     if not isinstance(outcome, dict) or outcome.get("action") != "none" or outcome.get("reason"):
@@ -646,10 +702,50 @@ def utf8_chunks(text, target):
         start = end
 
 
+def op_sanitize_source(request, preserve_terminal_marker=False):
+    project_root(request)
+    source = text_value(request.get("text"), "text")
+    from continuum import SECRET_PATTERNS, redact_secrets
+    sanitized, count = redact_secrets(source)
+    if preserve_terminal_marker:
+        # A reviewed, pre-redacted source may be split inside a replacement
+        # marker. Preserve only an EXACT proper prefix of a native marker at
+        # EOF; marker-plus-secret suffixes and near-matches are not exempt.
+        # Earlier text still passes through the original native redactor.
+        markers = [replacement for _, replacement in SECRET_PATTERNS if isinstance(replacement, str)]
+        markers.append("[REDACTED_SECRET]")
+        for pattern, replacement in SECRET_PATTERNS:
+            if replacement is not None:
+                continue
+            for match in pattern.finditer(source):
+                start = match.start() + len(match.group(1)) + len(match.group(2))
+                end = match.end() - len(match.group(3))
+                fragment = source[start:end]
+                if end == len(source) and any(marker.startswith(fragment) and marker != fragment for marker in markers):
+                    prefix, count = redact_secrets(source[:start])
+                    sanitized = prefix + fragment
+    if sanitized == source:
+        count = 0  # Re-reading existing masks is not another redaction.
+    return {"text": sanitized, "redactionCount": count, "bytes": len(sanitized.encode("utf-8")),
+            "sourceHash": hashlib.sha256(sanitized.encode("utf-8")).hexdigest()}
+
+
 def op_ingest(request):
     root = project_root(request)
     tc, _, _ = verified_chain(root, require_writable=True)
-    source = text_value(request.get("text"), "text")
+    raw_source = text_value(request.get("text"), "text")
+    # This exact hash is supplied by the trusted server only AFTER its whole
+    # source preprocessing. It never exempts real credentials from redaction;
+    # it permits only the narrow, credential-free marker fragment above.
+    reviewed_bytes = request.get("sourceHash") == hashlib.sha256(raw_source.encode("utf-8")).hexdigest()
+    sanitized = op_sanitize_source(request, preserve_terminal_marker=reviewed_bytes)
+    source = sanitized["text"]
+    prior_redactions = request.get("redactionCount", 0)
+    if isinstance(prior_redactions, bool) or not isinstance(prior_redactions, int) or not 0 <= prior_redactions <= MAX_TEXT_BYTES:
+        raise BridgeError("INVALID_REQUEST", "redactionCount must be a nonnegative bounded integer.")
+    redaction_count = prior_redactions + sanitized["redactionCount"]
+    if request.get("sourceHash") is not None and request["sourceHash"] != sanitized["sourceHash"]:
+        raise BridgeError("SOURCE_CHANGED", "The sanitized source differs from its reviewed source hash.")
     name = text_value(request.get("name", "Imported text"), "name", 1024)
     finding = request.get("finding")
     if finding is not None:
@@ -660,15 +756,19 @@ def op_ingest(request):
     action = {"input": f"Ingest the user-selected source named {name} as data.",
               "output": finding or f"Store {name} as untrusted source data for later reference.",
               "groundingContext": source if finding else "",
-              "scores": request.get("scores"), "assessment": request.get("assessment")}
-    assessed = assess_exchange(root, tc, action)
+              "scores": request.get("scores"), "assessment": request.get("assessment"),
+              "usedRings": request.get("usedRings", [])}
+    assessed = assess_exchange(root, tc, action, source_evidence=[source])
     selected = selected_faculties(root, request.get("loadout"))
     rc = recall_for(root, selected)
     from continuum import Continuum
+    from types import SimpleNamespace
     continuum = Continuum(root, target=max(1, target), min_=1, max_=max(1, target))
     # UTF-8 chunking is handled above. Each native ingest call now gets one
     # bounded chunk; its token ceiling deliberately exceeds its character count.
-    continuum._labeler = rc
+    # Native recall can discover dormant or distilled faculties independently
+    # of its corpus. Apply the same explicit equipment filter used by chat.
+    continuum._labeler = SimpleNamespace(label=lambda content: equipment_labels(rc, selected, content))
     rings = []
     source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
     with strict_append_lock(tc):
@@ -676,6 +776,8 @@ def op_ingest(request):
         verified_chain(root, require_writable=True)
         def seal_data(kind, payload, **kwargs):
             payload["ingestion_review"] = assessed["assessment"]
+            payload["usedRings"] = assessed["usedRings"]
+            payload["evidence"] = assessed["evidence"]
             payload["byte_policy"] = {"target_bytes": target, "source_sha256": source_hash}
             if request.get("reviewWindows"):
                 payload["semantic_review"] = {"windows": request["reviewWindows"],
@@ -685,13 +787,14 @@ def op_ingest(request):
         continuum.open_task(f"Ingest {name}", items_total=len(chunks))
         for index, chunk in enumerate(chunks):
             batch, _ = continuum.ingest(name, chunk, finding=finding, metadata={"file_content_hash": source_hash,
-                        "relative_path": name, "file_index": index + 1}, label=True)
+                        "relative_path": name, "file_index": index + 1,
+                        "redacted": redaction_count > 0, "redaction_count": redaction_count}, label=True)
             rings.extend({"index": r["index"], "hash": r["ring_hash"],
                           "bytes": len(r["payload"]["data"]["content"].encode("utf-8"))} for r, _ in batch)
     verified_chain(root)
     return {"sealed": True, "blocks": rings, "bytes": len(source.encode("utf-8")),
             "targetBytes": target, "head": compact_head(tc), "sourceHash": source_hash,
-            "state": continuum.resume(), "assessment": assessed["assessment"]}
+            "state": continuum.resume(), "assessment": assessed["assessment"], "redactionCount": redaction_count}
 
 
 def op_verify(request):
@@ -861,7 +964,8 @@ def op_pack_import(request):
     tc, _, _ = verified_chain(root, require_writable=True)
     pack = validated_pack(request.get("pack"))
     action = pack_action(pack)
-    reviewed = assess_exchange(root, tc, {**action, "scores": request.get("scores"), "assessment": request.get("assessment")})
+    reviewed = assess_exchange(root, tc, {**action, "scores": request.get("scores"),
+                                         "assessment": request.get("assessment"), "usedRings": request.get("usedRings", [])})
     with strict_append_lock(tc), native_writes_under_lock(root):
         check_expected(tc, request)
         verified_chain(root, require_writable=True)
@@ -891,6 +995,7 @@ def op_pack_import(request):
                 "faculty_import": {k: report[k] for k in ("pack", "author", "imported", "skipped_covered", "blocked")},
                 "pack_sha256": pack["pack_sha256"], "donor": pack.get("donor"), "donor_verified": False,
                 "semantic_review": reviewed["assessment"], "poi_verdict": reviewed["gate"],
+                "usedRings": reviewed["usedRings"], "evidence": reviewed["evidence"],
             }, poi=reviewed["scores"])
             journal.update(stage="committed", ring={"index": ring["index"], "hash": ring["ring_hash"]})
             atomic_write_json(transaction / "transaction.json", journal)
@@ -952,6 +1057,7 @@ def op_pack_export(request):
 
 OPERATIONS = {"init": op_init, "inspect": op_inspect, "prepare": op_prepare,
               "evaluate": op_evaluate, "commit": op_commit, "ingest": op_ingest, "verify": op_verify,
+              "sanitize_source": op_sanitize_source,
               "pack_preview": op_pack_preview, "pack_import": op_pack_import, "pack_export": op_pack_export}
 
 

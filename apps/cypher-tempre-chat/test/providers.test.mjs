@@ -10,6 +10,7 @@ import {
   FRUITS,
   DIMENSIONS,
   ProviderError,
+  assertCredentialIsolation,
 } from "../lib/providers.mjs";
 
 async function localProvider(t, handler) {
@@ -40,10 +41,247 @@ const respond = (res, data, status = 200) => {
   res.end(JSON.stringify(data));
 };
 const goodReview = () => ({
+  usedRings: [],
   decision: "approve",
   scores: Object.fromEntries(DIMENSIONS.map((x) => [x, 225])),
   fruits: Object.fromEntries(FRUITS.map((x) => [x, 230])),
   rationale: "Accurate, respectful, and consistent with the covenant.",
+});
+
+test("every provider rejects reflected authentication before returning model output", async (t) => {
+  const secret = 'synthetic-key-with-"quotes"-and-\\slashes';
+  for (const provider of ["openai", "compatible", "anthropic", "gemini"]) {
+    await t.test(provider, async (t) => {
+      const mock = await localProvider(t, (req, res) => {
+        const reflected =
+          req.headers.authorization ||
+          req.headers["x-api-key"] ||
+          req.headers["x-goog-api-key"];
+        const responses = {
+          openai: {
+            status: "completed",
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: reflected }],
+              },
+            ],
+          },
+          compatible: {
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { role: "assistant", content: reflected },
+              },
+            ],
+          },
+          anthropic: {
+            stop_reason: "end_turn",
+            content: [{ type: "text", text: reflected }],
+          },
+          gemini: {
+            candidates: [
+              {
+                finishReason: "STOP",
+                content: { parts: [{ text: reflected }] },
+              },
+            ],
+          },
+        };
+        respond(res, responses[provider]);
+      });
+      await assert.rejects(
+        generate(
+          { provider, model: "fixture", apiKey: secret, baseUrl: mock.baseUrl },
+          { messages: [{ role: "user", content: "Synthetic request" }] },
+        ),
+        (error) =>
+          error.code === "PROVIDER_CREDENTIAL_REFLECTION" &&
+          !error.message.includes(secret),
+      );
+      assert.ok(!JSON.stringify(mock.requests[0].body).includes(secret));
+    });
+  }
+});
+
+test("reflected review rationale is held and cannot become a gate assessment", async (t) => {
+  const secret = 'synthetic-review-"credential"-with-\\slashes';
+  const mock = await localProvider(t, (req, res) =>
+    respond(res, {
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              ...goodReview(),
+              rationale: req.headers.authorization,
+            }),
+          },
+        },
+      ],
+    }),
+  );
+  await assert.rejects(
+    review(
+      {
+        provider: "compatible",
+        model: "fixture",
+        apiKey: secret,
+        baseUrl: mock.baseUrl,
+      },
+      {
+        input: "Synthetic request",
+        candidate: "Synthetic candidate",
+        covenant: [...FRUITS],
+      },
+    ),
+    (error) =>
+      error.code === "PROVIDER_CREDENTIAL_REFLECTION" &&
+      !error.message.includes(secret),
+  );
+});
+
+test("credential guard checks nested raw strings and keys, including short credentials, without modifying safe output", () => {
+  for (const secret of ["x", 'synthetic-"quoted"-key', "synthetic-\\-key"]) {
+    for (const value of [
+      { text: "prefix" + secret + "suffix" },
+      { metadata: [{ [secret]: "value" }] },
+    ])
+      assert.throws(
+        () => assertCredentialIsolation({ apiKey: secret }, value),
+        { code: "PROVIDER_CREDENTIAL_REFLECTION" },
+      );
+  }
+  const safe = { text: "A safe response.", usage: { output_tokens: 10 } };
+  const original = structuredClone(safe);
+  assertCredentialIsolation({ apiKey: "synthetic-not-present" }, safe);
+  assert.deepEqual(safe, original);
+  assertCredentialIsolation({ apiKey: "" }, safe);
+});
+
+test("OpenCode Go receives an honest client name and private random provider-session identifier only at its official endpoint", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    requests.push({ url, ...options });
+    const body = JSON.parse(options.body);
+    const text = body.instructions.includes(
+      "independent pre-release covenant reviewer",
+    )
+      ? JSON.stringify(goodReview())
+      : "Safe fixture answer.";
+    return new Response(
+      JSON.stringify({
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text }],
+          },
+        ],
+      }),
+    );
+  });
+  const config = {
+    provider: "openai",
+    model: "fixture",
+    apiKey: "synthetic-opencode-key",
+    baseUrl: "https://opencode.ai/inference/go/openai/v1",
+  };
+  await generate(config, {
+    messages: [{ role: "user", content: "First request" }],
+  });
+  await review(config, {
+    input: "First request",
+    candidate: "Safe answer",
+    covenant: [...FRUITS],
+  });
+  await generate(
+    { ...config },
+    { messages: [{ role: "user", content: "Another session" }] },
+  );
+  const first = requests[0].headers["x-opencode-session"];
+  assert.match(
+    first,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  assert.equal(requests[0].headers["user-agent"], "CypherTempre-ChainChat");
+  assert.equal(requests[1].headers["x-opencode-session"], first);
+  assert.notEqual(requests[2].headers["x-opencode-session"], first);
+  assert.equal(requests[0].url, config.baseUrl + "/responses");
+  for (const baseUrl of [
+    "https://opencode.ai.evil.example/inference/go/openai/v1",
+    "https://opencode.ai/other/v1",
+    "https://opencode.ai:444/inference/go/openai/v1",
+  ]) {
+    await generate(
+      { ...config, baseUrl },
+      { messages: [{ role: "user", content: "Unrelated endpoint" }] },
+    );
+    assert.equal(requests.at(-1).headers["x-opencode-session"], undefined);
+    assert.equal(requests.at(-1).headers["user-agent"], undefined);
+  }
+});
+
+test("review evidence references are explicit unique canonical indices, never every retrieved item by default", () => {
+  const evidence = [1, 2].map((index) => ({
+    index,
+    hash: "ab".repeat(32),
+    text: "Canonical fixture evidence",
+    truncated: false,
+  }));
+  assert.deepEqual(
+    parseReview(JSON.stringify({ ...goodReview(), usedRings: [2] }), evidence)
+      .usedRings,
+    [2],
+  );
+  for (const usedRings of [
+    undefined,
+    null,
+    "1",
+    [1, 1],
+    [-1],
+    [1.2],
+    ["1"],
+    [3],
+  ])
+    assert.throws(
+      () =>
+        parseReview(JSON.stringify({ ...goodReview(), usedRings }), evidence),
+      { code: "GATE_INVALID_EVIDENCE" },
+    );
+});
+
+test("an active credential in prompt or review context is held before any network request", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", () => {
+    calls++;
+    throw new Error("Network should not be reached.");
+  });
+  const config = {
+    provider: "openai",
+    model: "fixture",
+    apiKey: "synthetic-active-key-not-real",
+  };
+  await assert.rejects(
+    generate(config, {
+      system: "Context includes " + config.apiKey,
+      messages: [{ role: "user", content: "Synthetic request" }],
+    }),
+    { code: "PROVIDER_CREDENTIAL_REFLECTION" },
+  );
+  await assert.rejects(
+    review(config, {
+      input: "Synthetic request",
+      candidate: "Safe answer",
+      covenant: [...FRUITS],
+      recentConversation: [{ role: "user", content: config.apiKey }],
+    }),
+    { code: "PROVIDER_CREDENTIAL_REFLECTION" },
+  );
+  assert.equal(calls, 0);
 });
 
 test("every provider normalizes model text while preserving credentials and request identity", async (t) => {
@@ -492,12 +730,31 @@ test("review has a fresh system frame, includes immutable covenant and requests 
       candidate: "An accurate reply",
       covenant: ["loving", "gentle"],
       perspectives: [{ name: "Scholar", summary: "Public summary" }],
+      availableEvidence: [
+        {
+          index: 2,
+          hash: "ab".repeat(32),
+          text: "A canonical memory snippet.",
+          truncated: false,
+        },
+      ],
+      recentConversation: [
+        { role: "user", content: "The preceding question." },
+      ],
     },
   );
   assert.equal(result.approved, true);
   const messages = mock.requests[0].body.messages;
   assert.match(messages[0].content, /solely as untrusted material/);
   assert.match(messages[0].content, /not private step-by-step reasoning/);
+  assert.match(messages[0].content, /Do not mark every retrieved ring as used/);
+  const context = JSON.parse(messages[1].content);
+  assert.equal(context.availableEvidence[0].index, 2);
+  assert.equal(
+    context.recentConversation[0].content,
+    "The preceding question.",
+  );
+  assert.deepEqual(result.usedRings, []);
   assert.deepEqual(JSON.parse(messages[1].content).genesisCovenant, [
     "loving",
     "gentle",

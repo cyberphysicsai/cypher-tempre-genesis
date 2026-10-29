@@ -63,6 +63,7 @@ function facultyPack() {
 }
 
 const assessment = () => ({
+  usedRings: [],
   approved: true,
   decision: "approve",
   scores: Object.fromEntries(DIMENSIONS.map((key) => [key, 240])),

@@ -3,12 +3,23 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomBytes, timingSafeEqual, randomUUID } from "node:crypto";
+import {
+  randomBytes,
+  timingSafeEqual,
+  randomUUID,
+  createHash,
+} from "node:crypto";
 import { engine as runEngine } from "./lib/engine.mjs";
-import { validateProvider, generate, review } from "./lib/providers.mjs";
+import {
+  validateProvider,
+  generate,
+  review,
+  assertCredentialIsolation,
+  validUsedRings,
+} from "./lib/providers.mjs";
 import { archetypes, chooseArchetypes } from "./lib/archetypes.mjs";
 import { StateStore, validateSettings } from "./lib/state.mjs";
-import { sanitizeModelValue } from "./lib/terminology.mjs";
+import { sanitizeModelValue, sanitizeModelText } from "./lib/terminology.mjs";
 import { createHoldingsGate } from "./lib/holdings-gate.mjs";
 
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -58,12 +69,13 @@ const keys = (loadout) => [
   ...loadout.senses.map((id) => (id.startsWith("sense:") ? id : `sense:${id}`)),
 ];
 
-export function strictReview(result) {
+export function strictReview(result, availableEvidence = []) {
   if (!result || typeof result !== "object")
     return {
       approved: false,
       fruitages: {},
       scores: {},
+      usedRings: [],
       rationale: "The reviewer returned no valid assessment.",
       threshold: 180,
     };
@@ -77,6 +89,7 @@ export function strictReview(result) {
     valid &&
     result.approved === true &&
     result.decision === "approve" &&
+    validUsedRings(result.usedRings, availableEvidence) &&
     FRUITS.every((k) => fruits[k] >= 180) &&
     scores.covenant >= 180;
   return {
@@ -84,6 +97,9 @@ export function strictReview(result) {
     fruitages: fruits,
     scores,
     rationale: String(result.rationale || "").slice(0, 1500),
+    usedRings: validUsedRings(result.usedRings, availableEvidence)
+      ? [...result.usedRings]
+      : [],
     threshold: 180,
   };
 }
@@ -95,9 +111,45 @@ function describeGate(assessment, native = {}) {
     fruits: assessment.fruitages,
     scores: assessment.scores,
     rationale: assessment.rationale,
+    usedRings: assessment.usedRings,
     threshold: 180,
     ...native,
   };
+}
+function boundedReviewText(value) {
+  const raw = Buffer.from(sanitizeModelText(value), "utf8");
+  let end = Math.min(raw.length, 8192);
+  while (end < raw.length && (raw[end] & 0xc0) === 0x80) end--;
+  return {
+    text: raw.subarray(0, end).toString("utf8"),
+    truncated: end < raw.length,
+  };
+}
+function reviewEvidence(evidence = []) {
+  return evidence.map((entry) => {
+    const bounded = boundedReviewText(entry.text);
+    return {
+      ...entry,
+      text: bounded.text,
+      truncated: entry.truncated || bounded.truncated,
+    };
+  });
+}
+function reviewConversation(messages = []) {
+  return messages.slice(-12).map(({ role, content, truncated }) => {
+    const bounded = boundedReviewText(content);
+    return {
+      role,
+      content: bounded.text,
+      truncated: Boolean(truncated || bounded.truncated),
+    };
+  });
+}
+function historyConversation(prepared) {
+  return (prepared.recentHistory || []).flatMap((entry) => [
+    { role: "user", content: entry.input },
+    { role: "assistant", content: entry.output },
+  ]);
 }
 function promptFor(prepared, record) {
   return `You are ${prepared.genesis?.name || record.name}, a Cypher Tempre agent. Your identity and memory live in the paired Timechain, independent of the model used for this turn.
@@ -206,17 +258,27 @@ export async function createApp(options = {}) {
   // retain their exact values. Injected transports obey the same boundary.
   const model = async (config, args) => {
     await requireHoldings();
-    const result = sanitizeModelValue(
-      await generateModel(config, sanitizeModelValue(args)),
-    );
+    assertCredentialIsolation(config, args);
+    const rawResult = await generateModel(config, sanitizeModelValue(args));
+    assertCredentialIsolation(config, rawResult);
+    const result = sanitizeModelValue(rawResult);
     await requireHoldings();
     return result;
   };
   const reviewer = async (config, args) => {
     await requireHoldings();
-    const result = sanitizeModelValue(
-      await reviewModel(config, sanitizeModelValue(args)),
+    assertCredentialIsolation(config, args);
+    const boundedArgs = {
+      ...args,
+      availableEvidence: reviewEvidence(args.availableEvidence),
+      recentConversation: reviewConversation(args.recentConversation),
+    };
+    const rawResult = await reviewModel(
+      config,
+      sanitizeModelValue(boundedArgs),
     );
+    assertCredentialIsolation(config, rawResult);
+    const result = sanitizeModelValue(rawResult);
     await requireHoldings();
     return result;
   };
@@ -336,6 +398,7 @@ export async function createApp(options = {}) {
     candidate,
     perspectives,
     signal,
+    recentConversation = historyConversation(prepared),
   ) {
     const assessment = strictReview(
       await reviewer(config, {
@@ -343,8 +406,11 @@ export async function createApp(options = {}) {
         candidate,
         covenant: prepared.genesis?.covenant || FRUITS,
         perspectives,
+        availableEvidence: prepared.availableEvidence || [],
+        recentConversation,
         signal,
       }),
+      prepared.availableEvidence || [],
     );
     if (!assessment.approved)
       throw Object.assign(
@@ -367,6 +433,7 @@ export async function createApp(options = {}) {
       scores: exchange.scores,
       assessment: exchange.assessment,
       perspectives: exchange.perspectives,
+      usedRings: exchange.usedRings || exchange.assessment?.usedRings || [],
       loadout: keys(record.loadout),
       groundingContext: exchange.groundingContext || prepared.context || "",
     });
@@ -422,6 +489,7 @@ export async function createApp(options = {}) {
           "Every exchange passed independent covenant review and the native PoI gate.",
       },
       perspectives: last.perspectives,
+      usedRings: last.usedRings || last.assessment?.usedRings || [],
       model: last.model,
       loadout: pending.loadout,
       growth: true,
@@ -894,6 +962,7 @@ export async function createApp(options = {}) {
                 expectedHead: preview.head.hash,
                 scores: assessment.scores,
                 assessment,
+                usedRings: assessment.usedRings,
               });
               if (
                 result.accepted !== true ||
@@ -976,6 +1045,7 @@ export async function createApp(options = {}) {
             return await exclusive(record, async () => {
               const message = text(input.message, "Message");
               const config = providerFor(session);
+              assertCredentialIsolation(config, message);
               const controller = new AbortController();
               session.controllers.add(controller);
               res.once("close", () => {
@@ -1040,8 +1110,11 @@ export async function createApp(options = {}) {
                         input: message,
                         candidate: result.text,
                         covenant: prepared.genesis.covenant,
+                        availableEvidence: prepared.availableEvidence || [],
+                        recentConversation: conversation,
                         signal,
                       }),
+                      prepared.availableEvidence || [],
                     );
                     if (!judgment.approved)
                       return { blocked: true, name: a.name };
@@ -1050,6 +1123,7 @@ export async function createApp(options = {}) {
                       output: result.text,
                       scores: judgment.scores,
                       assessment: judgment,
+                      usedRings: judgment.usedRings,
                       perspectives: [],
                     });
                     return {
@@ -1057,6 +1131,7 @@ export async function createApp(options = {}) {
                       summary: result.text,
                       scores: judgment.scores,
                       assessment: judgment,
+                      usedRings: judgment.usedRings,
                     };
                   },
                 );
@@ -1109,17 +1184,22 @@ export async function createApp(options = {}) {
                 candidate,
                 perspectives,
                 signal,
+                conversation,
               );
               const exchange = {
                 input: message,
                 output: candidate,
                 scores: assessment.scores,
                 assessment,
-                perspectives: perspectives.map(({ name, summary, scores }) => ({
-                  name,
-                  summary,
-                  scores,
-                })),
+                usedRings: assessment.usedRings,
+                perspectives: perspectives.map(
+                  ({ name, summary, scores, usedRings }) => ({
+                    name,
+                    summary,
+                    scores,
+                    usedRings,
+                  }),
+                ),
                 model: { provider: config.provider, model: config.model },
                 timestamp: new Date().toISOString(),
                 groundingContext: prepared.context,
@@ -1218,6 +1298,7 @@ export async function createApp(options = {}) {
                 loadout: keys(record.loadout),
               });
               // Re-review on flush, including after restart, model change, or an external append.
+              const reviewedConversation = historyConversation(prepared);
               for (const exchange of pending.exchanges) {
                 exchange.assessment = await assess(
                   config,
@@ -1226,9 +1307,15 @@ export async function createApp(options = {}) {
                   exchange.output,
                   exchange.perspectives,
                   controller.signal,
+                  reviewedConversation,
                 );
                 exchange.scores = exchange.assessment.scores;
+                exchange.usedRings = exchange.assessment.usedRings;
                 await nativeEvaluation(record, prepared, exchange);
+                reviewedConversation.push(
+                  { role: "user", content: exchange.input },
+                  { role: "assistant", content: exchange.output },
+                );
               }
               if (controller.signal.aborted)
                 throw err(
@@ -1247,7 +1334,27 @@ export async function createApp(options = {}) {
             return await exclusive(record, async () => {
               const config = providerFor(session);
               text(input.text, "Source text", 12_000_000);
-              const source = input.text;
+              const sanitized = await engine({
+                op: "sanitize_source",
+                root: record.root,
+                text: input.text,
+              });
+              if (
+                typeof sanitized.text !== "string" ||
+                !Number.isSafeInteger(sanitized.redactionCount) ||
+                sanitized.redactionCount < 0 ||
+                sanitized.bytes !== Buffer.byteLength(sanitized.text, "utf8") ||
+                sanitized.sourceHash !==
+                  createHash("sha256")
+                    .update(sanitized.text, "utf8")
+                    .digest("hex")
+              )
+                throw err(
+                  "The engine returned no valid sanitized source receipt.",
+                  "SOURCE_SANITIZATION_INVALID",
+                  422,
+                );
+              const source = sanitized.text;
               const name = text(
                 input.name || "Manual source",
                 "Source name",
@@ -1337,6 +1444,11 @@ export async function createApp(options = {}) {
                   // by a later high score. Final native PoI also audits the synopsis.
                   const assessment = {
                     approved: true,
+                    usedRings: [
+                      ...new Set(
+                        judgments.flatMap((judgment) => judgment.usedRings),
+                      ),
+                    ],
                     rationale: judgments.at(-1).rationale,
                     scores: Object.fromEntries(
                       DIMENSIONS.map((k) => [
@@ -1362,10 +1474,15 @@ export async function createApp(options = {}) {
                     root: record.root,
                     name: `${name} [${i + 1}/${parts.length}]`,
                     text: chunk,
+                    redactionCount: i === 0 ? sanitized.redactionCount : 0,
+                    sourceHash: createHash("sha256")
+                      .update(chunk, "utf8")
+                      .digest("hex"),
                     finding,
                     targetBytes,
                     expectedHead: prepared.head.hash,
                     assessment,
+                    usedRings: assessment.usedRings,
                     scores: assessment.scores,
                     loadout: keys(record.loadout),
                     reviewWindows: windows.length,
@@ -1406,6 +1523,8 @@ export async function createApp(options = {}) {
                 blocks,
                 bytes: consumed,
                 targetBytes,
+                redactionCount: sanitized.redactionCount,
+                sourceHash: sanitized.sourceHash,
                 state: await state(session),
               });
             });

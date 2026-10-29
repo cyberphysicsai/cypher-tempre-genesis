@@ -263,6 +263,157 @@ class EngineBridgeTests(unittest.TestCase):
         self.assertEqual(out["sourceHash"], hashlib.sha256(source.encode()).hexdigest())
         self.assertTrue(self.call("verify")["verified"])
 
+    def test_declared_evidence_enforces_aggregate_coverage(self):
+        tc = bridge.Timechain(self.root)
+        evidence = tc.seal("experience", {"summary": "One observation records a count of 11."},
+                           poi=self.exchange()["scores"])
+        (self.root / "registry" / "policy.json").write_text(
+            json.dumps({"poi": {"aggregate_min_terms": 5}}), encoding="utf-8")
+        exchange = self.exchange(input="Give the total count across all observations.",
+                                 output="The total count is 99 across all observations.")
+        before = tc.rings_path.read_bytes()
+        for used in ([], [evidence["index"]]):
+            with self.assertRaises(bridge.BridgeError) as rejected:
+                self.call("evaluate", **exchange, usedRings=used)
+            self.assertEqual(rejected.exception.code, "POI_REJECTED")
+            verdict = rejected.exception.details["verdict"]
+            self.assertEqual(verdict["decision"], "FORCE_UNCERTAINTY")
+            self.assertTrue(any("aggregate_min_terms 5" in reason for reason in verdict["reasons"]))
+        self.assertEqual(tc.rings_path.read_bytes(), before)
+
+    def test_armed_entity_grounding_cannot_use_prompt_metadata_as_evidence(self):
+        tc = bridge.Timechain(self.root)
+        evidence = tc.seal("experience", {"summary": "A measurement in metres was recorded in a document."},
+                           poi=self.exchange()["scores"])
+        (self.root / "registry" / "policy.json").write_text(
+            json.dumps({"floors": {"entity_grounding_enforce": True}}), encoding="utf-8")
+        exchange = self.exchange(input="Summarize the measurement reported in the evidence.",
+                                 output="The measurement was 875 metres in document.txt.")
+        for used in ([], [evidence["index"]]):
+            with self.assertRaises(bridge.BridgeError) as rejected:
+                self.call("evaluate", **exchange, usedRings=used,
+                          groundingContext='{"faculty_id":875,"source":"document.txt"}')
+            verdict = rejected.exception.details["verdict"]
+            self.assertEqual(verdict["decision"], "FORCE_UNCERTAINTY")
+            self.assertEqual(verdict["entity_grounding"], 0)
+            self.assertEqual(set(verdict["specifics_missing"]), {"875", "document.txt"})
+
+    def test_declared_evidence_comes_from_canonical_records_and_is_sealed(self):
+        tc = bridge.Timechain(self.root)
+        evidence = tc.seal("experience", {"summary": "The measurement was 875 metres in document.txt."},
+                           poi=self.exchange()["scores"])
+        (self.root / "registry" / "policy.json").write_text(
+            json.dumps({"floors": {"entity_grounding_enforce": True}}), encoding="utf-8")
+        self.commit(input="Summarize the recorded measurement.",
+                    output="The measurement was 875 metres in document.txt.", usedRings=[evidence["index"]])
+        item = tc._tail_ring()["payload"]["exchanges"][0]
+        self.assertEqual(item["usedRings"], [evidence["index"]])
+        self.assertEqual(item["evidence"][0]["hash"], evidence["ring_hash"])
+        self.assertEqual(item["gate"]["entity_grounding"], 255)
+
+    def test_declared_evidence_rejects_missing_genesis_duplicate_and_unreleased_refs(self):
+        evidence = bridge.Timechain(self.root).seal("turn", {"event": "web_chat_turn", "input": "hidden",
+                                                   "output": "held"}, poi=self.exchange()["scores"])
+        for used in ([True], [0], [999], [1, 1], [evidence["index"]], "1"):
+            self.assert_code("EVIDENCE_INVALID", lambda used=used: self.call("evaluate", **self.exchange(), usedRings=used))
+
+    def test_available_evidence_is_bounded_utf8_and_does_not_claim_use(self):
+        text = "spectrometer λ indigo-lattice " * 1000
+        tc = bridge.Timechain(self.root)
+        evidence = tc.seal("experience", {"summary": text}, poi=self.exchange()["scores"])
+        prepared = self.call("prepare", input="spectrometer indigo-lattice", loadout=[])
+        offered = next(e for e in prepared["availableEvidence"] if e["index"] == evidence["index"])
+        self.assertTrue(offered["truncated"])
+        self.assertLessEqual(len(offered["text"].encode("utf-8")), bridge.MAX_EVIDENCE_BYTES)
+        self.assertEqual(offered, bridge.declared_evidence(tc, [evidence["index"]])[0])
+        self.assertNotIn("usedRings", prepared)
+
+    def test_source_sanitization_is_readonly_and_ingestion_defensively_redacts(self):
+        source = "Example configuration: password=synthetic-not-a-real-secret\n"
+        tc = bridge.Timechain(self.root)
+        before = tc.rings_path.read_bytes()
+        safe = self.call("sanitize_source", text=source)
+        self.assertEqual(safe["redactionCount"], 1)
+        self.assertNotIn("synthetic-not-a-real-secret", safe["text"])
+        self.assertEqual(safe["bytes"], len(safe["text"].encode("utf-8")))
+        self.assertEqual(safe["sourceHash"], hashlib.sha256(safe["text"].encode("utf-8")).hexdigest())
+        self.assertEqual(tc.rings_path.read_bytes(), before)
+        ex = self.exchange()
+        out = self.call("ingest", expectedHead=self.head(), text=source, name="synthetic.txt", targetBytes=11,
+                        scores=ex["scores"], assessment=ex["assessment"])
+        data = [r["payload"]["data"] for r in tc.iter_rings() if r["ring_type"] == "continuum"]
+        self.assertEqual("".join(d["content"] for d in data), safe["text"])
+        self.assertTrue(all(len(d["content"].encode("utf-8")) <= 11 for d in data))
+        self.assertTrue(all(d["redacted"] and d["redaction_count"] == 1 for d in data))
+        self.assertEqual(out["redactionCount"], 1)
+
+    def test_ingestion_preserves_presanitized_review_metadata_and_checks_hash(self):
+        safe = self.call("sanitize_source", text="password=synthetic-not-a-real-secret\n")
+        ex = self.exchange()
+        self.assert_code("SOURCE_CHANGED", lambda: self.call("ingest", expectedHead=self.head(),
+                         **{**safe, "sourceHash": "0" * 64}, name="safe.txt", scores=ex["scores"], assessment=ex["assessment"]))
+        result = self.call("ingest", expectedHead=self.head(), **safe, name="safe.txt", targetBytes=1024,
+                           scores=ex["scores"], assessment=ex["assessment"])
+        self.assertEqual(result["redactionCount"], 1)
+        self.assertEqual(bridge.Timechain(self.root)._tail_ring()["payload"]["data"]["redaction_count"], 1)
+
+    def test_presanitized_source_byte_boundaries_do_not_rewrite_mask_fragments(self):
+        safe = self.call("sanitize_source", text="password=synthetic-not-a-real-secret\n")
+        ex = self.exchange()
+        tc = bridge.Timechain(self.root)
+        for size in (8, 16, 17):
+            start = self.call("inspect")["height"]
+            counts = []
+            for i, chunk in enumerate(bridge.utf8_chunks(safe["text"], size)):
+                result = self.call("ingest", expectedHead=self.head(), text=chunk,
+                                   sourceHash=hashlib.sha256(chunk.encode("utf-8")).hexdigest(),
+                                   redactionCount=safe["redactionCount"] if i == 0 else 0,
+                                   name="safe.txt", targetBytes=size,
+                                   scores=ex["scores"], assessment=ex["assessment"])
+                counts.append(result["redactionCount"])
+            data = [r["payload"]["data"] for r in tc.iter_rings()
+                    if r["index"] >= start and r["ring_type"] == "continuum"]
+            self.assertEqual("".join(d["content"] for d in data), safe["text"])
+            self.assertEqual(sum(counts), 1)
+            self.assertTrue(all(len(d["content"].encode("utf-8")) <= size for d in data))
+
+    def test_mask_fragment_allowance_does_not_exempt_real_or_near_match_values(self):
+        ex = self.exchange()
+        for source in ("password=[REDACTEX", "password=[REDACTED_SECRET]real-secret",
+                       "password=[REDACTEreal-secret", "password=synthetic-not-a-real-secret"):
+            self.assert_code("SOURCE_CHANGED", lambda source=source: self.call(
+                "ingest", expectedHead=self.head(), text=source, name="fixture.txt",
+                sourceHash=hashlib.sha256(source.encode("utf-8")).hexdigest(), targetBytes=1024,
+                scores=ex["scores"], assessment=ex["assessment"]))
+        # Even a valid terminal marker prefix cannot protect another raw secret.
+        source = "password=synthetic-not-a-real-secret\ntoken=[REDACTE"
+        self.assert_code("SOURCE_CHANGED", lambda: self.call(
+            "ingest", expectedHead=self.head(), text=source, name="fixture.txt",
+            sourceHash=hashlib.sha256(source.encode("utf-8")).hexdigest(), targetBytes=1024,
+            scores=ex["scores"], assessment=ex["assessment"]))
+
+    def test_ingestion_honors_explicit_equipment_even_for_relevant_dormant_faculties(self):
+        import cambium
+        with contextlib.redirect_stdout(io.StringIO()):
+            cambium.save_grown(self.root, {"registry": "grown", "modalities": [{"id": 999,
+                "name": "Photonic Lattice Tomography", "function": "Interpret photonic lattice tomography measurements.",
+                "category": "Fixture", "status": "dormant", "seed_terms": ["photonic", "lattice", "tomography"],
+                "effect": {"type": "frame", "text": "Inspect photonic lattice uncertainty."}}], "senses": []})
+        ex = self.exchange()
+        for loadout in ([], ["modality:999"]):
+            self.call("ingest", expectedHead=self.head(), text="Photonic lattice tomography measurement",
+                      name="photonic.txt", targetBytes=1024, loadout=loadout,
+                      scores=ex["scores"], assessment=ex["assessment"])
+            labels = bridge.Timechain(self.root)._tail_ring()["payload"]["labels"]
+            self.assertEqual(labels["equipped"], loadout)
+            if loadout:
+                self.assertEqual(labels["frames"], ["Inspect photonic lattice uncertainty."])
+                self.assertEqual(labels["modalities"][0]["id"], 999)
+            else:
+                self.assertEqual(labels["modalities"], [])
+                self.assertEqual(labels["frames"], [])
+                self.assertEqual(labels["computed"], {})
+
     def test_tampering_and_paused_chain_fail_closed(self):
         (self.root / "chain" / "PAUSED").write_text("paused", encoding="utf-8")
         self.assert_code("CHAIN_PAUSED", lambda: self.call("prepare", input="Hello"))
