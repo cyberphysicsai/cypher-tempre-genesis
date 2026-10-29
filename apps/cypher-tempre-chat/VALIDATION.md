@@ -1,132 +1,68 @@
-# Preview validation
+# ChainChat validation
 
-## Native cognition beta 0.5.0
+Validation separates deterministic engine behavior, application orchestration and real-model observations. Passing a transport or gate test does not establish equal answer quality across models, perfect security or elimination of hallucinations.
 
-This release connects the chat to native routing, shaped recall, scored tree search, teaching, controlled growth, dormancy and maintenance. It does not establish equal benchmark performance across models or reproduce an external game/robotics/coding environment.
+## Current interoperability release: 0.6.0
 
-Final local suite: **163 Node tests passed**, with one expected Windows case-sensitivity skip; **56 Python adapter tests passed**. The independent original-engine reference was supplied, so both compatibility checks ran. JavaScript syntax and Git whitespace checks passed.
+Eight independent interoperability acceptance cases pass against an unchanged original 3.30.08 installation. They use real Python engines, local HTTP, disposable chains and synthetic generation/review transports. No paid provider calls, personal chains or real wallet signatures were used for these new changes.
 
-- Real HTTP plus native Python tests verify active review/seal, confirmed pause/resume, stateless raw calls, external dormancy, learning freeze, per-session activity privacy, and cancellation before release. Learning-off file fingerprints check registries, telemetry and training state while accepted conversation still seals.
-- Semantic recall toggles change native route/memory calls and canonical evidence supplied to generation. Malformed plans cannot introduce unoffered ring IDs or teach unequipped labels. A reviewed replay takes a fresh semantic/native gate and records its accepted source.
-- Perspective search creates actual model continuations, reviews each, and uses native UIC selection/backpropagation rather than fabricated rollout counters. Tests verify explored depth, call counts, synthesis and persisted bounded search receipts. Public tree metadata is descriptive evidence of the bridge run, not independent proof that a semantic assessment is true.
-- Revision tests hold the first candidate, review a corrected candidate, and reject exhausted attempts without appending. Derived teaching occurs only after an accepted seal and is suppressed with learning off. Opted-in Dream runs after the inference transaction is idle; Stop removes queued jobs. Stop remains bound to the originating chain after an agent switch.
-- Browser checks on disposable agents cover backend stage glow, paused chat with unchanged height, Stop, native search and history reload, manual promote/equip/hibernate/wake, 21-position picker, Orbitron throughout, and desktop/390px mobile layouts without horizontal document overflow. New faculties remain unequipped until selected.
-- Original-engine fixtures still compare all 44 native scoring cases and all four decisions. Continuing an independently created earlier chain preserves historical bytes and policy; both verifiers pass. The 65 bundled native engine files remain unchanged.
-- No paid provider calls or real wallet signatures were made for this release. Tests use local deterministic model/review transports. Holdings, scoped signatures, credential reflection, source redaction, stale-head rejection and release-ledger regressions remain in the suite.
-- Maintenance fault tests cover failed native adoption seals, exceptions swallowed by Dream, missing adoption receipts, abrupt subprocess exit/restart, successful adoption and a failed final journal write. A durable marker and backups precede mutations; mismatched or incomplete adoption blocks further inference/writes and requires local recovery review. No automatic history rewrite occurs.
-
-Public benchmark claims require per-run provenance. Inspected local LIBERO and RoboCurve bundles support their particular simulation/checkpoint protocols; they do not establish the same outcome from every text API model. Matching ARC, LongMemEval, Pokemon or MazeBench scores would require their exact datasets/environments, allowed tools, start state, model settings, budgets and scoring records. No such rerun was performed here. Earlier real-model results below describe their recorded release and configuration, not this expanded runtime.
-
-Remaining boundaries are explicit in the capability manifest: full-corpus audit queues, recovery and witness/task-chain administration use native operator workflows; external coding/browser/game/robotics environments need separate adapters. Selected memory and model reviews remain bounded and fallible. No claim of zero hallucinations or universal skill-performance parity is made.
-
-## OpenCode Go review and perspective allowances
-
-The initial real Muse Spark 1.3 Contributor benchmark exposed output-budget exhaustion: 19 calls reached a 2,048-token cap; five non-fork tasks completed generation but not review, and all four review-only probes were incomplete. These observations identify a limit in the tested configuration, not a measure of intrinsic model quality or proof that a larger allowance will complete every review.
-
-The exact `muse-spark-1.3-contributor` model on the OpenAI Responses adapter at `https://opencode.ai/inference/go/openai/v1` now receives an 8,192-token review ceiling. A subsequent real-model benchmark recorded 24 correct core answers and all four expected review-probe outcomes. Its 21-perspective run still failed during candidate generation: a response reached the 2,048-token cap, with 2,046 reasoning tokens reported and `max_output_tokens` as the incomplete reason. This identifies a separate candidate-generation limit, not a successful 21-perspective run.
-
-Perspective candidates now use the same exact-model/endpoint eligibility and an 8,192-token ceiling. Mock-transport serialization regressions verify the exact model, protocol, HTTPS host, default port and endpoint path; other models, providers, lookalike hosts, alternate ports and alternate paths retain 2,048 for reviews and candidates. Ordinary chat and synthesis remain at 4,096, and source summaries remain at 1,536. An incomplete response at the larger ceiling still raises `PROVIDER_INCOMPLETE`; candidate exhaustion creates no pending answer or native commit.
-
-The candidate-budget change is covered by provider serialization and server-orchestration tests using synthetic credentials and local or mocked transports. A targeted real-model rerun then completed both three- and 21-perspective requests, released correct JSON answers and verified both synthetic chains. The three-perspective request made eight provider calls in 56.2 seconds; the 21-perspective request made 44 calls in 275.9 seconds. No incomplete responses occurred in that targeted run. Larger allowances are not a success guarantee or a retry policy.
-
-Across the initial diagnostic run, the full follow-up and the targeted perspective test, 217 real provider calls had an estimated token value of $0.082284482, within the authorized $10 ceiling. No personal chain or real wallet was used. Credentials were cleared from the temporary test processes. The latest CI passed 120 Node tests and 39 Python adapter tests; two optional external-reference checks were skipped in CI and had passed separately with the original engine supplied locally.
-
-These small synthetic tests establish execution and correctness only for the specified cases. The bare model already answered all six core attempts correctly; no accuracy improvement over that baseline was demonstrated. The reviewer rejected false arithmetic, an invented address and a contradiction of the supplied record, and approved the correct control. This does not establish general hallucination resistance, long-horizon memory improvement, arbitrary-model reliability or full original-skill workflow parity. Only the reviewer and perspective limits changed for the named model; real-model source ingestion and faculty exchange were not benchmarked here.
-
-## Security and functional audit: beta 0.4.1
-
-The audit found and corrected integration gaps that earlier fixture tests did not cover. It does not certify the application as vulnerability-free or prove identical answer quality to every workflow in the skill.
-
-- The complete backend/provider suite with the external parity reference passed **116 tests**, with one expected Windows case-sensitivity skip. A further frontend version-gate test passed alongside the existing three display tests. The Python adapter suite passed **39 tests**. All 65 native engine files remain byte-identical to the published engine.
-- Exact active credentials are rejected in model-bound context, raw provider output, nested decoded review data and injected transports before release, pending storage or native commitment. Synthetic reflection tests verified that credentials do not reach output or saved records. This is exact active-key protection, not general secret detection.
-- The reviewer now receives bounded canonical evidence and recent conversational context, and explicitly declares the evidence it relied on. The native adapter resolves that evidence from verified, released, nonquarantined chain records. Aggregate-coverage and optional entity-grounding fixtures that previously passed incorrectly now match the original engine's uncertainty decisions.
-- Source ingestion now applies the native secret-pattern redactor before model calls and storage. Regressions cover small UTF-8 block boundaries through redaction markers, exact safe-source hashes, and false marker lookalikes. Continuum labeling now respects the actual equipped loadout, including an empty loadout.
-- A real HTTP bridge/provider-transport/native-engine probe with synthetic model responses verified recall off/on, empty/equipped faculties, 1/3/21 perspective requests, size-based pending blocks, re-reviewed flush, malformed and low reviews, unchanged rejected-chain heads and final chain verification. The 21-perspective case produced 21 candidates plus a synthesis, each with a review: 44 provider requests.
-- Existing-chain tests use the genuine original skill engine. Historical chain and policy bytes remain unchanged after pairing and new-schema continuation; both verifiers pass. Native scoring parity still covers 44 cases spanning all four decisions.
-- Independent wallet review passed all 28 focused wallet tests. The active flow requests a scoped message signature, not spending approval, a permit or a transaction. Privacy boundaries include the browser, chosen model provider and RPC provider; wallet use is not anonymous.
-- The deployed 0.4.0 public assets were verified against their release Git blobs, with expected security headers. Probes for environment, Git, local state and bridge-source paths returned denial or the public page, not private files. The 0.4.1 frontend requires an updated bridge before sending a pairing code; a browser fixture confirmed zero pairing requests to a 0.4.0 bridge.
-- OpenCode Go transport adds an honest client user agent and a random in-memory session identifier. Its provider-specific access, model support, data-use terms and billing remain external dependencies.
-
-The deliberate false-arithmetic fixture can still pass both original and wrapped gates when a synthetic reviewer supplies high scores. Mechanical checks cannot independently determine arbitrary factual truth. A model benchmark measures only its stated tasks and settings; it is not a hallucination-elimination guarantee. Router/replay, full iterative MCTS and complete training/consolidation workflows are not automatically invoked by the chat surface. Real-model benchmark evidence is recorded separately from these no-cost regression results.
-
-## ChainChat beta 0.4.0
-
-- Full Node suite with the external original-engine parity reference: **100 passed, 0 failed, 1 Windows-only skip**. This includes 19 holdings backend tests, 9 wallet-flow tests and 3 display/access-routing tests.
-- Python adapter suite: **29 passed**. JavaScript syntax and Git whitespace checks pass. The native Proof of Interaction engine remains unchanged.
-- Holdings tests cover exact/below/above threshold, real EOA signing and recovery, deployed ERC-1271 and delegated EOA verification, scoped single-use SIWE challenges, signed session expiry, origin/session isolation, replay, wrong chain, token decimals, malformed RPC data, canonical-block changes, expiry/cache failure, logout during generation and authorization changes during verification.
-- Native writes are authorized before starting. Tests verify receipt retention for an already-started commit and accurate Continuum committed-block/consumed-byte counts when subsequent work loses authorization.
-- Wallet tests use local providers and fixture signatures; the active interface requests no payment, token approval, permit or transaction. No real wallet signature or paid model request was made during validation.
-- A read-only call to Base mainnet verified chain 8453, the configured CPHY contract's 18 decimals and support for the canonical block-hash query used by this implementation. Test balances and wallet authentication use fixtures; an owner's real wallet sign-in remains to be exercised.
-- Browser inspection on an isolated local bridge verified pairing without holdings, locked new-action controls, the holdings dialog and a disposable chain's actual genesis height **0**. After an external native append, the counter refreshed to **1** without a reload. No personal chain was used.
-- Default desktop and 390×844 mobile views retain the monochrome physics/DNA motif and Orbitron. Mobile content width measured 375px inside a 390px viewport, with no horizontal overflow. Screenshots are separate deliverables, not bundled with runtime state.
-- The official frontend and local bridge must be updated together. Hosted-to-local pairing with the user's installed bridge and an actual wallet remains a live beta verification step after restart.
-
-## Beta 0.3.0
-
-- Full Node integration suite: 83 passed, 1 Windows-specific skip. Native scoring parity reference was supplied. JavaScript syntax checks pass.
-- Solidity registry: 13 local EVM tests passed, including atomic payment, exact receipt, owner-only recovery, owner-scoped front-running resistance, malicious token callbacks and compiled runtime comparison.
-- Wallet tests cover exact quantities, pinned selectors and runtime, network/account changes, disabled payments, and fresh Ed25519 bridge proofs.
-- Hosted bridge tests cover exact HTTPS origins, session-origin binding, loopback endpoint restrictions, CORS and auditor embedding. License checks use a pinned deployment and a canonical Base block; verification failure and mid-generation expiry prevent release.
-- Current payment configuration is deliberately disabled. No mainnet contract deployment, wallet transaction or live paid model request was performed.
-- The existing auditor is preserved below the chat, with memory-only pairing credentials and Orbitron typography. It continues to use its separate original bridge on port 8788.
-- Browser automation stopped before final beta UI/deployment verification. Unit and HTTP integration checks passed; actual hosted-to-local pairing must be checked after Hostinger deployment and the user's local bridge restart. Prior 0.2.1 layout checks below are retained as earlier evidence, not claimed as beta browser verification.
-
-Version 0.2.1 presentation validated locally on 2026-10-28. The engine and provider results below were established for 0.2.0; their implementation is unchanged in this typography update. This is a working local preview; no change was deployed to the original GitHub repository or website.
-
-## Presentation update
-
-- Browser title and brand subtitle read **Agentic Timechain Metaprogramming Interface**.
-- Orbitron is the only declared and bundled typeface. Every interface element reports Orbitron in browser computed styles, including chat input, code, forms, menus and faculty text. Native file controls and placeholders explicitly inherit it.
-- Desktop 1440×1000 and mobile 390×844 layouts have no horizontal overflow. The mobile header has separate rows for branding and actions; the conversation heading does not overlap its status controls. The narrower ability bar uses three columns.
-- The perspective dialog has no horizontal overflow on mobile and uses Orbitron throughout. The previous handwriting asset, preload, and font stacks were removed.
-- JavaScript syntax checks pass. No live provider request was made for this presentation update.
-
-## Results
-
-| Check | Result |
+| Area | Evidence |
 | --- | --- |
-| Node.js 22.23.2: providers, bridge security, faculty exchange, native integration and external compatibility | 53 passed; 1 test skipped because it specifically checks case-sensitive non-Windows paths |
-| Python 3.12.10 on Windows: adapter regressions | 29 passed |
-| Python 3.14.4 on WSL Linux, extracted onto a native `/tmp` filesystem | 29 passed |
-| JavaScript syntax checks | Passed |
-| Bundled engine Git blobs and executable modes | All 65 files identical to the published Proof of Interaction engine |
-| Native scoring comparison against an independently stored original engine | 44 cases match exactly: six dimensions, brightness, grounding, policy thresholds and all four decisions |
-| Retired product terminology in source and release archive | Zero case-insensitive matches in paths or contents, including the bundled skill and font assets |
-| Desktop 1440×1000 and mobile 390×844 browser inspection | Passed; no horizontal overflow on the phone layout |
-| Source archive | Git-tracked files only; no `.local`, chains, pending conversations, credentials, caches, or private learned registries |
+| Original chain continuation | Pair an original-created chain, append through ChainChat, then resume native original sealing and growth. Historical bytes remain a prefix; both verifiers pass. |
+| Faculty mechanisms | Original safe primitive outputs match; frames reach model context; original growth is equipable in ChainChat and ChainChat growth remains readable by the original engine. |
+| Full portable packs | Original companion export → bundled-engine import → original companion return preserves safe specs, frame/hint/op effects, seed terms, dormant status, local ID rebinding and exact source lineage. HTTP import, equipment, export and return also pass. |
+| Learned state | An original labeler is trained from synthetic teaching examples and adopted through its native holdout guard. Learning-frozen chat preserves its bytes. Gifted learned heads remain in authenticated provenance without silently becoming recipient training. |
+| Model changes | The same verified memory, active frames and computed features reach another model configuration; unequipping removes current frame/computation activation. Provider weights do not transfer. |
+| Semantic controls | Hibernation and Dream reviews receive the actual user reason, explicit confirmation, relevant canonical memory and precise reversible scope. Accepted controls preserve native verification. |
+| Authored code | Pair, prepare, export and import do not execute pending code. A complete imported module can be materialized locally, separately approved by exact digest and deliberately equipped. Its output matches the original engine. |
+| Approval boundaries | Source, native-runtime and local dependency bindings are checked. A copied approval on another root, changed source or changed local dependency suppresses execution. Code runs in a bounded subprocess with local OS permissions, not an OS sandbox. |
 
-## Behavior exercised
+The original native format-1 importer still accepts the lens projection, with its original limited fidelity. Full restoration of rich state on an old skill installation requires `skill_interop.py`. The companion does not alter the original engine or the 65 bundled native files. Donor identity is unverified; hashes establish content integrity. Authored code and donor approval never activate automatically in a recipient.
 
-- Fresh genesis contains all nine requested fruitages.
-- Pairing an original-skill chain leaves its existing bytes unchanged. After a chat append, the original `timechain.py verify` still passes.
-- Model changes retain the same genesis, root, and history.
-- Selected faculties run their native computations. Different equipment selections are retained per exchange inside a batched block.
-- Three-perspective chat integration produces reviewed candidates and a native explicit-note collapse; a separate adapter regression covers all 21 perspectives.
-- Native low-consistency rejection, each low fruitage, missing assessments, malformed review data, missing native acceptance, and invalid commit receipts hold output.
-- A post-seal guard failure cannot expose its candidate through history, recall, or pending-response polling.
-- A deliberately lost receipt recovers the same committed ring, without duplicating it.
-- Two concurrent native writers cannot both commit against the same expected head.
-- Size-based conversation accumulation, automatic thresholds, manual re-reviewed flush, stale external appends, and exact paired input/output storage work.
-- Continuum preserves source whitespace and UTF-8 bytes. Each source block contains reviewed findings in canonical Continuum state. A source exceeding 1 MiB at a 2 MiB commitment boundary produces exactly one source ring after all semantic-window reviews. Rejecting its second window leaves the chain unchanged.
-- Growth produces actual faculties and auxiliary registry epochs; full verification remains valid.
-- Host/Origin checks, pairing throttling, bearer authentication, key exclusion from persisted state, provider disconnect, and session cancellation are exercised.
-- Faculty pack preview and export leave the complete agent tree byte-identical. Tampered hashes, malformed entries, active code fields, name collisions, stale heads, low fruitage reviews, and native low-consistency scores reject imports. Invalid later entries cannot cause a partial import.
-- A real native sense imports, equips, exports, and imports into a second fresh agent with its definition, category, and seed terms intact. The recipient retains its own genesis and empty conversation history. Export excludes private history and credentials; declared donor identity is explicitly unverified.
-- Transaction failure regressions cover byte-exact registry rollback before an epoch commit and retention of the committed epoch plus recovery evidence after a later failure.
-- Browser QA covered bridge pairing, fresh Cypher Tempre genesis, verified state, equipment selection, the 21-position radial menu, KB/MB controls, and mobile drawers. The monochrome revision also exercised valid pack preview, model-connection gating, empty share inventory, and the exchange modal at phone width.
-- All interface CSS/SVG color literals are grayscale. The original dashboard's animated atom, DNA, timechain, and Lissajous motifs are adapted with reduced-motion support.
-- Native runtime, skill text, new score fields and verdicts use Proof of Interaction (PoI). The central tree/atom illustration and history headline remain removed.
-- Generation and review tests cover all four provider protocols, inherited memory and faculty text, input/output normalization, retained credentials, cancellation signals, and unchanged original input in local history. Normalized output is reviewed before release; the rename does not weaken the gate.
-- A true external original-engine fixture retains its byte-identical historical prefix and policy file after a new PoI append. Both engine verifiers pass. Its stricter 200 consistency floor still rejects a score of 190. The original native brightness cap remains binding.
-- Orbitron is bundled with its SIL OFL license and serves locally as `font/ttf` for all interface text.
-- Output formatting uses DOM nodes, never injected HTML. Script-looking content and links in model text remain inert.
+An earlier separate local comparison matched all 42 base-faculty native computations. The regression suites cover 44 scoring parity cases and all four decisions, review/revision holds, pause/resume, stateless raw calls, learning freeze, activity isolation, stale heads, cancellation, replay, native tree search, Continuum and post-seal release checks. Maintenance and portable imports retain recovery journals and hold further work after interrupted or uncommitted mutations.
 
-## Remaining verification limits
+The final hardened suite, with both original-reference environment variables explicitly set, passed **187 Node tests**, with zero failures and one expected Windows platform skip (188 total). **77 Python tests** passed, with one symlink-privilege skip (78 total). JavaScript syntax and Git whitespace checks passed. The eight independent acceptance cases include actual materialization, original-runtime approval, HTTP equipment and dependency-change rejection. Additional hardening tests cover trust anchors, named operator approval and reflected-key rejection.
 
-Cloud provider calls used local protocol fixtures; no live paid API key was supplied or used. The full HTTP-to-Python-to-Timechain integration uses the real engine and filesystem, with only model generation/review replaced by test fixtures. A live provider/model combination should be checked using the user's own key before a public launch.
+A local browser check with synthetic model transport sealed a real chat ring, displayed six computed faculty receipts and cleared completed activity indicators. A full original-engine pack then imported two faculties at ring 4; equipping Brillouin Resonator Reasoning and chatting sealed ring 5 with a visible **COMPUTED** receipt. Paused plain chat left height unchanged, and resume passed. Disabling Recall showed Route and Replay as **RECALL OFF**. These browser checks used disposable chains and provide interface/orchestration evidence, not paid-model quality evidence; the local screenshot is `chainchat-interoperability-browser.png`. The interface requires local bridge version 0.6.0 or newer for these capabilities.
 
-No external action/tool executor is exposed. Semantic model assessments are fallible; the enforced gate is not a guarantee of correctness or moral judgment. Large source ingestion, context windows, block thresholds, and optional administration CLI limits are described in `README.md`.
+## Reproduce locally
 
-The original remote remained at `73c5013f654979b26dc10bbec58d834d976f3c34` throughout this work. No existing personal Timechain was paired or modified by the chat preview. The active browser preview uses a separate, fresh Cypher Tempre genesis; the prior demo genesis was archived locally without rewriting its history.
+Use Node 20+ and Python 3.10+. Point the reference variables at a trusted, independently stored original skill directory containing its native Python modules and registries. The reference is not included in the product.
 
-The external parity checks can be repeated by setting `CT_PARITY_REFERENCE` to an independently stored original skill directory outside this product, then running `node --test test/compatibility.test.mjs`. They skip when that optional reference is unavailable. The reference engine is never included in the release. Compatibility of earlier schemas is provided by the app adapter; standalone CLI commands assume the current schema.
+```powershell
+$env:CT_ORIGINAL_SKILL = "C:\\path\\to\\original-skill"
+$env:CT_PARITY_REFERENCE = $env:CT_ORIGINAL_SKILL
+node --test test/interoperability.test.mjs
+node --test test/compatibility.test.mjs
+npm test
+python -m unittest discover -s test -p "test_*.py"
+npm run check
+git diff --check
+```
+
+The interoperability tests fall back to the development workspace's `work/source-v3.30.08/skills/codex/cypher-tempre-self-model`. If no original reference exists, they explicitly skip. Such skips are not successful original-engine verification. Tests create marked disposable fixture roots and do not use private chains or real credentials.
+
+## Earlier real Muse evidence
+
+A separate beta 0.5.0 run used OpenCode Go `muse-spark-1.3-contributor` for 181 actual provider requests across 55 functional rows. Recorded statuses were 50 passed, two failed and three held. Reported token usage and configured pricing produced an estimated value of $0.103099662; this is not a provider invoice.
+
+- All 42 base faculties were selected, prepared and computed, with a real generation and review for each. Forty-one released and sealed; one was held.
+- Two requested depth-two continuations executed and were reviewed but were held before entering the tree. The requested depth was not achieved.
+- All 21 requested perspectives executed and were reviewed. Eight entered the tree and 13 were held. The first synthesis was held; a revision passed. The failed all-approved-branches expectation remains a failure.
+- Import and equipped chat succeeded, but hibernation was held because the review lacked sufficient user intent and reversible-scope context. Index and training controls succeeded; Dream was held for insufficient scope and consent context. The current change improves those review inputs; it has not yet been rerun with real Muse.
+- Recall, unknown-fact abstention, equipment, byte/source Continuum, learning on/off and pause/resume had passing functional cases. The unknown-fact case is not a hallucination-rate estimate.
+- The browser fixture paired, but its conflicting holdings policies disabled Send. That run did not establish successful paid browser chat.
+
+The raw results remain unchanged. Local deliverables are `chainchat-muse-live-abilities-results.json`, `chainchat-muse-verification-summary.json`, `chainchat-live-abilities-interpretation.json` and `chainchat-live-abilities-source-verification.json`. The interpretation's source checkpoint SHA-256 is `5ff8291c3fffb4cdbd2c00ab9c97fc4a1ad2a57a245f8539caa832d6bffeeb58`; its source verification records base commit `03ec44618e63eac84552fdaaeca3b91a179f3cbc` plus the then-local Windows maintenance path fix.
+
+Those 181 calls predate the full portability and authored-operator approval changes. They are not live-model validation of the new interoperability release. Earlier smaller benchmark runs used different configurations and are not combined into a new accuracy claim.
+
+## Security and performance boundaries
+
+Regression coverage includes origin/host restrictions, memory-only credentials, active-key reflection rejection, source redaction, wallet challenge/session binding, holdings expiry and authorization races. Wallet fixtures exercise scoped message signatures; the interface does not request token spending approval, a permit or a transaction. Model and RPC providers remain external services, and wallet use is not anonymous.
+
+Model reviews are semantic judgments and remain fallible. A deliberately false arithmetic answer can pass both native and wrapped gates if a synthetic reviewer supplies high scores. Mechanical parity alone cannot prove arbitrary factual truth, moral judgment or cross-model quality uplift.
+
+No ARC-AGI, LongMemEval, Pokemon, robotics or MazeBench result is reproduced by these application tests. Those tasks require their actual environments, datasets, tools, start states, budgets and scoring protocols. Local approved faculty operators do not supply a complete coding, browser, game or robotics agent harness.
+
+Production deployment and real-wallet/live-browser checks are separate from these local test results. The current interoperability changes require an updated local bridge and corresponding public interface; the prior deployed asset checks do not establish that this revision is live.

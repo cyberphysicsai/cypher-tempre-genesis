@@ -541,7 +541,8 @@ class EngineBridgeTests(unittest.TestCase):
         self.commit(input="Keep this personal notebook phrase in this chain: tangerine-amphora.")
         out = self.call("pack_export", keys=[imported["imported"][0]["key"]])
         self.assertNotIn("tangerine-amphora", json.dumps(out["pack"]))
-        self.assertEqual(set(out["pack"]["faculties"][0]["provenance"]), {"origin", "donor_id"})
+        self.assertTrue({"origin", "donor_id"} <= set(out["pack"]["faculties"][0]["provenance"]))
+        self.assertEqual(out["pack"]["interaction_portability"]["format"], 1)
 
     def test_pack_pre_epoch_write_failure_restores_registry_without_history_rewrite(self):
         before = (self.root / "chain" / "rings.jsonl").read_bytes()
@@ -889,6 +890,27 @@ with contextlib.redirect_stdout(io.StringIO()): b.dispatch(json.load(sys.stdin))
         self.assertEqual(tc._tail_ring()["ring_type"], "maintenance-control")
         self.assertTrue(tc.verify()[0])
         self.assertTrue(self.call("inspect")["locked"])
+
+    def test_subprocess_maintenance_journal_under_long_windows_workspace_path(self):
+        work = PRODUCT.parents[1] / "work"
+        work.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="maintenance-path-", dir=work) as directory:
+            original_root = self.root
+            try:
+                self.root = Path(directory) / "bridge" / "agents" / str(uuid.uuid4())
+                state = self.call("init", name="Long path fixture")
+                (self.root / "registry" / "policy.json").write_text("{}", encoding="utf-8")
+                request = {"op": "maintenance", "root": str(self.root), "action": "index", "confirmed": True,
+                           "expectedHead": state["head"]["hash"], "scores": self.exchange()["scores"],
+                           "assessment": self.exchange()["assessment"]}
+                result = subprocess.run([sys.executable, str(PRODUCT / "engine_bridge.py")],
+                           input=json.dumps(request), text=True, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=30, check=True)
+                receipt = json.loads(result.stdout)
+                self.assertTrue(receipt["ok"], receipt)
+                self.assertFalse(self.call("inspect")["locked"])
+            finally:
+                self.root = original_root
 
 
 if __name__ == "__main__":

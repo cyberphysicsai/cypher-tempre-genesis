@@ -29,7 +29,7 @@ Use `CT_CHAT_PYTHON` to select a Python executable, `CT_CHAT_PORT` to change the
 
 Run `npm run beta` on the same machine as your Timechain, then open https://cyphertempre.ai and pair using the code printed by the bridge. Approve your browser's local-network permission when requested. The official site uses loopback port 8790; it does not tunnel or expose that port to the Internet. A local-only alternative is `npm start` and http://127.0.0.1:8790. Hosted pairing tokens are restricted to their exact originating site and remain in memory.
 
-The hosted interface requires bridge **0.5.0 or newer** before pairing. Updating the website does not update a previously running local bridge: install the new bridge package and restart it to receive the native cognition controls and activity feed.
+The hosted interface requires bridge **0.6.0 or newer** before pairing. Updating the website does not update a previously running local bridge: install the new bridge package and restart it to receive the native cognition controls and activity feed.
 
 The chat is followed by the preserved read-only chain auditor. It pairs independently with the original audit bridge on port 8788. Existing chain and registry files are not included in downloads or uploaded to hosting.
 
@@ -65,6 +65,8 @@ This gate is enforced by the distributed bridge and frontend. It is not a hosted
 
 An outlined skill button means configured; a glowing button means the bridge reports that stage currently executing. Completed, held and cancelled events remain in the activity timeline. This feed contains operation labels and counters, not prompt text or API keys. Stale, disconnected or other-agent activity is not displayed as current execution.
 
+Each accepted chain response can also include **Faculty receipts**. **COMPUTED** means the bridge completed the listed mechanism; **FRAME APPLIED** means a faculty instruction entered model context. **UNSUPPORTED**, **UNAVAILABLE**, **EXECUTION FAILED**, and **CODE QUARANTINED** make execution limits visible. Inventory badges explicitly refer to the **last chain turn**, independently of the current equipment selection. They are not live running indicators or evidence of improved answer quality. Reviewed memory replay and response revisions appear beside the accepted message's seal receipt and remain available in saved history when the bridge provides their metadata.
+
 The chain grows through native Cambium after a successful conversation commit when learning and growth are enabled. Newly sprouted, imported or promoted faculties appear in inventory **unequipped** until chosen. Inspect a proposal before promotion; **Prune** means reversible hibernation, preserving its identity and history. Wake restores availability, not automatic equipment. Faculties with authored code require the native explicit local code-review workflow. Descriptive faculties condition model context; supported primitive operators also produce concrete computed features.
 
 Growth and maintenance can create auxiliary faculty and registry-epoch rings; “one turn per block” refers to the conversation ring, not the absence of bookkeeping rings. Learning feedback is derived from an already accepted exchange. A failed learning update is reported without losing its successful seal receipt.
@@ -81,11 +83,44 @@ Semantic recall asks the model to select valid memory shapes, queries, offered r
 
 ## Exchange modalities and senses
 
-Open **Faculty Exchange** in the loadout panel. On **Receive**, load or paste a faculty-pack JSON file and preview it. The preview checks its schema, checksum, duplicate coverage, and immune screen without modifying the chain. Import requires a connected model: the complete proposed capability change is reviewed against genesis and the native PoI gate before the registry changes. After a successful import, the catalogue refreshes with the adopted senses/modalities ready to equip. Covered duplicates are reported instead of being added again.
+Open **Faculty Exchange** in the loadout panel. On **Receive**, load or paste a faculty-pack JSON file and preview it. The preview checks its schema, checksum, duplicate coverage, and immune screen without modifying the chain. Its mechanism compatibility report distinguishes supported computations, context frames, unsupported mechanisms and quarantined authored code. It lists the metadata field names preserved for each faculty and any companion-runtime requirement. A checksum alone does not establish execution support. Import requires a connected model: the complete proposed capability change is reviewed against genesis and the native PoI gate before the registry changes. After a successful import, the catalogue refreshes with the adopted senses/modalities available for inspection and equipment where supported. Covered duplicates are reported instead of being added again.
 
-On **Share**, select promoted, learned or imported faculties, name the pack, and download its JSON file. Give that file to another agent's owner, who imports it through the same flow. This is portable capability exchange; there is no payment system or marketplace service. The original format supports up to 50 faculties per pack and 800 characters per faculty function. The base catalogue is already installed on every agent and is not exported; emerging proposals must be promoted first.
+On **Share**, select faculties the bridge marks exportable, name the pack, and download its JSON file. This can include quarantined faculty data without making it equippable or executable. Give that file to another agent's owner, who imports it through the same flow. This is portable capability exchange; there is no payment system or marketplace service. The original format supports up to 50 faculties per pack and 800 characters per faculty function. The base catalogue is already installed on every agent and is not exported.
 
-Packs carry lens definitions and limited provenance, not conversation history, private sources, API keys, model weights, or executable Python. A checksum detects changes to the pack body; it does **not** authenticate the declared donor's identity. An imported lens is evaluated and calibrated through the receiving agent's own experience. Existing chain history and genesis remain intact.
+Complete packs preserve faculty definitions, recipes, frames, routing hints, seed terms, lifecycle records, donor learned-head snapshots and provenance. Authored source travels as quarantined data; import does not approve or execute it. Donor learning snapshots remain inactive; they are not counted as recipient experience. Whole-chain pairing retains the agent's own active learned state. Browser exports default to the complete format, bounded to 4 MiB and 50 faculties. Old lens-only packs still import, but cannot recover data their exporter omitted.
+
+The bridge never includes its stored conversation history or session API key in a faculty export. Faculty definitions, learned metadata and authored source can themselves contain private material: inspect the JSON before sharing it. An authored pack may include the whole `active_ops.py` module and its helper functions. A checksum detects changes; it does **not** authenticate donor identity or capability quality. Existing chain history and genesis remain intact.
+
+### Exchange with an original skill installation
+
+Use the included `skill_interop.py` companion alongside the unchanged original skill. Its native `faculties.py` importer only reads the lens projection; use this companion for full fidelity. Run these from the ChainChat package directory, substituting your trusted engine path, agent root and faculty keys:
+
+```powershell
+python skill_interop.py --engine "C:\trusted\skill" --root "C:\agents\my-agent" export --keys modality:108 sense:109 --out full-pack.json
+python skill_interop.py --engine "C:\trusted\skill" --root "C:\agents\recipient" preview --pack full-pack.json
+```
+
+Import the exported JSON through ChainChat's Faculty Exchange, or have your coding agent freshly review the companion preview against the recipient's genesis. Save the review as JSON containing `planHash`, `expectedHead`, UTC `reviewedAt`, all six integer `scores`, and `assessment` with `approved`, all nine integer `fruitages`, and `rationale`. The CLI validates the review, native gate, current head and exact plan before applying it:
+
+```powershell
+python skill_interop.py --engine "C:\trusted\skill" --root "C:\agents\recipient" import --pack full-pack.json --review review.json --expected-head HEAD_HASH --plan-hash PLAN_HASH --confirm
+```
+
+Reviews expire after ten minutes. Imports use a write-ahead journal, native registry epochs and a sealed adoption receipt. A failed partial import holds the chain for local recovery review; `recovery-status` reports the journal without performing a blind rollback.
+
+### Authored operators
+
+For a paired agent that already has `active_ops.py`, review its code and imports, then run `approve-code` locally with the exact digest shown in Cognition controls. When receiving a module in a pack, `materialize-code` first places the exact reviewed module from its authenticated artifact. It refuses to overwrite an existing module. **An original skill may autoload the materialized file on its next run.** ChainChat additionally requires separate approval:
+
+```powershell
+python skill_interop.py --engine "C:\trusted\skill" --root "C:\agents\recipient" materialize-code --sha256 SOURCE_SHA256 --confirm
+python skill_interop.py --engine "C:\trusted\skill" --root "C:\agents\recipient" approve-code --sha256 SOURCE_SHA256 --confirm
+python skill_interop.py --root "C:\agents\recipient" revoke-code --confirm
+```
+
+Approval binds the source, authorized faculty names, local Python dependencies, native runtime, root and genesis to a sealed receipt. Changing these requires renewed approval. Static `OPS` dictionary names are detected without executing code; for a dynamic mapping, explicitly supply `--names "Exact Faculty Name"` during approval. Only equipped, authorized names can launch that module. Proposed faculties still require native promotion; approval does not invent an earned faculty. After approval, equip the supported grown faculty in ChainChat. Execution uses a bounded child process, with timeout and output limits. **This is not a security sandbox:** approved Python and its imports have the user's OS permissions. Dependencies must be installed locally; missing or unsupported mechanisms are reported rather than silently described as executed. No browser or model endpoint can grant code approval.
+
+Execution also requires a matching installation-local approval record in `.local/operator-approvals/`, outside the agent directory. Keep that directory private and preserve it with the local ChainChat installation. A chain-carried receipt or copied approval manifest has no authority on its own. A fresh installation or moved agent requires local review and approval again; importing a chain or faculty pack never grants execution permission. The approval directory cannot be inside the selected agent or traverse symbolic links. Revoking approval removes its local record as well as appending the chain revocation receipt.
 
 ## Genesis and release gate
 

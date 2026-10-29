@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_COGNITION, normalizeCognition, normalizeActivity, abilityIndicators,
   facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
+  activityLineState, pollWithDeadline, routeControlState, reviewReceipt, facultyExecutionView, portabilityView,
+  operatorCompatibilityView, facultyIsExportable,
 } from "../public/cognition-display.js";
 import { requiresHoldings } from "../public/chainchat-display.js";
 
@@ -110,4 +112,107 @@ test("native search paths and winner render from the actual engine report shape"
   assert.deepEqual(view.epitaphs[0], {path: "Analytic", summary: "Public earlier candidate"});
   assert.equal(view.depth, 2);
   assert.equal(view.iterations, 6);
+});
+
+test("stale activity clears the main busy status and active labels ignore unrelated completions", () => {
+  const current = normalizeActivity(feed({ events: [
+    { ability: "review", status: "started", label: "Reviewing covenant" },
+    { ability: "model", status: "completed", label: "Model finished" },
+  ], activeAbilities: ["review"] }), "chain-a");
+  assert.deepEqual(activityLineState(current, { paired: true, fresh: true }), { text: "Reviewing covenant", kind: "busy" });
+  const stale = activityLineState(current, { paired: true, fresh: false, requestBusy: true });
+  assert.equal(stale.kind, "");
+  assert.match(stale.text, /unknown/);
+  assert.equal(activityLineState(current, { paired: false, fresh: false }), null);
+  assert.equal(activityLineState({ running: false, events: [] }, { paired: true, fresh: true, requestBusy: true }).kind, "");
+});
+
+test("a stalled activity transport times out, aborts, and permits a later poll", async () => {
+  let stalledSignal;
+  await assert.rejects(pollWithDeadline(signal => {
+    stalledSignal = signal;
+    return new Promise(() => {}); // Deliberately ignores abort, like a stuck transport.
+  }, 15), /timed out/);
+  assert.equal(stalledSignal.aborted, true);
+  assert.deepEqual(await pollWithDeadline(async () => ({ revision: 4 }), 100), { revision: 4 });
+  await assert.rejects(pollWithDeadline(async () => { throw new Error("Bridge offline"); }, 100), /Bridge offline/);
+});
+
+test("Route reflects effective Recall and pause dependencies without changing stored preference", () => {
+  const preferred = { mode: "active", autoRoute: true };
+  assert.deepEqual(routeControlState(preferred, false), { enabled: false, label: "RECALL OFF" });
+  assert.equal(preferred.autoRoute, true);
+  assert.deepEqual(routeControlState(preferred, true), { enabled: true, label: "AUTOMATIC" });
+  assert.deepEqual(routeControlState({ ...preferred, mode: "dormant" }, true), { enabled: false, label: "PAUSED" });
+  assert.deepEqual(routeControlState({ ...preferred, autoRoute: false }, true), { enabled: false, label: "OFF" });
+});
+
+test("accepted replay and revision receipts need explicit metadata and never label plain chat", () => {
+  assert.deepEqual(reviewReceipt({ replayed: true, revisions: 2 }), ["Reviewed memory replay", "2 revisions before acceptance"]);
+  assert.deepEqual(reviewReceipt({ replayed: true, revisions: 1, mode: "dormant" }), []);
+  assert.deepEqual(reviewReceipt({ replayed: "true", revisions: "2" }), []);
+  assert.deepEqual(reviewReceipt({ replayed: 0, revisions: -1 }), []);
+  assert.deepEqual(reviewReceipt({ revisions: 4 }), []);
+});
+
+test("faculty execution receipts distinguish computations, frames, failures and nonexecuted code", () => {
+  const entries = [
+    { key: "a", kind: "modality", name: "Analytic", mode: "computed", mechanism: "base-op", status: "completed" },
+    { key: "b", kind: "sense", name: "Custom lens", mode: "frame", mechanism: "lens", status: "completed" },
+    { key: "c", kind: "modality", name: "Missing recipe", mode: "unsupported", status: "unavailable" },
+    { key: "d", kind: "sense", name: "Authored", mode: "quarantined", status: "completed" },
+    { key: "e", kind: "sense", name: "Failed recipe", mode: "computed", status: "failed" },
+  ];
+  const view = facultyExecutionView({ scope: "turn", entries });
+  assert.deepEqual(view.map(item => item.label), ["COMPUTED", "FRAME APPLIED", "UNSUPPORTED", "CODE QUARANTINED", "EXECUTION FAILED"]);
+  assert.equal(view[3].status, "unavailable", "Code quarantine cannot become an execution success claim.");
+  assert.deepEqual(facultyExecutionView({ scope: "equipped", entries }), []);
+  assert.deepEqual(facultyExecutionView({ scope: "turn", entries: [{ ...entries[0], status: "running" }] }), [], "No invented live execution from last-turn receipts.");
+});
+
+test("faculty receipts bound untrusted metadata, deduplicate identity, and discard private output", () => {
+  const item = { key: "shared", kind: "sense", mode: "frame", status: "completed", name: "n".repeat(500), reason: "r".repeat(1000), output: "private model text", code: "private code" };
+  const view = facultyExecutionView({ scope: "turn", entries: [item, item, { ...item, kind: "modality" }, { ...item, key: "invalid", mode: "magic" }] });
+  assert.equal(view.length, 2);
+  assert.equal(view[0].name.length, 200);
+  assert.equal(view[0].reason.length, 600);
+  assert.equal(Object.hasOwn(view[0], "output"), false);
+  assert.equal(Object.hasOwn(view[0], "code"), false);
+});
+
+test("portability preview keeps compatibility and field names while excluding code and private metadata values", () => {
+  const view = portabilityView({ formatVersion: 2, requiresCompanion: true, quarantinedCodeCount: 1, items: [
+    { name: "Recipe", mechanism: "recipe", compatibility: "supported", preservedFields: ["recipe", "provenance"], recipe: "private value" },
+    { name: "Authored", mechanism: "authored-code", compatibility: "quarantined", preservedFields: ["code"], code: "do not execute" },
+    { name: "Unknown", compatibility: "trust-me", preservedFields: [null, "metadata"], reason: "r".repeat(700) },
+  ] });
+  assert.equal(view.requiresCompanion, true);
+  assert.equal(view.quarantinedCodeCount, 1);
+  assert.deepEqual(view.items.map(item => item.label), ["SUPPORTED", "CODE QUARANTINED", "UNSUPPORTED"]);
+  assert.deepEqual(view.items[0].preservedFields, ["recipe", "provenance"]);
+  assert.equal(Object.hasOwn(view.items[1], "code"), false);
+  assert.equal(view.items[2].reason.length, 600);
+  assert.equal(portabilityView(null), null);
+});
+
+test("local code instructions are tied to the detected digest and never provide a browser activation", () => {
+  const digest = "a".repeat(64);
+  const view = operatorCompatibilityView({ available: true, approved: false, source: "active_ops.py", sha256: digest,
+    declaredNames: ["pattern_match"], code: "private source" });
+  assert.equal(view.label, "LOCAL REVIEW REQUIRED");
+  assert.equal(view.command, `python skill_interop.py approve-code --root "<agent directory>" --sha256 ${digest} --confirm`);
+  assert.equal(Object.hasOwn(view, "code"), false);
+  assert.equal(Object.hasOwn(view, "activationUrl"), false);
+  assert.equal(operatorCompatibilityView({ available: true, sha256: "a; execute command" }).command, "");
+  assert.equal(operatorCompatibilityView({ available: true, approved: true, sha256: digest }).command, "");
+  assert.equal(operatorCompatibilityView({ available: false, approved: true, sha256: digest }).label, "NO LOCAL MODULE");
+  assert.equal(operatorCompatibilityView(null), null);
+});
+
+test("export permission is separate from equipment permission and respects explicit native refusals", () => {
+  assert.equal(facultyIsExportable({ source: "emergent", equippable: false, exportable: true, requiresLocalCodeReview: true }), true);
+  assert.equal(facultyIsExportable({ source: "grown", equippable: true, exportable: false }), false);
+  assert.equal(facultyIsExportable({ source: "grown", equippable: true }), true);
+  assert.equal(facultyIsExportable({ source: "base", equippable: true }), false);
+  assert.equal(facultyIsExportable({ source: "emergent", equippable: false }), false);
 });

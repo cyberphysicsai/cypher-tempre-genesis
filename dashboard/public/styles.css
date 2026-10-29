@@ -2951,6 +2951,14 @@ optgroup,
 .lifecycle-preview button { margin-right: 13px; }
 .message.plain .message-meta { border-left: 2px solid #888; padding-left: 9px; }
 .learning-note { border-left: 2px dashed #bbb; padding: 6px 10px; font-size: 9px; line-height: 1.8; }
+.faculty-execution { display: block; margin-top: 7px; color: #ddd; font-size: 7px; line-height: 1.6; letter-spacing: .04em; overflow-wrap: anywhere; }
+.faculty-execution[data-mode="frame"] { color: #aaa; }
+.faculty-execution[data-mode="unsupported"], .faculty-execution[data-mode="quarantined"] { border-left: 1px dashed #aaa; padding-left: 6px; }
+.faculty-execution-details .perspective-note, .portability-item { overflow-wrap: anywhere; }
+.quarantine-note { border: 1px dashed #aaa; padding: 10px; font-size: 9px; line-height: 1.8; }
+.review-receipt { border: 1px solid #555; padding: 3px 6px; }
+.operator-digest, .operator-command { display: block; padding: 10px; background: #090909; border: 1px solid #444; font-size: 9px; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
+.operator-compatibility > strong { font-size: 10px; line-height: 1.8; }
 .search-node[data-selected="true"] { border-left: 2px solid #ddd; padding-left: 10px; }
 .search-epitaph-title { display: block; margin-top: 15px; font-size: 10px; }
 @media (max-height: 820px) and (min-width: 701px) {
