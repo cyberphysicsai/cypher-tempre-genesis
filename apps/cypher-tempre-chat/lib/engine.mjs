@@ -75,13 +75,15 @@ export async function engine(request, { signal, timeout = 180_000 } = {}) {
       if (done) return;
       try {
         const value = JSON.parse(output);
-        if (!value.ok)
-          return finish(
-            fail(
+        if (!value.ok) {
+          const error = fail(
               value.error?.message || "The engine refused this operation.",
               value.error?.code || "ENGINE_REJECTED",
-            ),
-          );
+            );
+          if (value.error?.code === "POI_REJECTED" && value.verdict && typeof value.verdict === "object")
+            error.nativeVerdict = value.verdict;
+          return finish(error);
+        }
         finish(null, value);
       } catch {
         finish(

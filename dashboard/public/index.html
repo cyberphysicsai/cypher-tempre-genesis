@@ -105,7 +105,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.4.3</span>
+        ><span class="mono" id="appVersion">v0.5.0</span>
       </div>
       <div class="top-actions">
         <button
@@ -230,6 +230,12 @@
             </button>
           </div>
         </header>
+        <div class="cognition-strip" aria-label="Agent cognition status">
+          <span class="mode-indicator" id="cognitionMode">TIMECHAIN UNPAIRED</span>
+          <span id="learningIndicator">LEARNING —</span>
+          <button class="text-button" id="quickCognition" type="button">Controls ↗</button>
+          <button class="text-button hidden" id="cancelTurn" type="button">Stop current run ■</button>
+        </div>
         <div class="conversation-scroll" id="conversationScroll">
           <section class="welcome" id="welcome">
             <p class="welcome-copy">
@@ -286,8 +292,7 @@
             ></textarea>
             <div class="composer-bottom">
               <span class="composer-context"
-                ><svg><use href="#i-shield" /></svg> Proof of Interaction always
-                active</span
+                ><svg><use href="#i-shield" /></svg><span id="composerGateLabel">Proof of Interaction active with Timechain</span></span
               ><button
                 type="submit"
                 class="send-button"
@@ -299,7 +304,7 @@
             </div>
           </form>
           <div class="skillbar-caption">
-            <span>YOUR ABILITY BAR</span><span>CONFIGURE BEFORE EACH TURN</span>
+            <span>YOUR ABILITY BAR</span><span>OUTLINED = EQUIPPED · GLOWING = RUNNING</span>
           </div>
           <nav class="skillbar" aria-label="Agent ability bar">
             <button
@@ -340,7 +345,23 @@
             >
               <span class="slot-key">6</span><svg><use href="#i-shield" /></svg
               ><span class="slot-title">Covenant</span
-              ><span class="slot-status">ALWAYS ON</span>
+              ><span class="slot-status" id="gateStatus">ACTIVE WITH CHAIN</span>
+            </button>
+            <button class="skill-slot" id="routeAbility" data-shortcut="7">
+              <span class="slot-key">7</span><svg><use href="#i-memory" /></svg>
+              <span class="slot-title">Route / Replay</span><span class="slot-status" id="routeStatus">AUTOMATIC</span>
+            </button>
+            <button class="skill-slot" id="learningAbility" data-shortcut="8">
+              <span class="slot-key">8</span><svg><use href="#i-spark" /></svg>
+              <span class="slot-title">Learning</span><span class="slot-status" id="learningStatus">ENABLED</span>
+            </button>
+            <button class="skill-slot" id="dreamAbility" data-shortcut="9">
+              <span class="slot-key">9</span><svg><use href="#i-orbit" /></svg>
+              <span class="slot-title">Dream</span><span class="slot-status" id="dreamStatus">MANUAL</span>
+            </button>
+            <button class="skill-slot" id="cognitionAbility" data-shortcut="0">
+              <span class="slot-key">0</span><svg><use href="#i-eye" /></svg>
+              <span class="slot-title">Cognition</span><span class="slot-status" id="cognitionStatus">MONITOR</span>
             </button>
           </nav>
           <div class="workspace-foot">
@@ -395,6 +416,7 @@
             Senses <span id="senseCount">0</span>
           </button>
         </div>
+        <button class="faculty-growth-notice hidden" id="newFacultiesNotice" type="button"></button>
         <label class="faculty-search"
           ><svg><use href="#i-eye" /></svg
           ><input
@@ -409,6 +431,9 @@
           role="tabpanel"
           aria-label="Faculty catalogue"
         ></div>
+        <button class="exchange-button" id="manageFaculties" type="button">
+          <svg><use href="#i-spark" /></svg><span>Growth & pruning</span><span>↗</span>
+        </button>
         <button class="exchange-button" id="exchangeButton" type="button">
           <svg><use href="#i-equip" /></svg><span>Faculty Exchange</span
           ><span>↗</span>
@@ -448,7 +473,7 @@
         </button>
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.4.3"
+          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.5.0"
           target="_blank"
           rel="noopener noreferrer"
           >Download local bridge</a
@@ -677,7 +702,7 @@
           ><span>Goodness</span><span>Patience</span><span>Faith</span>
         </div>
         <p class="fine-print">
-          These nine values are written into genesis. Every proposed answer is
+          These nine values are written into genesis. In active Timechain mode, every proposed answer is
           checked against them before release.
         </p>
         <div class="dialog-error" role="alert"></div>
@@ -774,9 +799,9 @@
             placeholder="Held only in this bridge session"
         /></label>
         <div class="info-box">
-          Your prompt, selected memories, and candidate answer are sent to this
-          provider for generation and alignment review. More perspectives use
-          more tokens.
+          In active Timechain mode, your prompt, selected memories and candidate answer go to this
+          provider for generation and alignment review. Plain mode sends only your current message.
+          More perspectives and search iterations use more tokens.
         </div>
         <div class="dialog-error" role="alert"></div>
         <button type="submit" class="primary-button full-width">
@@ -836,8 +861,13 @@
             ><input id="forkEnabled" type="checkbox" role="switch"
           /></label>
           <p class="cost-note" id="forkCost">
-            Up to 12 model requests per turn.
+            Perspective generation, search and review use additional model requests.
           </p>
+          <div class="search-budget-fields">
+            <label class="field">Search iterations<input id="searchIterations" type="number" min="1" max="64" value="6" /></label>
+            <label class="field">Search depth<input id="searchDepth" type="number" min="1" max="8" value="3" /></label>
+          </div>
+          <p class="fine-print">Native tree search can expand and revise candidates within these bounds. More iterations and perspectives can increase model usage and latency.</p>
         </section>
         <section class="archetype-section">
           <div class="section-caption">
@@ -968,9 +998,9 @@
       <span class="modal-emblem"
         ><svg><use href="#i-shield" /></svg
       ></span>
-      <h2>Alignment is an ability<br />you cannot unequip.</h2>
+      <h2>Alignment stays active<br />with your Timechain.</h2>
       <p>
-        Each generated response is held while a separate model review scores its
+        While Timechain is active, each generated response is held while a separate model review scores its
         harmony with your agent’s genesis covenant. The Proof of Interaction
         (PoI) gate must also accept it.
       </p>
@@ -985,8 +1015,8 @@
         rather than guaranteeing factual accuracy or moral judgment.
       </div>
       <p class="fine-print" id="thresholdNote">
-        The gate remains active for every request. This workspace does not
-        execute model-supplied commands or tools.
+        Deliberate dormancy pauses the complete Timechain loop, including this
+        gate, for plain model chat. Resume the Timechain to restore its review and recording.
       </p>
     </dialog>
     <dialog id="exchangeDialog" class="modal exchange-modal">
@@ -1146,6 +1176,52 @@
       </div>
       <h2>Your history, verifiable.</h2>
       <div id="historyContent"></div>
+    </dialog>
+    <dialog id="cognitionDialog" class="modal cognition-modal">
+      <div class="dialog-top"><span class="eyebrow">TIMECHAIN CONTROL & LIVE MONITOR</span><button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button></div>
+      <h2>Your agent, at your pace.</h2>
+      <div class="cognition-mode-card">
+        <strong id="cognitionModeTitle">Timechain active</strong>
+        <p id="cognitionModeDescription">Memory, faculties, covenant review and accepted conversation blocks are active.</p>
+        <button class="secondary-button" id="toggleChainMode" type="button">Pause Timechain · plain model chat</button>
+      </div>
+      <form id="cognitionForm">
+        <label class="toggle-row"><span>Real-time learning<small>Train from accepted experience and allow faculty growth. When off, active Timechain conversations still record history.</small></span><input id="learningEnabled" type="checkbox" role="switch" checked /></label>
+        <label class="toggle-row"><span>Route before generation<small>Check verified memory for replay or useful partial context.</small></span><input id="autoRoute" type="checkbox" role="switch" checked /></label>
+        <label class="toggle-row"><span>Semantic recall selection<small>Let the model select relevant evidence beyond lexical retrieval.</small></span><input id="semanticRecall" type="checkbox" role="switch" checked /></label>
+        <label class="toggle-row"><span>Automatic sprouting<small>Allow new safe faculties to grow. New faculties are shown for your equipment choice.</small></span><input id="autoSprout" type="checkbox" role="switch" checked /></label>
+        <label class="toggle-row"><span>Consolidate when due<small>Run native Dream consolidation while idle after every 100 new blocks, while learning is enabled. Off by default.</small></span><input id="autoDream" type="checkbox" role="switch" /></label>
+        <label class="field">Maximum response revisions<input id="revisionLimit" type="number" min="0" max="3" value="1" /></label>
+        <button class="primary-button" type="submit">Apply cognition settings</button>
+      </form>
+      <section class="monitor-section" aria-labelledby="liveMonitorTitle">
+        <div class="section-caption"><span id="liveMonitorTitle">LIVE ACTIVITY</span><span id="monitorConnection">NOT CONNECTED</span></div>
+        <p id="monitorStage">Pair a Timechain to see its actual runtime stages.</p>
+        <ol class="activity-timeline" id="activityTimeline"></ol>
+      </section>
+      <section class="monitor-section"><div class="section-caption">NATIVE MAINTENANCE</div><p class="fine-print">Enable learning and run these between conversations. They operate on the paired agent, use a model review, and may append native maintenance records.</p>
+        <div class="maintenance-actions"><button class="secondary-button" type="button" data-maintenance="index">Rebuild recall index</button><button class="secondary-button" type="button" data-maintenance="train">Train learners</button><button class="secondary-button" type="button" data-maintenance="dream">Dream & consolidate</button></div>
+        <div class="capability-list" id="capabilityList"></div>
+      </section>
+      <div class="dialog-error" role="alert"></div>
+    </dialog>
+    <dialog id="pauseChainDialog" class="modal compact-modal">
+      <div class="dialog-top"><span class="eyebrow">DELIBERATE DORMANCY</span><button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button></div>
+      <h2>Pause the Timechain?</h2>
+      <p>Plain model chat will use your chosen provider without Timechain recall, faculties, PoI review, learning or new chain blocks. Each request is sent on its own without earlier chat context. Existing history remains intact.</p>
+      <p class="info-box">A current run will be stopped before pausing. An atomic block commit already underway may finish. Your model provider still receives plain-chat messages.</p>
+      <div class="dialog-error" role="alert"></div>
+      <button class="primary-button full-width" id="confirmPauseChain" type="button">Pause & use plain model chat</button>
+    </dialog>
+    <dialog id="facultyLifecycleDialog" class="modal faculty-lifecycle-modal">
+      <div class="dialog-top"><span class="eyebrow">FACULTY GROWTH & HIBERNATION</span><button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button></div>
+      <h2>Choose what grows with you.</h2>
+      <p>Inspect emerging faculties, promote supported proposals and choose what to equip. Pruning hibernates a faculty; its definition and past history remain available.</p>
+      <p class="fine-print" id="lifecycleControlNotice"></p>
+      <div class="lifecycle-filter-row"><label class="field">Show<select id="lifecycleFilter"><option value="all">All learned faculties</option><option value="new">New this session</option><option value="emergent">Emerging</option><option value="active">Available</option><option value="dormant">Hibernating</option></select></label><button class="text-button" id="refreshLifecycle" type="button">Refresh ↻</button></div>
+      <div id="lifecycleList" class="lifecycle-list"></div>
+      <section id="lifecyclePreview" class="lifecycle-preview hidden"><strong id="lifecyclePreviewTitle"></strong><p id="lifecyclePreviewDescription"></p><button class="primary-button" id="confirmLifecycle" type="button">Confirm</button><button class="text-button" id="cancelLifecycle" type="button">Cancel</button></section>
+      <div class="dialog-error" role="alert"></div>
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>

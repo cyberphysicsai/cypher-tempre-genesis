@@ -9,6 +9,10 @@ import {
 } from "./holdings-wallet.js";
 import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersion } from "./chainchat-display.js";
 import {
+  DEFAULT_COGNITION, normalizeCognition, normalizeActivity,
+  abilityIndicators, facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
+} from "./cognition-display.js";
+import {
   bridgeApiUrl,
   bridgePort,
   isLocalBridgePage,
@@ -57,6 +61,9 @@ const conversations = new Map();
 let packPreviewState = null,
   previewGeneration = 0;
 const exportSelection = new Set();
+let runtimeActivity = null, activityReceivedAt = 0, activityPolling = false,
+  cognitionBusy = false, stoppingBusy = false, lifecycleSelection = null, capabilities = [];
+const seenFacultyIds = new Map(), newFacultyIds = new Map();
 const icon = (name) => {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const use = document.createElementNS(svg.namespaceURI, "use");
@@ -319,6 +326,14 @@ function settings() {
 }
 function applyState(result) {
   const next = result.state || result;
+  const incomingId = next.agent?.id || next.agent?.root;
+  if (incomingId && incomingId !== agentId()) {
+    delete state.faculties;
+    state.cognition = { ...DEFAULT_COGNITION };
+    lifecycleSelection = null;
+    runtimeActivity = null;
+    activityReceivedAt = 0;
+  }
   if (next.agent !== undefined || next.agents !== undefined) {
     state = { ...state, ...next };
     state.settings = {
@@ -330,6 +345,9 @@ function applyState(result) {
       },
     };
   }
+  if (next.cognition) state.cognition = normalizeCognition(next.cognition);
+  if (next.faculties) state.faculties = next.faculties;
+  else if (next.agent?.faculties) state.faculties = next.agent.faculties;
   renderState();
 }
 async function refreshState() {
@@ -347,13 +365,15 @@ async function refreshState() {
   }
 }
 function normalizeFaculties() {
-  const all = state.agent?.faculties;
+  const all = state.faculties || state.agent?.faculties;
   let entries = Array.isArray(all)
     ? all
     : all
       ? [
           ...(all.modalities || []).map((f) => ({ ...f, kind: "modality" })),
           ...(all.senses || []).map((f) => ({ ...f, kind: "sense" })),
+          ...(all.emergent || []).map((f) => ({ ...f, source: "emergent", equippable: false })),
+          ...(all.dormant || []).map((f) => ({ ...f, dormant: true })),
         ]
       : catalogue;
   return entries.map((f) => ({
@@ -361,6 +381,157 @@ function normalizeFaculties() {
     kind: cleanKind(f.kind),
     id: f.id ?? f.key,
   }));
+}
+
+function cognition() {
+  return normalizeCognition(state.cognition);
+}
+
+function trackFacultyGrowth(faculties) {
+  if (!state.agent) return;
+  const id = agentId(), ids = new Set(faculties.map(facultyIdentity));
+  const previous = seenFacultyIds.get(id);
+  if (previous) {
+    const additions = newFacultyIds.get(id) || new Set();
+    for (const key of ids) if (!previous.has(key)) additions.add(key);
+    newFacultyIds.set(id, additions);
+  }
+  seenFacultyIds.set(id, ids);
+}
+
+function renderCognition() {
+  const paired = !!token && !!state.agent, current = cognition(), dormant = current.mode === "dormant";
+  const held = !!(state.agent?.locked || state.agent?.maintenancePending);
+  $("cognitionMode").textContent = !paired ? "TIMECHAIN UNPAIRED" : dormant ? "TIMECHAIN PAUSED · PLAIN CHAT" : held ? "TIMECHAIN HELD · LOCAL REVIEW" : "TIMECHAIN ACTIVE";
+  $("cognitionMode").classList.toggle("dormant", paired && dormant);
+  $("cognitionMode").closest(".cognition-strip").classList.toggle("dormant", paired && dormant);
+  $("learningIndicator").textContent = !paired ? "LEARNING —" : dormant ? "LEARNING PAUSED" : current.learning ? "LEARNING ON" : "LEARNING OFF";
+  $("composerGateLabel").textContent = dormant && paired ? "Plain model chat · no Timechain review or recording" : "Proof of Interaction active with Timechain";
+  $("gateStatus").textContent = dormant && paired ? "PAUSED" : held ? "CHAIN HELD" : "ACTIVE WITH CHAIN";
+  $("gateAbility").classList.toggle("active", paired && !dormant);
+  $("gateAbility").classList.toggle("locked", !dormant);
+  $("routeAbility").classList.toggle("active", paired && !dormant && current.autoRoute);
+  $("routeStatus").textContent = dormant ? "PAUSED" : current.autoRoute ? "AUTOMATIC" : "OFF";
+  $("learningAbility").classList.toggle("active", paired && !dormant && current.learning);
+  $("learningStatus").textContent = dormant ? "PAUSED" : current.learning ? "ENABLED" : "OFF · HISTORY ON";
+  $("dreamAbility").classList.toggle("active", paired && !dormant && current.learning && current.autoDream);
+  $("dreamStatus").textContent = dormant ? "PAUSED" : current.autoDream && current.learning ? "EVERY 100 BLOCKS" : "MANUAL";
+  $("cognitionStatus").textContent = dormant ? "PLAIN CHAT" : "MONITOR";
+  $("cognitionModeTitle").textContent = dormant ? "Timechain paused · plain model chat" : held ? "Timechain held for local review" : "Timechain active";
+  $("cognitionModeDescription").textContent = dormant
+    ? "No Timechain context, faculty computations, PoI review, learning or new chain blocks. Each plain request is sent on its own; earlier displayed messages are not added as context. Resume whenever you choose."
+    : held ? "The native agent is locked or has an incomplete maintenance journal. Review and recover it locally before continuing chain work. Existing history is preserved; this interface will not clear the hold automatically."
+    : current.learning
+      ? "Memory, faculties, covenant review and accepted conversation blocks are active. Learning and growth follow your selected settings."
+      : "Memory, faculties, covenant review and accepted conversation blocks remain active. Learner training and automatic growth are off.";
+  $("toggleChainMode").textContent = dormant ? "Resume Timechain" : "Pause Timechain · plain model chat";
+  $("toggleChainMode").disabled = !paired || cognitionBusy || (dormant && !hasHoldingsAccess());
+  if (paired && dormant) {
+    for (const id of ["recallAbility", "forkAbility", "continuumAbility", "loadoutAbility"])
+      $(id).classList.remove("active");
+    for (const id of ["recallAbility", "forkAbility", "continuumAbility"])
+      $(id).querySelector(".slot-status").textContent = "PAUSED";
+    $("loadoutAbility").querySelector(".slot-status").textContent = "LOADOUT SAVED";
+  }
+  $("sessionTag").textContent = paired && dormant ? "PLAIN CHAT · CHAIN PAUSED" : $("sessionTag").textContent;
+  renderRuntimeActivity();
+}
+
+function renderRuntimeActivity() {
+  const paired = !!token && !!state.agent;
+  const fresh = paired && runtimeActivity?.agentId === agentId() && Date.now() - activityReceivedAt < 6000;
+  for (const [id, indicator] of Object.entries(abilityIndicators(runtimeActivity, fresh))) {
+    const button = $(id);
+    button.classList.toggle("running", indicator.active);
+    button.dataset.runStatus = indicator.status;
+    button.setAttribute("aria-busy", String(indicator.active));
+    let badge = button.querySelector(".slot-live");
+    if (!badge) { badge = el("span", "slot-live"); button.append(badge); }
+    badge.textContent = paired ? indicator.status : "IDLE";
+  }
+  $("monitorConnection").textContent = !paired ? "NOT CONNECTED" : fresh ? "LIVE BRIDGE" : "ACTIVITY UNAVAILABLE";
+  const running = fresh && runtimeActivity?.running;
+  $("cancelTurn").classList.toggle("hidden", !(requestBusy || running));
+  $("cancelTurn").disabled = stoppingBusy;
+  const events = runtimeActivity?.events || [];
+  const last = events.at(-1);
+  $("monitorStage").textContent = !paired ? "Pair a Timechain to see its actual runtime stages."
+    : !fresh ? "Live activity is unavailable. No ability is shown as running until the bridge confirms it."
+      : running ? last?.label || runtimeActivity.stage || "Agent operation running"
+        : last?.label || "Idle. Equipped abilities will light up when the bridge runs them.";
+  if (running) activity(last?.label || runtimeActivity.stage || "Agent operation running…", "busy");
+  else if (fresh && last && !requestBusy) activity(last.label || "Agent operation completed.", ["failed", "held"].includes(last.status) ? "error" : "");
+  const list = $("activityTimeline");
+  list.replaceChildren();
+  for (const event of events.slice(-30).reverse()) {
+    const row = el("li"); row.dataset.status = event.status;
+    const date = new Date(event.at);
+    const timestamp = Number.isFinite(date.getTime()) ? date.toLocaleTimeString() : "";
+    row.append(el("small", "", `${timestamp} · ${event.ability.toUpperCase()} · ${event.status.toUpperCase()}`), el("span", "", event.label || event.stage));
+    if (event.detail) row.append(el("p", "fine-print", event.detail));
+    list.append(row);
+  }
+  if (!events.length) list.append(el("li", "", "No activity recorded in this bridge session yet."));
+}
+
+async function refreshActivity() {
+  if (!token || !state.agent || activityPolling) return;
+  activityPolling = true;
+  const sessionToken = token, id = agentId();
+  try {
+    const result = await api("/api/activity");
+    if (sessionToken !== token || id !== agentId()) return;
+    const next = normalizeActivity(result.activity || result, id);
+    if (!next || (runtimeActivity?.agentId === id && next.revision < runtimeActivity.revision)) return;
+    runtimeActivity = next; activityReceivedAt = Date.now();
+  } catch { activityReceivedAt = 0; }
+  finally { activityPolling = false; renderRuntimeActivity(); }
+}
+
+async function refreshCognition() {
+  if (!token || !state.agent) return;
+  const sessionToken = token, id = agentId();
+  const result = await api("/api/cognition");
+  if (sessionToken !== token || id !== agentId()) return;
+  state.cognition = normalizeCognition(result.cognition || result.state?.cognition);
+  if (result.faculties) state.faculties = result.faculties;
+  if (Array.isArray(result.capabilities)) capabilities = result.capabilities;
+  renderState();
+  renderLifecycle();
+  return result;
+}
+
+function renderCapabilities() {
+  const target = $("capabilityList"); target.replaceChildren();
+  for (const capability of capabilities) {
+    if (!capability || typeof capability !== "object") continue;
+    const row = el("div", "capability-item");
+    row.append(el("strong", "", String(capability.name || capability.id || "Capability")), el("span", "", String(capability.status || (capability.available === false ? "UNAVAILABLE" : "AVAILABLE")).toUpperCase()));
+    if (capability.description || capability.detail || capability.control) row.append(el("p", "", String(capability.description || capability.detail || capability.control)));
+    target.append(row);
+  }
+}
+
+async function openCognition() {
+  openDialog("cognitionDialog");
+  try {
+    await refreshCognition();
+    const current = cognition();
+    for (const [id, key] of [["learningEnabled", "learning"], ["autoRoute", "autoRoute"], ["semanticRecall", "semanticRecall"], ["autoSprout", "autoSprout"], ["autoDream", "autoDream"]]) $(id).checked = current[key];
+    $("revisionLimit").value = current.revisionLimit;
+    const result = await api("/api/capabilities");
+    capabilities = Array.isArray(result.capabilities) ? result.capabilities : Array.isArray(result.items) ? result.items : [];
+    renderCapabilities();
+    await refreshActivity();
+  } catch (error) { $("cognitionDialog").querySelector(".dialog-error").textContent = error.message; }
+}
+
+async function saveCognition(change) {
+  const result = await api("/api/cognition", change);
+  state.cognition = normalizeCognition(result.cognition || result.state?.cognition || { ...cognition(), ...change });
+  applyState(result);
+  await refreshCognition();
+  return result;
 }
 function isEquipped(faculty) {
   const chosen =
@@ -371,6 +542,11 @@ function isEquipped(faculty) {
 function renderFaculties() {
   const faculties = normalizeFaculties(),
     query = $("facultySearch").value.toLowerCase().trim();
+  trackFacultyGrowth(faculties);
+  const freshIds = newFacultyIds.get(agentId()) || new Set();
+  const freshCount = faculties.filter(f => freshIds.has(facultyIdentity(f))).length;
+  $("newFacultiesNotice").classList.toggle("hidden", !freshCount || !state.agent);
+  $("newFacultiesNotice").textContent = `${freshCount} new facult${freshCount === 1 ? "y" : "ies"} · inspect before equipping ↗`;
   const modalities = faculties.filter((f) => f.kind === "modality"),
     senses = faculties.filter((f) => f.kind === "sense");
   $("availableCount").textContent = faculties.length || "—";
@@ -386,7 +562,8 @@ function renderFaculties() {
     ? "LIVE AGENT\nCATALOGUE"
     : "BASE\nCATALOGUE";
   $("growthNote").textContent = state.agent
-    ? "Your live catalogue refreshes as this agent learns. Loadout choices apply to its next turn."
+    ? cognition().mode === "dormant" ? "Timechain is paused. Equipped faculties are saved for when you resume."
+      : "Your live catalogue refreshes as this agent learns. New faculties wait for your equipment choice."
     : "Your catalogue grows as your agent learns. Pair a chain to equip faculties.";
   const list = $("facultyList");
   list.replaceChildren();
@@ -405,7 +582,7 @@ function renderFaculties() {
     const selected = !!state.agent && isEquipped(faculty);
     const button = el(
       "button",
-      `faculty-card${selected ? " equipped" : ""}${faculty.equippable === false ? " emerging" : ""}`,
+      `faculty-card${selected ? " equipped" : ""}${faculty.equippable === false ? " emerging" : ""}${freshIds.has(facultyIdentity(faculty)) ? " new-faculty" : ""}`,
     );
     button.type = "button";
     button.disabled = !!token && !hasHoldingsAccess();
@@ -434,7 +611,7 @@ function renderFaculties() {
       el(
         "span",
         "",
-        selected
+        freshIds.has(facultyIdentity(faculty)) ? "NEW · " + (faculty.equippable === false ? "EMERGING" : "AVAILABLE") : selected
           ? "EQUIPPED"
           : faculty.equippable === false
             ? "EMERGING"
@@ -451,10 +628,12 @@ function renderFaculties() {
     button.append(frame, copy);
     if (selected) button.append(el("span", "faculty-check", "✓"));
     button.addEventListener("click", () => {
+      if (faculty.dormant) {
+        requireAgent(() => openLifecycle("dormant"));
+        return;
+      }
       if (faculty.equippable === false) {
-        toast(
-          "This proposed faculty is still emerging. It becomes equippable after promotion.",
-        );
+        requireAgent(() => openLifecycle("emergent"));
         return;
       }
       requireAgent(() => toggleFaculty(faculty));
@@ -515,6 +694,7 @@ function historyMessages() {
         ring,
         gate: payload.gate || payload.poi_verdict,
         perspectives: payload.perspectives,
+        search: payload.search,
         fromHistory: true,
       });
   }
@@ -529,6 +709,7 @@ function historyMessages() {
         pending: true,
         gate: pending.gate,
         perspectives: pending.perspectives,
+        search: pending.search,
         fromHistory: true,
       });
   }
@@ -672,8 +853,9 @@ function renderState() {
   if ($("exchangeDialog").open) renderExportFaculties();
   if (state.gate?.threshold)
     $("thresholdNote").textContent =
-      `Every fruitage must meet the server-enforced minimum (${state.gate.threshold}/255), alongside native PoI acceptance. This workspace does not execute model-supplied commands or tools.`;
+      `While Timechain is active, every fruitage must meet the server-enforced minimum (${state.gate.threshold}/255), alongside native PoI acceptance. Deliberate dormancy uses plain model chat without this gate or chain recording.`;
   renderHoldingsControls();
+  renderCognition();
 }
 function renderConversation() {
   const messages = conversations.get(agentId()) || [];
@@ -683,7 +865,7 @@ function renderConversation() {
   for (const message of messages) {
     const node = el(
       "article",
-      `message ${message.role}${message.held ? " held" : ""}`,
+      `message ${message.role}${message.held ? " held" : ""}${messageIsDormant(message) ? " plain" : ""}`,
     );
     const label = el("div", "message-label");
     if (message.role === "assistant")
@@ -707,7 +889,9 @@ function renderConversation() {
         el(
           "span",
           "",
-          message.pending
+          messageIsDormant(message)
+            ? "Plain model chat · not reviewed or recorded in Timechain"
+            : message.pending
             ? "✓ Covenant accepted · pending block"
             : ring
               ? `✓ Sealed · Ring ${ring.index ?? ring}`
@@ -725,6 +909,8 @@ function renderConversation() {
       if (message.gate?.brightness !== undefined)
         meta.append(el("span", "", `PoI ${message.gate.brightness}/255`));
       node.append(meta);
+      if (Number.isInteger(message.learning?.held) && message.learning.held > 0)
+        node.append(el("p", "learning-note", `${message.learning.held} derived learning step${message.learning.held === 1 ? " was" : "s were"} held. The accepted conversation receipt above is unchanged; those learning updates were not applied.`));
       const review = covenantReview(message.gate);
       if (review) node.append(review);
       if (Array.isArray(message.perspectives) && message.perspectives.length) {
@@ -755,6 +941,23 @@ function renderConversation() {
           );
           details.append(item);
         }
+        node.append(details);
+      }
+      if (message.search && typeof message.search === "object") {
+        const details = el("details", "perspective-details search-details");
+        const search = nativeSearchView(message.search);
+        details.append(el("summary", "", "Native Chronosynaptic search"));
+        details.append(el("p", "fine-print", `Explored depth: ${search.depth} · iterations: ${search.iterations} · winner: ${search.winner}`));
+        if (search.selectedPath.length) details.append(el("p", "fine-print", `Selected path: ${search.selectedPath.join(" → ")}`));
+        for (const item of search.nodes) {
+          const card = el("div", "perspective-note search-node");
+          card.dataset.selected = String(item.selected);
+          card.append(el("strong", "", `${item.selected ? "SELECTED · " : ""}${item.name} · visits ${item.visits} · value ${item.value}`));
+          if (item.summary) card.append(el("p", "", item.summary));
+          details.append(card);
+        }
+        if (search.epitaphs.length) details.append(el("strong", "search-epitaph-title", "Candidate records · not selected"));
+        for (const item of search.epitaphs) details.append(el("p", "fine-print", `${item.path ? item.path + ": " : ""}${item.summary || "Candidate not selected."}`));
         node.append(details);
       }
     }
@@ -833,6 +1036,9 @@ function clearLocalSession() {
     settings: structuredClone(DEFAULT_SETTINGS),
   };
   conversations.clear();
+  seenFacultyIds.clear(); newFacultyIds.clear();
+  runtimeActivity = null; activityReceivedAt = 0; capabilities = [];
+  lifecycleSelection = null;
   activeAgentId = null;
   $("apiKey").value = "";
   $("pairCode").value = "";
@@ -885,7 +1091,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Update and restart your local bridge to beta 0.4.1 or newer before pairing. This interface requires the credential and grounding fixes in that release.");
+      throw new Error("Update and restart your local bridge to beta 0.5.0 or newer before pairing. This interface requires native cognition controls and live activity support.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -1026,16 +1232,17 @@ $("chatForm").addEventListener("submit", async (event) => {
     return;
   }
   requestBusy = true;
+  const turnMode = cognition().mode;
   const chatSession = token;
+  const chatAgent = agentId();
   chatController = new AbortController();
   $("sendButton").disabled = true;
   $("messageInput").disabled = true;
   addMessage({ role: "user", content: message });
   $("messageInput").value = "";
   activity(
-    settings().fork
-      ? `Exploring ${settings().perspectives} perspectives · the response will appear after covenant review.`
-      : "Recalling, generating, and checking the genesis covenant…",
+    turnMode === "dormant" ? "Starting plain model chat · no Timechain review or recording."
+      : "Starting the Timechain run · waiting for live bridge activity…",
     "busy",
   );
   try {
@@ -1044,21 +1251,23 @@ $("chatForm").addEventListener("submit", async (event) => {
       { message },
       { signal: chatController.signal },
     );
-    if (token !== chatSession) return;
+    if (token !== chatSession || agentId() !== chatAgent) return;
     if (result.state) applyState(result.state);
     const response = result.message || result;
     if (typeof response.content !== "string")
       throw new Error(
         "No accepted response was returned. Inspect the bridge before trying again.",
       );
-    addMessage({ role: "assistant", input: message, ...response });
+    addMessage({ role: "assistant", input: message, mode: turnMode, ...response });
     activity(
-      response.pending
+      messageIsDormant(response)
+        ? "Plain model response · Timechain remains paused and unchanged."
+        : response.pending
         ? `Covenant accepted · ${bytes(state.pending?.bytes)} pending toward the next block.`
         : `Accepted and sealed${response.ring?.index !== undefined ? ` in ring ${response.ring.index}` : ""}.`,
     );
   } catch (error) {
-    if (token !== chatSession) return;
+    if (token !== chatSession || agentId() !== chatAgent) return;
     addMessage({
       role: "assistant",
       held: true,
@@ -1071,7 +1280,7 @@ $("chatForm").addEventListener("submit", async (event) => {
     activity(
       error.gate
         ? "The proposed response was held by the alignment gate."
-        : "The request was not completed. No unreviewed answer was released.",
+        : turnMode === "dormant" ? "The plain model request did not complete. Your Timechain remains paused." : "The request was not completed. No unreviewed answer was released.",
       "error",
     );
   } finally {
@@ -1081,6 +1290,7 @@ $("chatForm").addEventListener("submit", async (event) => {
     $("messageInput").disabled = false;
     $("messageInput").focus();
     await refreshState();
+    await refreshActivity();
   }
 });
 $("messageInput").addEventListener("keydown", (event) => {
@@ -1136,7 +1346,7 @@ function renderRadial() {
   $("archetypeSelected").textContent =
     `${draftArchetypes.size} / ${archetypes.length || 21}`;
   $("forkCost").textContent =
-    `Up to ${2 * draftPerspectives + 2} model requests per turn. Standard chat uses 2.`;
+    `${draftPerspectives} initial perspectives, plus bounded search, synthesis and reviews. Replay and recall selection can change the number of model calls.`;
 }
 function setPerspectiveCount(n) {
   draftPerspectives = Math.min(21, Math.max(1, Number(n)));
@@ -1195,6 +1405,8 @@ $("forkAbility").addEventListener("click", async () => {
   draftArchetypes = new Set((settings().archetypes || []).map(String));
   draftPerspectives = settings().perspectives || 5;
   $("forkEnabled").checked = settings().fork;
+  $("searchIterations").value = cognition().searchIterations;
+  $("searchDepth").value = cognition().searchDepth;
   setPerspectiveCount(draftPerspectives);
   openDialog("forkDialog");
 });
@@ -1213,12 +1425,16 @@ $("saveFork").addEventListener("click", () => {
     try {
       if (draftArchetypes.size < 1)
         throw new Error("Choose at least one archetype.");
+      const iterations = Number($("searchIterations").value), depth = Number($("searchDepth").value);
+      if (!Number.isInteger(iterations) || iterations < 1 || iterations > 64 || !Number.isInteger(depth) || depth < 1 || depth > 8)
+        throw new Error("Choose 1–64 search iterations and a depth of 1–8.");
       await saveSettings({
         ...settings(),
         fork: $("forkEnabled").checked,
         perspectives: draftArchetypes.size,
         archetypes: [...draftArchetypes],
       });
+      await saveCognition({ searchIterations: iterations, searchDepth: depth });
       closeDialog("forkDialog");
       toast(
         settings().fork
@@ -1509,7 +1725,7 @@ document.addEventListener("keydown", (event) => {
     !event.ctrlKey &&
     !event.metaKey &&
     !document.querySelector("dialog[open]") &&
-    /^[1-6]$/.test(event.key)
+    /^[0-9]$/.test(event.key)
   ) {
     event.preventDefault();
     document.querySelector(`[data-shortcut="${event.key}"]`)?.click();
@@ -1521,6 +1737,167 @@ document
     (button) =>
       (button.title = `${button.querySelector(".slot-title").textContent} · Alt + ${button.dataset.shortcut}`),
   );
+
+for (const id of ["quickCognition", "cognitionAbility", "routeAbility", "learningAbility", "dreamAbility"])
+  $(id).addEventListener("click", () => requireAgent(openCognition));
+
+$("cognitionForm").addEventListener("submit", event => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    await saveCognition({
+      learning: $("learningEnabled").checked,
+      autoRoute: $("autoRoute").checked,
+      semanticRecall: $("semanticRecall").checked,
+      autoSprout: $("autoSprout").checked,
+      autoDream: $("autoDream").checked,
+      revisionLimit: Number($("revisionLimit").value),
+    });
+    toast("Cognition settings saved for this agent.");
+  });
+});
+
+$("toggleChainMode").addEventListener("click", async () => {
+  if (cognition().mode !== "dormant") {
+    closeDialog("cognitionDialog"); openDialog("pauseChainDialog"); return;
+  }
+  cognitionBusy = true; renderCognition();
+  try {
+    await saveCognition({ mode: "active", confirm: true });
+    toast("Timechain resumed. New accepted turns can be recorded again.");
+  } catch (error) { $("cognitionDialog").querySelector(".dialog-error").textContent = error.message; }
+  finally { cognitionBusy = false; renderCognition(); }
+});
+
+$("confirmPauseChain").addEventListener("click", async () => {
+  if (cognitionBusy) return;
+  cognitionBusy = true; $("confirmPauseChain").disabled = true;
+  try {
+    await saveCognition({ mode: "dormant", confirm: true });
+    chatController?.abort();
+    closeDialog("pauseChainDialog");
+    activity("Timechain paused. Plain model chat does not change its history.");
+    toast("Timechain paused. Resume from Cognition controls at any time.");
+  } catch (error) { $("pauseChainDialog").querySelector(".dialog-error").textContent = error.message; }
+  finally { cognitionBusy = false; $("confirmPauseChain").disabled = false; renderCognition(); await refreshActivity(); }
+});
+
+$("cancelTurn").addEventListener("click", async () => {
+  if (!token || stoppingBusy) return;
+  stoppingBusy = true; renderRuntimeActivity();
+  try {
+    await api("/api/cancel", {});
+    chatController?.abort();
+    activity("Cancellation requested. An atomic commit already underway may finish.");
+  } catch (error) { toast(error.message, true); }
+  finally { stoppingBusy = false; await refreshActivity(); renderRuntimeActivity(); }
+});
+
+for (const button of document.querySelectorAll("[data-maintenance]")) {
+  button.addEventListener("click", async () => {
+    if (requestBusy || cognitionBusy) { toast("Finish or stop the current operation first."); return; }
+    cognitionBusy = true; renderHoldingsControls();
+    $("cognitionDialog").querySelector(".dialog-error").textContent = "";
+    try {
+      const result = await api("/api/maintenance", { action: button.dataset.maintenance, confirm: true });
+      applyState(result); await refreshState(); await refreshCognition();
+      toast("Native maintenance completed. Inspect its recorded activity below.");
+    } catch (error) { $("cognitionDialog").querySelector(".dialog-error").textContent = error.message; }
+    finally { cognitionBusy = false; renderHoldingsControls(); await refreshActivity(); }
+  });
+}
+
+function renderLifecycle() {
+  const list = $("lifecycleList"); list.replaceChildren();
+  const readOnly = cognition().mode === "dormant" || !cognition().learning;
+  $("lifecycleControlNotice").textContent = cognition().mode === "dormant"
+    ? "Resume your Timechain before changing learned faculties."
+    : !cognition().learning ? "Learning is off. Enable it in Cognition controls before promoting, hibernating or waking learned faculties. You can still change your equipment." : "";
+  const filter = $("lifecycleFilter").value;
+  const freshIds = newFacultyIds.get(agentId()) || new Set();
+  const items = normalizeFaculties().filter(faculty => {
+    if (faculty.source === "base") return false;
+    if (filter === "new") return freshIds.has(facultyIdentity(faculty));
+    if (filter === "emergent") return faculty.equippable === false;
+    if (filter === "dormant") return !!faculty.dormant;
+    if (filter === "active") return faculty.equippable !== false && !faculty.dormant;
+    return true;
+  });
+  if (!items.length) list.append(el("p", "faculty-empty", "No learned faculties match this view. New proposals will appear here as your agent grows."));
+  for (const faculty of items) {
+    const card = el("article", "lifecycle-card");
+    const header = el("header");
+    const status = faculty.equippable === false ? "EMERGING" : faculty.dormant ? "HIBERNATING" : "AVAILABLE";
+    header.append(el("strong", "", faculty.name), el("span", "lifecycle-badge", `${freshIds.has(facultyIdentity(faculty)) ? "NEW · " : ""}${status}`));
+    card.append(header, el("p", "", faculty.function || faculty.description || "No description supplied."));
+    card.append(el("p", "faculty-meta", `${faculty.kind.toUpperCase()} · ${faculty.category || "learned"}${Number.isFinite(faculty.uses) ? ` · ${faculty.uses} uses` : ""}`));
+    const action = facultyLifecycleAction(faculty);
+    if (action) {
+      const button = el("button", "text-button", action === "promote" ? "Review promotion ↗" : action === "wake" ? "Wake faculty ↗" : "Prune to hibernation ↗");
+      button.type = "button"; button.disabled = requestBusy || cognitionBusy || !hasHoldingsAccess() || readOnly;
+      button.addEventListener("click", () => previewLifecycle(faculty, action));
+      card.append(button);
+    }
+    if (faculty.requiresLocalCodeReview) card.append(el("p", "fine-print", "This proposal contains authored code. Review it locally before activation; ChainChat will not execute it."));
+    if (faculty.equippable !== false && !faculty.dormant) {
+      const equip = el("button", "text-button", isEquipped(faculty) ? "Unequip" : "Equip");
+      equip.type = "button"; equip.disabled = requestBusy || cognitionBusy || !hasHoldingsAccess();
+      equip.addEventListener("click", async () => { await toggleFaculty(faculty); renderLifecycle(); });
+      card.append(equip);
+    }
+    list.append(card);
+  }
+}
+
+async function openLifecycle(filter = "all") {
+  $("lifecycleFilter").value = filter;
+  lifecycleSelection = null; $("lifecyclePreview").classList.add("hidden");
+  openDialog("facultyLifecycleDialog");
+  try { await refreshCognition(); renderLifecycle(); }
+  catch (error) { $("facultyLifecycleDialog").querySelector(".dialog-error").textContent = error.message; }
+}
+
+async function previewLifecycle(faculty, action) {
+  if (requestBusy || cognitionBusy) return;
+  cognitionBusy = true; renderLifecycle();
+  lifecycleSelection = null;
+  $("lifecyclePreview").classList.add("hidden");
+  const id = agentId(), sessionToken = token;
+  try {
+    const request = { action, key: faculty.key || facultyId(faculty), preview: true };
+    const result = await api("/api/faculties/lifecycle", request);
+    if (id !== agentId() || sessionToken !== token) return;
+    const preview = typeof result.preview === "object" ? result.preview : result;
+    lifecycleSelection = { ...request, agentId: id, name: faculty.name, allowed: preview.allowed !== false && result.allowed !== false, previewToken: result.previewToken || preview.previewToken, expectedHead: result.expectedHead || preview.expectedHead };
+    $("lifecyclePreviewTitle").textContent = `${action === "promote" ? "Promote" : action === "wake" ? "Wake" : "Hibernate"} ${faculty.name}`;
+    $("lifecyclePreviewDescription").textContent = preview.plan?.description || preview.description || preview.message || preview.reason || (action === "hibernate" ? "This faculty will leave the active working set. Its full definition and historical records are preserved, and you can wake it later." : action === "promote" ? "The native engine will evaluate this emerging faculty for promotion. Promotion does not equip it automatically." : "This faculty will become available again. Choose Equip separately when you want to use it.");
+    $("confirmLifecycle").disabled = preview.allowed === false || result.allowed === false;
+    $("lifecyclePreview").classList.remove("hidden");
+  } catch (error) { $("facultyLifecycleDialog").querySelector(".dialog-error").textContent = error.message; }
+  finally { cognitionBusy = false; renderLifecycle(); }
+}
+
+$("confirmLifecycle").addEventListener("click", async () => {
+  const selection = lifecycleSelection;
+  if (!selection || !selection.allowed || selection.agentId !== agentId() || cognitionBusy) return;
+  cognitionBusy = true; $("confirmLifecycle").disabled = true;
+  try {
+    const request = { action: selection.action, key: selection.key, preview: false, confirm: true };
+    if (selection.previewToken) request.previewToken = selection.previewToken;
+    if (selection.expectedHead) request.expectedHead = selection.expectedHead;
+    const result = await api("/api/faculties/lifecycle", request);
+    applyState(result);
+    lifecycleSelection = null; $("lifecyclePreview").classList.add("hidden");
+    await refreshState(); await refreshCognition();
+    toast(`${selection.name}: ${selection.action === "hibernate" ? "hibernated; history preserved" : selection.action === "wake" ? "available to equip" : "promotion reviewed"}.`);
+  } catch (error) { $("facultyLifecycleDialog").querySelector(".dialog-error").textContent = error.message; }
+  finally { cognitionBusy = false; renderLifecycle(); await refreshActivity(); }
+});
+$("cancelLifecycle").addEventListener("click", () => { lifecycleSelection = null; $("lifecyclePreview").classList.add("hidden"); });
+$("manageFaculties").addEventListener("click", () => requireAgent(() => openLifecycle()));
+$("newFacultiesNotice").addEventListener("click", () => requireAgent(() => openLifecycle("new")));
+$("refreshLifecycle").addEventListener("click", async () => { try { await refreshCognition(); } catch (error) { toast(error.message, true); } });
+$("lifecycleFilter").addEventListener("change", renderLifecycle);
+
 function invalidatePackPreview() {
   previewGeneration += 1;
   packPreviewState = null;
@@ -1846,8 +2223,10 @@ function licenseMessage(info) {
 }
 function renderHoldingsControls() {
   const active = hasHoldingsAccess(), blocked = !!token && !active;
+  const held = !!(state.agent?.locked || state.agent?.maintenancePending);
+  const testMode = active && licenseDeployment?.required === false && currentLicense?.status === "local-test-mode";
   $("modelHoldingsNotice").classList.toggle("hidden", !blocked);
-  $("sendButton").disabled = requestBusy || blocked;
+  $("sendButton").disabled = requestBusy || blocked || (held && cognition().mode !== "dormant");
   $("newAgentButton").disabled = blocked;
   for (const selector of ['#genesisForm button[type="submit"]', '#modelForm button[type="submit"]',
     '#continuumForm button[type="submit"]', '#ingestForm button[type="submit"]', '#saveFork', '#flushContinuum']) {
@@ -1861,10 +2240,19 @@ function renderHoldingsControls() {
   if (blocked) $("importPackButton").disabled = true;
   $("holdingsPrompt").classList.toggle("verified", active);
   $("holdingsPromptLabel").textContent = active
-    ? "CPHY holdings verified · your tokens remain in your wallet"
+    ? testMode ? "LOCAL TEST MODE · CPHY holdings are not checked" : "CPHY holdings verified · your tokens remain in your wallet"
     : token ? "Verify at least 21,000 CPHY to enable new operations" : "Hold 21,000 CPHY on Base to use ChainChat";
   $("holdingsPromptAction").textContent = active ? "View access ↗" : "Verify holdings ↗";
-  $("sendButton").title = blocked ? "Verify your CPHY holdings to send a message" : "Send message";
+  $("sendButton").title = blocked ? "Verify your CPHY holdings to send a message" : held && cognition().mode !== "dormant" ? "Review the native recovery hold before continuing" : "Send message";
+  const dormant = cognition().mode === "dormant";
+  $("cognitionForm").querySelectorAll("input,button").forEach(control => {
+    control.disabled = blocked || requestBusy || cognitionBusy;
+  });
+  document.querySelectorAll("[data-maintenance]").forEach(control => {
+    control.disabled = blocked || held || requestBusy || cognitionBusy || dormant || !cognition().learning;
+  });
+  $("toggleChainMode").disabled = !token || !state.agent || cognitionBusy || (dormant && blocked);
+  $("confirmLifecycle").disabled = blocked || held || requestBusy || cognitionBusy || dormant || !cognition().learning || !lifecycleSelection?.allowed;
 }
 function renderLicense(info) {
   currentLicense = info;
@@ -2016,6 +2404,8 @@ $("verifyHoldingsButton").addEventListener("click", async () => {
 async function start() {
   initMotifs();
   renderState();
+  setInterval(() => { void refreshActivity(); }, 1000);
+  setInterval(() => { renderRuntimeActivity(); }, 2000);
   $("hostedBridgeSetup").classList.toggle("hidden", localBridgePage);
   $("bridgePort").disabled = localBridgePage || ["cyphertempre.ai","www.cyphertempre.ai"].includes(location.hostname);
   $("bridgePort").value = selectedBridgePort;
