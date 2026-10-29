@@ -1,0 +1,15 @@
+.local/
+node_modules/
+__pycache__/
+*.py[cod]
+**/chain/
+**/tasks/
+**/registry/emergent.json
+**/registry/grown.json
+**/registry/grown_ops.json
+**/registry/policy.json
+**/registry/scorer.json
+**/registry/labeler.json
+**/registry/lens/
+.env
+*.log

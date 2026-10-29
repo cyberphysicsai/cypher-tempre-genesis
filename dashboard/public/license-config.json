@@ -1,0 +1,11 @@
+{
+  "chainId": 8453,
+  "token": "0x08Df470d41C11Ba5Cb60242747D76C65Ca52c94c",
+  "treasury": "0x7932cca1bd502d6850842c423d21f527de47a0ca",
+  "unitPrice": "21000000000000000000000",
+  "registry": null,
+  "runtimeCodeSha256": null,
+  "rpcUrl": "https://mainnet.base.org",
+  "confirmations": 2,
+  "required": false
+}

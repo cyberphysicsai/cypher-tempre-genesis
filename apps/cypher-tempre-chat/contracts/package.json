@@ -1,0 +1,17 @@
+{
+  "name": "cypher-tempre-seat-registry",
+  "version": "0.1.0-beta",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "compile": "node scripts/compile.mjs",
+    "test": "node --test test/registry.test.mjs"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "5.6.1",
+    "ethers": "6.17.0",
+    "ganache": "7.9.2",
+    "solc": "0.8.38"
+  }
+}

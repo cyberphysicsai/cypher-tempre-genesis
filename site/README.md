@@ -1,5 +1,7 @@
 # cyphertempre.ai Static Site
 
+**The chat beta replaces the hosted landing page. See [CHAT-BETA.md](CHAT-BETA.md) for current deployment and local bridge instructions.** The legacy setup below describes the original read-only auditor, now preserved at `/audit/`. Its no-model-call behavior does not describe the new chat. Keep the existing Hostinger `site-deploy` installation and deploy its updated branch; do not delete or reinstall it using the old setup steps below.
+
 Use `dashboard/public` as the production static publish directory for
 `https://cyphertempre.ai`. The hosted site is only a UI shell — every byte of
 Timechain data stays on the user's machine, read by their own local bridge.

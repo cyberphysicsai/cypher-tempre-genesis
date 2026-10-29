@@ -1,0 +1,53 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash \"__SKILL_DIR__/session_start_hook.sh\"",
+            "timeout": 30,
+            "statusMessage": "Loading Proof of Interaction self-model"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash \"__SKILL_DIR__/loop_hook.sh\"",
+            "timeout": 30,
+            "statusMessage": "Marking Proof of Interaction turn"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash \"__SKILL_DIR__/stop_hook.sh\"",
+            "timeout": 30,
+            "statusMessage": "Checking Proof of Interaction seal"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash \"__SKILL_DIR__/subagent_stop_hook.sh\"",
+            "timeout": 30,
+            "statusMessage": "Checking Proof of Interaction subagent seal"
+          }
+        ]
+      }
+    ]
+  }
+}
