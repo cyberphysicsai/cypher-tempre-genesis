@@ -93,14 +93,22 @@ function openCodeGoEndpoint(config) {
     : null;
 }
 
-function reviewTokenAllowance(config) {
+function usesMuseGoResponses(config) {
   const normalized = validateProvider(config);
   const endpoint = openCodeGoEndpoint(normalized);
-  return normalized.provider === "openai" &&
+  return (
+    normalized.provider === "openai" &&
     normalized.model === "muse-spark-1.3-contributor" &&
     endpoint?.pathname === "/inference/go/openai/v1"
-    ? 8192
-    : 2048;
+  );
+}
+
+function reviewTokenAllowance(config) {
+  return usesMuseGoResponses(config) ? 8192 : 2048;
+}
+
+export function perspectiveTokenAllowance(config) {
+  return usesMuseGoResponses(config) ? 8192 : 2048;
 }
 
 export function validateProvider(config) {

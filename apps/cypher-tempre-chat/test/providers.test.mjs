@@ -11,6 +11,7 @@ import {
   DIMENSIONS,
   ProviderError,
   assertCredentialIsolation,
+  perspectiveTokenAllowance,
 } from "../lib/providers.mjs";
 
 async function localProvider(t, handler) {
@@ -225,7 +226,7 @@ test("OpenCode Go receives an honest client name and private random provider-ses
   }
 });
 
-test("only official Go Responses Muse Contributor reviews receive the bounded 8192-token allowance", async (t) => {
+test("only official Go Responses Muse Contributor reviews and perspective requests receive the bounded 8192-token allowance", async (t) => {
   const requests = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
     requests.push({ url, body: JSON.parse(options.body) });
@@ -319,6 +320,15 @@ test("only official Go Responses Muse Contributor reviews receive the bounded 81
       expected,
       `${config.provider} ${config.baseUrl} ${config.model}`,
     );
+    await generate(config, {
+      messages: [{ role: "user", content: "One perspective candidate" }],
+      maxTokens: perspectiveTokenAllowance(config),
+    });
+    const candidateBody = requests.at(-1).body;
+    assert.equal(
+      (candidateBody.generationConfig || candidateBody)[field],
+      expected,
+    );
   }
   await generate(eligible, {
     messages: [{ role: "user", content: "Ordinary generation" }],
@@ -331,7 +341,7 @@ test("only official Go Responses Muse Contributor reviews receive the bounded 81
   assert.equal(requests.at(-1).body.max_output_tokens, 512);
 });
 
-test("Muse review exhaustion remains held at its larger allowance", async (t) => {
+test("Muse review and perspective exhaustion remain held at the larger allowance", async (t) => {
   t.mock.method(globalThis, "fetch", async (_url, options) => {
     assert.equal(JSON.parse(options.body).max_output_tokens, 8192);
     return new Response(
@@ -364,6 +374,19 @@ test("Muse review exhaustion remains held at its larger allowance", async (t) =>
         covenant: [...FRUITS],
       },
     ),
+    { code: "PROVIDER_INCOMPLETE" },
+  );
+  const config = {
+    provider: "openai",
+    model: "muse-spark-1.3-contributor",
+    apiKey: "synthetic-budget-key",
+    baseUrl: "https://opencode.ai/inference/go/openai/v1",
+  };
+  await assert.rejects(
+    generate(config, {
+      messages: [{ role: "user", content: "One perspective candidate" }],
+      maxTokens: perspectiveTokenAllowance(config),
+    }),
     { code: "PROVIDER_INCOMPLETE" },
   );
 });

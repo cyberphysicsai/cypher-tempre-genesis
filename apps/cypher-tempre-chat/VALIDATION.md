@@ -1,12 +1,14 @@
 # Preview validation
 
-## OpenCode Go review allowance adjustment
+## OpenCode Go review and perspective allowances
 
 The initial real Muse Spark 1.3 Contributor benchmark exposed output-budget exhaustion: 19 calls reached a 2,048-token cap; five non-fork tasks completed generation but not review, and all four review-only probes were incomplete. These observations identify a limit in the tested configuration, not a measure of intrinsic model quality or proof that a larger allowance will complete every review.
 
-The exact `muse-spark-1.3-contributor` model on the OpenAI Responses adapter at `https://opencode.ai/inference/go/openai/v1` now receives an 8,192-token review ceiling. Mock-transport serialization regressions verify the exact model, protocol, HTTPS host, default port and endpoint path; other models, providers, lookalike hosts, alternate ports and alternate paths retain 2,048. Ordinary generation allowances remain unchanged. An incomplete response at the larger ceiling still raises `PROVIDER_INCOMPLETE` and releases no assessment.
+The exact `muse-spark-1.3-contributor` model on the OpenAI Responses adapter at `https://opencode.ai/inference/go/openai/v1` now receives an 8,192-token review ceiling. A subsequent real-model benchmark recorded 24 correct core answers and all four expected review-probe outcomes. Its 21-perspective run still failed during candidate generation: a response reached the 2,048-token cap, with 2,046 reasoning tokens reported and `max_output_tokens` as the incomplete reason. This identifies a separate candidate-generation limit, not a successful 21-perspective run.
 
-All 30 provider regression tests passed using synthetic credentials and local or mocked transports, with no external model calls. Its effect on real-model completion, latency and cost requires a subsequent benchmark; increased allowance is not a success guarantee or a retry policy.
+Perspective candidates now use the same exact-model/endpoint eligibility and an 8,192-token ceiling. Mock-transport serialization regressions verify the exact model, protocol, HTTPS host, default port and endpoint path; other models, providers, lookalike hosts, alternate ports and alternate paths retain 2,048 for reviews and candidates. Ordinary chat and synthesis remain at 4,096, and source summaries remain at 1,536. An incomplete response at the larger ceiling still raises `PROVIDER_INCOMPLETE`; candidate exhaustion creates no pending answer or native commit.
+
+The candidate-budget change is covered by provider serialization and server-orchestration tests using synthetic credentials and local or mocked transports, with no external model calls. A real 21-perspective rerun with the new candidate allowance remains pending. Completion, latency and cost must be measured; increased allowance is not a success guarantee or a retry policy.
 
 ## Security and functional audit: beta 0.4.1
 
