@@ -587,5 +587,309 @@ class EngineBridgeTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
 
 
+    def test_runtime_pause_resume_preserve_history_and_require_explicit_control(self):
+        before = self.snapshot()
+        state = self.call("runtime_status")
+        self.assertTrue(state["runtime"]["supported"])
+        self.assertEqual(state["runtime"]["mode"], "active")
+        self.assert_code("CONFIRMATION_REQUIRED", lambda: self.call("dormancy", action="pause", expectedHead=self.head()))
+        paused = self.call("dormancy", action="pause", confirmed=True, expectedHead=self.head())
+        self.assertEqual(paused["runtime"]["mode"], "dormant")
+        self.assert_code("CHAIN_PAUSED", lambda: self.call("prepare", input="A regular conversation."))
+        self.assert_code("CHAIN_PAUSED", lambda: self.call("route", input="A regular conversation."))
+        self.call("dormancy", action="resume", confirmed=True, expectedHead=self.head())
+        self.assertEqual(before, self.snapshot())
+
+    def test_learning_off_skips_telemetry_teaching_and_growth_but_seals(self):
+        import cambium
+        before_catalog = self.call("inspect")["faculties"]
+        before = self.snapshot()
+        prepared = self.call("prepare", input=self.exchange()["input"], learning=False)
+        self.call("route", input=self.exchange()["input"], learning=False)
+        self.call("memory", query=self.exchange()["input"], learning=False)
+        self.assertFalse(prepared["runtime"]["learning"])
+        self.assertEqual(before, self.snapshot())
+        with patch.object(cambium, "fill_gap", side_effect=AssertionError("Growth ran while disabled")):
+            self.call("commit", expectedHead=self.head(), learning=False, growth=True, **self.exchange())
+        self.assertEqual(before_catalog, self.call("inspect")["faculties"])
+        self.assertFalse((self.root / "chain" / "telemetry.jsonl").exists())
+        self.assertEqual(self.call("inspect")["height"], 2)
+        self.assert_code("LEARNING_DISABLED", lambda: self.call("teach", learning=False, **self.exchange()))
+
+    def test_model_scored_native_tree_uses_real_depth_and_backpropagation(self):
+        ex = self.exchange()
+        candidates = [{"name": name, "summary": ex["output"], "scores": ex["scores"],
+                       "assessment": ex["assessment"]} for name in ("Skeptic", "Builder")]
+        before = self.snapshot()
+        search = self.call("search", input=ex["input"], perspectives=candidates,
+                           iterations=12, depth=3, learning=False)["search"]
+        self.assertEqual(search["algorithm"], "native-uic-mcts")
+        self.assertEqual(search["exploredDepth"], 1)
+        self.assertEqual(sum(n["visits"] for n in search["nodes"]), 12)
+        rollouts = [{**candidates[0], "path": ["Skeptic", "Evidence"]},
+                    {**candidates[0], "path": ["Skeptic", "Evidence", "Verification"]}]
+        deep = self.call("search", input=ex["input"], perspectives=candidates,
+                         rollouts=rollouts, iterations=12, depth=3, learning=False)["search"]
+        self.assertEqual(deep["exploredDepth"], 3)
+        self.assertTrue(any(len(n["path"]) == 3 and n["visits"] for n in deep["nodes"]))
+        self.assertEqual(before, self.snapshot())
+        bad = copy.deepcopy(candidates)
+        bad[0]["assessment"]["fruitages"]["love"] = 1
+        self.assert_code("COVENANT_REJECTED", lambda: self.call("search", input=ex["input"], perspectives=bad))
+
+    def test_search_receipt_is_bounded_preserved_and_not_scoring_authority(self):
+        ex = self.exchange()
+        perspective = {"name": "Skeptic", "summary": ex["output"], "scores": ex["scores"], "assessment": ex["assessment"]}
+        search = self.call("search", input=ex["input"], perspectives=[perspective], depth=2,
+                           rollouts=[{**perspective, "path": ["Skeptic", "Verification"]}])["search"]
+        search["modelRollouts"] = 1
+        search["arbitraryExtra"] = {"untrusted": "must not persist"}
+        self.commit(search=search)
+        stored = self.call("inspect")["history"][-1]["search"]
+        self.assertEqual(stored["modelRollouts"], 1)
+        self.assertEqual(stored["exploredDepth"], 2)
+        self.assertIn("not an independent", stored["provenance"])
+        self.assertNotIn("arbitraryExtra", stored)
+        bad = copy.deepcopy(search)
+        bad["nodes"][0]["value"] = float("nan")
+        before = self.snapshot()
+        self.assert_code("INVALID_SEARCH", lambda: self.commit(search=bad))
+        self.assertEqual(before, self.snapshot())
+        poor = copy.deepcopy(ex["assessment"])
+        poor["fruitages"]["love"] = 0
+        self.assert_code("COVENANT_REJECTED", lambda: self.commit(search=search, assessment=poor))
+
+    def test_memory_actions_filter_unreleased_sources_and_paginate_canonical_evidence(self):
+        tc = bridge.Timechain(self.root)
+        valid = []
+        for i in range(43):
+            valid.append(tc.seal("experience", {"summary": f"Measurement sample count item {i} at the laboratory."},
+                                 poi=self.exchange()["scores"])["index"])
+        hidden = tc.seal("turn", {"event": "web_chat_turn", "summary": "Hidden unreleased laboratory secret."},
+                         poi=self.exchange()["scores"])
+        result = self.call("memory", action="fetch", rings=valid, budgetChars=64000, learning=False)
+        self.assertEqual(len(result["availableEvidence"]), 40)
+        self.assertEqual(result["coverage"]["nextCursor"], 40)
+        self.assertFalse(result["coverage"]["complete"])
+        tail = self.call("memory", action="fetch", rings=valid, cursor=40, budgetChars=64000, learning=False)
+        self.assertEqual(len(tail["availableEvidence"]), 3)
+        self.assertFalse(tail["coverage"]["complete"])
+        self.assertTrue(tail["coverage"]["hasPrevious"])
+        for action in ("evidence", "grep", "gather", "track", "endpoints"):
+            with self.subTest(action=action):
+                out = self.call("memory", action=action, query="laboratory", a="sample", b="laboratory", learning=False)
+                self.assertNotIn("Hidden unreleased", out["context"])
+                self.assertNotIn(hidden["index"], [e["index"] for e in out["availableEvidence"]])
+                self.assertFalse(out["coverage"]["complete"])
+        self.assert_code("EVIDENCE_INVALID", lambda: self.call("memory", action="fetch", rings=[hidden["index"]]))
+
+    def test_route_only_offers_replay_and_requires_review_and_fresh_derivation(self):
+        import replay
+        result = self.commit(input="Recall patient clear reasoning", output="Patient clear reasoning helps us examine uncertainty carefully.")
+        ring = result["ring"]["index"]
+        route = self.call("route", input="patient clear reasoning", learning=False)["route"]
+        self.assertEqual(route["decision"], "REPLAY")
+        self.assertTrue(route["requiresReview"])
+        self.assertEqual(route["antecedent"]["ring"], ring)
+        manager = replay.Replay(self.root, registry_root=self.root)
+        manager._save_ledger({str(ring): {"since_fresh": 999, "accepts": 999}})
+        route = self.call("route", input="patient clear reasoning", learning=False)["route"]
+        self.assertNotEqual(route["decision"], "REPLAY")
+
+    def test_shaped_memory_local_embeddings_temporal_resolution_and_span_guard(self):
+        tc = bridge.Timechain(self.root)
+        ring = tc.seal("experience", {"summary": "Measured samples contained 11 observations on Monday."},
+                       poi=self.exchange()["scores"])
+        memory = self.call("memory", query="How many observations were measured?", shapes=["aggregate"],
+                           embed=True, learning=False)
+        self.assertEqual(memory["result"]["shapes"], ["aggregate"])
+        self.assertIn("native", memory["result"])
+        self.assertIsNotNone(memory["result"]["embedding"])
+        json.dumps(memory)
+        resolved = self.call("memory", action="resolve", query="last week", askedOn="2026-10-28")
+        self.assertIn("2026", json.dumps(resolved["result"]))
+        guarded = self.call("memory", action="span_guard", input="What was measured?",
+                            output="Measured samples contained 11 observations.", usedRings=[ring["index"]])
+        self.assertTrue(guarded["result"])
+        self.assertEqual(guarded["availableEvidence"][0]["index"], ring["index"])
+
+    def test_hibernate_wake_reviewed_preview_and_append_only_epochs(self):
+        self.import_pack()
+        faculty = next(f for f in self.call("inspect")["faculties"] if f["source"] == "imported")
+        before = self.snapshot()
+        preview = self.call("faculty_action", action="hibernate", key=faculty["key"], preview=True)
+        self.assertEqual(preview["plan"]["faculty"]["key"], faculty["key"])
+        self.assertEqual(before, self.snapshot())
+        request = {"action": "hibernate", "key": faculty["key"], "expectedHead": self.head(),
+                   "scores": self.exchange()["scores"], "assessment": self.exchange()["assessment"]}
+        self.assert_code("CONFIRMATION_REQUIRED", lambda: self.call("faculty_action", **request))
+        self.call("faculty_action", confirmed=True, **request)
+        dormant = next(f for f in self.call("inspect")["faculties"] if f["key"] == faculty["key"])
+        self.assertTrue(dormant["dormant"])
+        self.assertTrue(dormant["canWake"])
+        self.call("faculty_action", **{**request, "action": "wake", "confirmed": True, "expectedHead": self.head()})
+        self.assertFalse(next(f for f in self.call("inspect")["faculties"] if f["key"] == faculty["key"])["dormant"])
+        self.assertTrue((self.root / "chain" / "rings.jsonl").read_bytes().startswith(before[str(Path("chain") / "rings.jsonl")]))
+        self.assertTrue(self.call("verify")["verified"])
+
+    def test_native_promotion_preserves_emergent_and_refuses_authored_code(self):
+        import cambium
+        entry = {"eid": "new-sense", "kind": "sense", "name": "Careful Measurement",
+                 "function": "Notice uncertainty in measured observations.", "category": "knowledge",
+                 "recurrence": 3, "seed_terms": ["measurement", "uncertainty"], "status": "emergent"}
+        cambium.save_emergent(self.root, {"registry": "emergent", "faculties": [entry]})
+        ex = self.exchange()
+        self.call("faculty_action", action="promote", key="emergent:new-sense", confirmed=True,
+                  expectedHead=self.head(), scores=ex["scores"], assessment=ex["assessment"])
+        self.assertEqual(cambium.load_emergent(self.root)["faculties"][0]["status"], "promoted")
+        self.assertTrue(any(f["name"] == entry["name"] and f["source"] == "grown" for f in self.call("inspect")["faculties"]))
+        entry = {**entry, "eid": "code-sense", "op_code": "raise RuntimeError('never run')"}
+        cambium.save_emergent(self.root, {"registry": "emergent", "faculties": [entry]})
+        before = self.snapshot()
+        self.assert_code("FACULTY_ACTION_BLOCKED", lambda: self.call("faculty_action", action="promote", key="emergent:code-sense", preview=True))
+        self.assertEqual(before, self.snapshot())
+
+    def test_teaching_accepts_only_equipped_faculties_and_preserves_history(self):
+        faculty = next(f for f in self.call("inspect")["faculties"] if f["kind"] == "modality")
+        request = {**self.exchange(), "expectedHead": self.head(), "loadout": [faculty["key"]],
+                   "labels": {"modalities": [faculty["name"]], "senses": []}}
+        history = (self.root / "chain" / "rings.jsonl").read_bytes()
+        result = self.call("teach", **request)
+        self.assertTrue(result["extractorTaught"])
+        self.assertEqual((self.root / "chain" / "rings.jsonl").read_bytes(), history)
+        from extractor import collect_pairs
+        self.assertEqual(len(collect_pairs(self.root)), 1)
+        self.assert_code("INVALID_LOADOUT", lambda: self.call("teach", **{**request, "labels": {"modalities": ["invented"]}}))
+        self.assert_code("INVALID_LOADOUT", lambda: self.call("teach", **{**request, "loadout": []}))
+
+    def test_maintenance_preview_training_holdout_and_dream_are_native(self):
+        before = self.snapshot()
+        preview = self.call("maintenance", action="train", preview=True)
+        self.assertIn("holdout", preview["plan"]["description"])
+        self.assertEqual(before, self.snapshot())
+        for action in ("train", "index", "dream"):
+            ex = self.exchange()
+            out = self.call("maintenance", action=action, confirmed=True, expectedHead=self.head(),
+                            scores=ex["scores"], assessment=ex["assessment"])
+            self.assertTrue(self.call("verify")["verified"])
+            if action == "train":
+                self.assertFalse(out["report"]["extractor"]["adopted"])
+                self.assertFalse(out["report"]["scorer"]["adopted"])
+            elif action == "dream":
+                self.assertTrue(out["report"]["ran"])
+            self.assertFalse((self.root / "chain" / "MAINTENANCE_PENDING.json").exists())
+
+    def scorer_training_report(self):
+        import learner
+        return {"weights": {"bias": 0.0, **{feature: 0.0 for feature in learner.FEATURES}},
+                "offers": 10000, "train_offers": 8000, "holdout_offers": 2000,
+                "examples": 10000, "positives": 1000, "features": list(learner.FEATURES),
+                "eval": {"trained_mrr": 1.0, "hand_mrr": 0.1, "ranked_holdout_offers": 20}}
+
+    def run_maintenance(self, action="train"):
+        ex = self.exchange()
+        return self.call("maintenance", action=action, confirmed=True, expectedHead=self.head(),
+                         scores=ex["scores"], assessment=ex["assessment"])
+
+    def test_operator_seal_failure_leaves_recovery_evidence_and_holds_future_writes(self):
+        import learner
+        before = (self.root / "chain" / "rings.jsonl").read_bytes()
+        seal = bridge.Timechain._seal_locked
+        def fail_operator(instance, ring_type, *args, **kwargs):
+            if ring_type == "operator":
+                raise OSError("injected native adoption seal failure")
+            return seal(instance, ring_type, *args, **kwargs)
+        with patch.object(learner, "train_scorer", return_value=self.scorer_training_report()), \
+                patch.object(bridge.Timechain, "_seal_locked", fail_operator):
+            self.assert_code("MAINTENANCE_INCOMPLETE", self.run_maintenance)
+        self.assertTrue(learner.scorer_path(self.root).exists())
+        self.assertEqual((self.root / "chain" / "rings.jsonl").read_bytes(), before)
+        state = self.call("inspect")
+        self.assertTrue(state["locked"])
+        self.assertTrue(state["maintenancePending"])
+        transaction = self.root / "chain" / "maintenance-transactions" / state["maintenancePending"]["id"]
+        journal = json.loads((transaction / "transaction.json").read_text(encoding="utf-8"))
+        self.assertEqual(journal["stage"], "needs-review")
+        self.assertEqual(journal["sealFailures"][0]["ringType"], "operator")
+        for op in ("prepare", "route", "memory", "commit", "teach", "maintenance", "faculty_action", "ingest"):
+            with self.subTest(op=op):
+                self.assert_code("MAINTENANCE_INCOMPLETE", lambda: self.call(op, input="Resume work."))
+        with self.assertRaises(RuntimeError):
+            bridge.Timechain(self.root).seal("experience", {"summary": "Native CLI also respects the lockdown."})
+
+    def test_dream_swallowed_operator_error_cannot_release_uncommitted_weights(self):
+        import learner
+        before = (self.root / "chain" / "rings.jsonl").read_bytes()
+        seal = bridge.Timechain._seal_locked
+        def fail_operator(instance, ring_type, *args, **kwargs):
+            if ring_type == "operator":
+                raise OSError("Dream catches this native operator failure")
+            return seal(instance, ring_type, *args, **kwargs)
+        with patch.object(learner, "train_scorer", return_value=self.scorer_training_report()), \
+                patch.object(bridge.Timechain, "_seal_locked", fail_operator):
+            self.assert_code("MAINTENANCE_INCOMPLETE", lambda: self.run_maintenance("dream"))
+        self.assertTrue((self.root / "chain" / "rings.jsonl").read_bytes().startswith(before))
+        self.assertTrue(self.call("inspect")["locked"])
+        self.assert_code("MAINTENANCE_INCOMPLETE", lambda: self.call("prepare", input="Read with new weights."))
+
+    def test_missing_operator_receipt_is_detected_even_without_an_exception(self):
+        import learner
+        def uncommitted(root, report, registry_root=None):
+            learner.scorer_path(registry_root).write_text(json.dumps({"status": "active", "weights": {"bias": 1}}), encoding="utf-8")
+            return {"adopted": True}
+        with patch.object(learner, "adopt_scorer", uncommitted):
+            self.assert_code("MAINTENANCE_INCOMPLETE", self.run_maintenance)
+        self.assertTrue(self.call("inspect")["locked"])
+
+    def test_abrupt_process_exit_leaves_durable_marker_honored_after_restart(self):
+        request = {"op": "maintenance", "root": str(self.root), "action": "train", "confirmed": True,
+                   "expectedHead": self.head(), "scores": self.exchange()["scores"], "assessment": self.exchange()["assessment"]}
+        script = """import contextlib,io,json,os,sys
+import engine_bridge as b
+import learner
+def crash(root, report, registry_root=None):
+    learner.scorer_path(registry_root).write_text('{"status":"active","weights":{"bias":1}}',encoding='utf-8')
+    os._exit(17)
+learner.adopt_scorer=crash
+with contextlib.redirect_stdout(io.StringIO()): b.dispatch(json.load(sys.stdin))
+"""
+        child = subprocess.run([sys.executable, "-c", script], cwd=PRODUCT, input=json.dumps(request), text=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+        self.assertEqual(child.returncode, 17)
+        state = self.call("inspect")
+        self.assertTrue(state["locked"])
+        operation = {"op": "prepare", "root": str(self.root), "input": "Continue after crash."}
+        restarted = subprocess.run([sys.executable, str(PRODUCT / "engine_bridge.py")], input=json.dumps(operation),
+                                   text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=True)
+        result = json.loads(restarted.stdout)
+        self.assertEqual(result["error"]["code"], "MAINTENANCE_INCOMPLETE")
+
+    def test_successful_native_adoption_and_config_state_are_anchored_before_unblock(self):
+        import learner
+        with patch.object(learner, "train_scorer", return_value=self.scorer_training_report()):
+            result = self.run_maintenance()
+        self.assertTrue(result["report"]["scorer"]["adopted"])
+        self.assertFalse(self.call("inspect")["locked"])
+        ring = bridge.Timechain(self.root)._tail_ring()
+        digest = hashlib.sha256(learner.scorer_path(self.root).read_bytes()).hexdigest()
+        self.assertEqual(ring["payload"]["stateAfter"]["registry/scorer.json"], digest)
+        self.assertTrue(any(ref["hash"] == digest for ref in ring["blockspace_refs"]))
+
+    def test_final_journal_failure_preserves_committed_history_and_holds_agent(self):
+        before = (self.root / "chain" / "rings.jsonl").read_bytes()
+        write = bridge.durable_json
+        def fail_receipt(path, value):
+            if value.get("stage") == "committed":
+                raise OSError("injected transaction receipt write failure")
+            return write(path, value)
+        with patch.object(bridge, "durable_json", fail_receipt):
+            self.assert_code("MAINTENANCE_INCOMPLETE", self.run_maintenance)
+        tc = bridge.Timechain(self.root)
+        self.assertTrue(tc.rings_path.read_bytes().startswith(before))
+        self.assertEqual(tc._tail_ring()["ring_type"], "maintenance-control")
+        self.assertTrue(tc.verify()[0])
+        self.assertTrue(self.call("inspect")["locked"])
+
+
 if __name__ == "__main__":
     unittest.main()

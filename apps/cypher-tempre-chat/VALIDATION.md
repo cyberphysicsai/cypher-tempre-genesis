@@ -1,5 +1,24 @@
 # Preview validation
 
+## Native cognition beta 0.5.0
+
+This release connects the chat to native routing, shaped recall, scored tree search, teaching, controlled growth, dormancy and maintenance. It does not establish equal benchmark performance across models or reproduce an external game/robotics/coding environment.
+
+Final local suite: **163 Node tests passed**, with one expected Windows case-sensitivity skip; **56 Python adapter tests passed**. The independent original-engine reference was supplied, so both compatibility checks ran. JavaScript syntax and Git whitespace checks passed.
+
+- Real HTTP plus native Python tests verify active review/seal, confirmed pause/resume, stateless raw calls, external dormancy, learning freeze, per-session activity privacy, and cancellation before release. Learning-off file fingerprints check registries, telemetry and training state while accepted conversation still seals.
+- Semantic recall toggles change native route/memory calls and canonical evidence supplied to generation. Malformed plans cannot introduce unoffered ring IDs or teach unequipped labels. A reviewed replay takes a fresh semantic/native gate and records its accepted source.
+- Perspective search creates actual model continuations, reviews each, and uses native UIC selection/backpropagation rather than fabricated rollout counters. Tests verify explored depth, call counts, synthesis and persisted bounded search receipts. Public tree metadata is descriptive evidence of the bridge run, not independent proof that a semantic assessment is true.
+- Revision tests hold the first candidate, review a corrected candidate, and reject exhausted attempts without appending. Derived teaching occurs only after an accepted seal and is suppressed with learning off. Opted-in Dream runs after the inference transaction is idle; Stop removes queued jobs. Stop remains bound to the originating chain after an agent switch.
+- Browser checks on disposable agents cover backend stage glow, paused chat with unchanged height, Stop, native search and history reload, manual promote/equip/hibernate/wake, 21-position picker, Orbitron throughout, and desktop/390px mobile layouts without horizontal document overflow. New faculties remain unequipped until selected.
+- Original-engine fixtures still compare all 44 native scoring cases and all four decisions. Continuing an independently created earlier chain preserves historical bytes and policy; both verifiers pass. The 65 bundled native engine files remain unchanged.
+- No paid provider calls or real wallet signatures were made for this release. Tests use local deterministic model/review transports. Holdings, scoped signatures, credential reflection, source redaction, stale-head rejection and release-ledger regressions remain in the suite.
+- Maintenance fault tests cover failed native adoption seals, exceptions swallowed by Dream, missing adoption receipts, abrupt subprocess exit/restart, successful adoption and a failed final journal write. A durable marker and backups precede mutations; mismatched or incomplete adoption blocks further inference/writes and requires local recovery review. No automatic history rewrite occurs.
+
+Public benchmark claims require per-run provenance. Inspected local LIBERO and RoboCurve bundles support their particular simulation/checkpoint protocols; they do not establish the same outcome from every text API model. Matching ARC, LongMemEval, Pokemon or MazeBench scores would require their exact datasets/environments, allowed tools, start state, model settings, budgets and scoring records. No such rerun was performed here. Earlier real-model results below describe their recorded release and configuration, not this expanded runtime.
+
+Remaining boundaries are explicit in the capability manifest: full-corpus audit queues, recovery and witness/task-chain administration use native operator workflows; external coding/browser/game/robotics environments need separate adapters. Selected memory and model reviews remain bounded and fallible. No claim of zero hallucinations or universal skill-performance parity is made.
+
 ## OpenCode Go review and perspective allowances
 
 The initial real Muse Spark 1.3 Contributor benchmark exposed output-budget exhaustion: 19 calls reached a 2,048-token cap; five non-fork tasks completed generation but not review, and all four review-only probes were incomplete. These observations identify a limit in the tested configuration, not a measure of intrinsic model quality or proof that a larger allowance will complete every review.

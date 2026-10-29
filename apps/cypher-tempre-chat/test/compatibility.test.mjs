@@ -274,7 +274,9 @@ test(
       assert.doesNotMatch(JSON.stringify(item.args), retired);
       assert.equal(item.config.apiKey, "memory-only-key");
     }
-    assert.match(generated[0].args.system, /inherited Proof of interaction/i);
+    // Retrieval planning may precede answer generation; the answer must still
+    // receive the inherited evidence with model-visible terminology normalized.
+    assert.ok(generated.some(item => /inherited Proof of interaction/i.test(item.args.system)));
     consistency = 190;
     const rejected = await call("/api/chat", {
       message: "Please consider the same question patiently.",

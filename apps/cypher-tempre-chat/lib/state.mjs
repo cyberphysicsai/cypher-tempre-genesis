@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { defaultCognition } from "./cognition.mjs";
 
 export const defaultSettings = () => ({
   recall: true,
@@ -97,6 +98,7 @@ export class StateStore {
       owned,
       loadout: defaultLoadout(),
       settings: defaultSettings(),
+      cognition: defaultCognition(),
     };
     this.agents.push(record);
     await this.save();

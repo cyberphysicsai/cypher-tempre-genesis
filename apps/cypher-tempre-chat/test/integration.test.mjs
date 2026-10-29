@@ -336,6 +336,9 @@ test(
   { timeout: 300000 },
   async (t) => {
     const f = await start(t);
+    // This case isolates the explicit first-level collapse. Iterative native
+    // expansions and semantic planning have their own HTTP integration cases.
+    assert.equal((await f.call("/api/cognition", { semanticRecall: false, autoRoute: false, searchDepth: 1 })).status, 200);
     assert.equal(
       (
         await f.call("/api/settings", {

@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersion } from "../public/chainchat-display.js";
 
-test("pairing requires a bridge with the credential and grounding fixes", () => {
-  for (const old of [undefined, null, "", "0.3.0", "0.4.0", "0.4.1-beta", "garbage", "0.04.1", "0.4.9007199254740993"])
+test("pairing requires native cognition and activity support", () => {
+  for (const old of [undefined, null, "", "0.3.0", "0.4.0", "0.4.1", "0.4.3", "0.4.999", "0.5.0-beta", "garbage", "0.05.0", "0.4.9007199254740993"])
     assert.equal(supportedBridgeVersion(old), false);
-  for (const current of ["0.4.1", "0.4.2", "0.5.0", "1.0.0"])
+  for (const current of ["0.5.0", "0.5.1", "0.6.0", "1.0.0"])
     assert.equal(supportedBridgeVersion(current), true);
 });
 
