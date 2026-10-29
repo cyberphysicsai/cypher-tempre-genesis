@@ -1,4 +1,4 @@
-# Cypher Tempre Chat
+# Cypher Tempre ChainChat
 
 A bring-your-own-model Agentic Timechain Metaprogramming Interface for Cypher Tempre. Monochrome physics diagrams, ambient DNA helices and timechain blocks, an MMO-style ability bar, and a real Timechain underneath.
 
@@ -6,18 +6,22 @@ This local application includes the complete Proof of Interaction engine. Its mo
 
 ## Start
 
-Install Node.js 20+ and Python 3.10+. No npm packages or Python packages are needed.
+Install Node.js 20+ and Python 3.10+. Install the pinned Node dependency used for wallet signature verification; no Python packages are needed.
 
 ```sh
+npm ci --ignore-scripts
 npm start
 ```
 
 Open **http://127.0.0.1:8790**. Enter the pairing code printed in the terminal, then:
 
-1. Seal a fresh genesis, or pair the absolute directory of an existing Timechain skill containing `chain/` and `registry/`.
-2. Connect your provider, exact model ID, optional base URL, and API key.
-3. Equip modalities and senses. Enable perspective forking or adjust Continuum if desired.
-4. Chat. The bridge reviews the generated answer, runs the native PoI gate, and commits accepted interactions according to the selected block policy.
+1. Connect your wallet and sign the readable ChainChat sign-in message. Keep at least **21,000 CPHY** in that wallet on Base. Signing does not transfer tokens or approve spending.
+2. Seal a fresh genesis, or pair the absolute directory of an existing Timechain skill containing `chain/` and `registry/`. Existing chains can be paired and inspected before wallet verification.
+3. Connect your provider, exact model ID, optional base URL, and API key.
+4. Equip modalities and senses. Enable perspective forking or adjust Continuum if desired.
+5. Chat. The bridge reviews the generated answer, runs the native PoI gate, and commits accepted interactions according to the selected block policy.
+
+**Current block height** is the paired chain's last sealed block index. Genesis is height 0. Pending exchanges do not advance it. An unpaired chain shows a dash, and refreshes read the actual chain head rather than predicting the next index.
 
 Use `CT_CHAT_PYTHON` to select a Python executable, `CT_CHAT_PORT` to change the port, or `CT_CHAT_DATA` to select a local data directory. The default data directory is `.local/`, excluded from Git. Close the server to end its credential sessions. Reloading the browser requires a new pairing and model connection.
 
@@ -27,13 +31,19 @@ Run `npm run beta` on the same machine as your Timechain, then open https://cyph
 
 The chat is followed by the preserved read-only chain auditor. It pairs independently with the original audit bridge on port 8788. Existing chain and registry files are not included in downloads or uploaded to hosting.
 
-Paid activation is **not open in this beta build**. The Base registry is implemented and tested locally, but not deployed. `public/license-config.json` deliberately has `required:false`, `registry:null` and no runtime hash. **Do not send CPHY directly to the treasury; direct transfers do not register seats.**
+## CPHY holdings access
 
-After a reviewed deployment, one persistent bridge instance costs 21,000 CPHY. N seats cost N times that amount. The browser requires the reviewed runtime bytecode, exact token, treasury and price before offering wallet transactions, and requests exact token approval. The bridge checks the same deployment and owner-scoped key binding at a canonical Base block, after two L2 confirmations. This is provisional activation, not final settlement. RPC errors hold required operations; license approvals are cached for at most 30 seconds.
+ChainChat requires at least **21,000 existing CPHY** at `0x08Df470d41C11Ba5Cb60242747D76C65Ca52c94c` on **Base Mainnet (8453)**. `public/license-config.json` enables holdings access by default. No payment registry, token transfer, spending approval, permit, or wallet transaction is used. The earlier contract prototype in `contracts/` is unused by ChainChat; do not deploy it or send tokens to obtain holdings access.
 
-A random Ed25519 identity stays in `.local/bridge-identity.json`. Back it up securely: never publish it or send it to someone else. A fresh browser challenge verifies possession before payment. The purchasing wallet owns the seat and can rotate it to a replacement bridge; a sponsor buying seats for others retains that recovery authority. The chosen public owner address is saved only locally in `.local/license-selection.json`.
+Wallet control is verified using a fresh, single-use Sign-In with Ethereum message scoped to the page origin, Base, pairing session and bridge key. The challenge expires after five minutes; wallet authorization expires after 30 minutes. Normal account signatures and supported deployed ERC-1271 smart-wallet signatures are verified by the bridge. Connecting a wallet or typing an address does not unlock access.
 
-This does not prove unique physical hardware or prevent people from copying keys or modifying open-source checks. It needs no customer account database, but wallet addresses, payments, seat ownership, and key commitments are public. Hosting/RPC providers can observe network metadata. See `contracts/README.md` and `contracts/artifacts/base-deployment.json` for the undeployed contract, tests and wallet handoff. No production deployment or payment is performed by the bridge.
+The bridge reads the exact token balance at a canonical Base block, using integer units and a two-block confirmation delay. Successful balance results expire within 30 seconds. Model calls and native writes check access again, including after long generation/review work. Insufficient holdings, session expiry or failed RPC verification pause new protected operations. Pairing, inspection, verification, faculty preview/export and disconnect remain available; a failed holdings check never deletes local history.
+
+Each native mutation is authorized immediately before it starts. An atomic block write already in progress may finish if eligibility changes during that write; its real receipt and committed history are retained. Further blocks and model calls are held. This avoids reporting an already-written block as failed or silently duplicating it on retry.
+
+A random Ed25519 identity stays in `.local/bridge-identity.json`. Keep it private. The browser verifies a fresh proof of that identity, configuration and access state. Wallet signatures and authorization grants are held only in memory, bound to one pairing session. Wallet/network changes revoke the session; restarting or ending the bridge session requires signing in again. No customer account database is created, and no chain or model key is sent to a wallet service.
+
+This gate is enforced by the distributed bridge and frontend. It is not a hosted authorization service: people controlling an open-source copy can change the checks. One eligible wallet may authorize more than one installation; the threshold does not reserve exclusive seats, prove unique hardware, or prove continuous historical ownership. A copied software key can be reused. Wallet addresses and balances are public, and hosting/RPC providers can observe connection metadata. These limits also apply when using the official static website.
 
 ## Your ability bar
 

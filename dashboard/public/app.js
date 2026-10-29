@@ -1,11 +1,13 @@
 import { initMotifs } from "./motifs.js";
 import {
-  purchaseBoundSeats,
-  rebindSeat,
-  validateDeployment,
+  validateHoldingsConfig,
+  verifyHoldingsWithWallet,
+  freshChallenge,
+  watchWallet,
   verifyBridgeIdentity,
   matchingConfiguration,
-} from "./seat-wallet.js";
+} from "./holdings-wallet.js";
+import { blockHeight, formatTokenBalance, requiresHoldings } from "./chainchat-display.js";
 import {
   bridgeApiUrl,
   bridgePort,
@@ -209,8 +211,10 @@ function covenantReview(gate) {
 async function api(path, data, options = {}) {
   if (!localBridgePage && !token && path !== "/api/pair")
     throw new Error("Pair your local bridge before connecting to it.");
+  if (requiresHoldings(path, data)) await ensureHoldings();
+  const requestToken = token;
   const headers = { Accept: "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
   if (data !== undefined) headers["Content-Type"] = "application/json";
   let response;
   try {
@@ -246,7 +250,8 @@ async function api(path, data, options = {}) {
     );
     error.code = result.code;
     error.gate = result.gate;
-    if (response.status === 401 && path !== "/api/pair") clearLocalSession();
+    if (response.status === 401 && path !== "/api/pair" &&
+        !path.startsWith("/api/license/") && token === requestToken) clearLocalSession();
     throw error;
   }
   return result;
@@ -302,6 +307,7 @@ async function runForm(form, callback) {
     else toast(error.message, true);
   } finally {
     if (button) button.disabled = false;
+    renderHoldingsControls();
   }
 }
 function settings() {
@@ -402,6 +408,7 @@ function renderFaculties() {
       `faculty-card${selected ? " equipped" : ""}${faculty.equippable === false ? " emerging" : ""}`,
     );
     button.type = "button";
+    button.disabled = !!token && !hasHoldingsAccess();
     button.title = `${faculty.function || faculty.description || ""}${faculty.dormant ? " · Dormant faculty" : ""}`;
     button.setAttribute("aria-pressed", String(selected));
     button.setAttribute(
@@ -607,10 +614,7 @@ function renderState() {
         ? "VERIFIED CHAIN"
         : "CHAIN NEEDS REVIEW"
       : "UNPAIRED";
-  $("conversationTitle").textContent =
-    paired && agent
-      ? `${agent.name || "Your agent"} · The next ring`
-      : "The next ring";
+  $("currentBlockHeight").textContent = blockHeight(agent, paired);
   $("chainNote").textContent = agent
     ? "Your history belongs to this agent.\nSwitch models without resetting it."
     : "One identity. Across models.\nEvery accepted turn, a new ring.";
@@ -669,6 +673,7 @@ function renderState() {
   if (state.gate?.threshold)
     $("thresholdNote").textContent =
       `Every fruitage must meet the server-enforced minimum (${state.gate.threshold}/255), alongside native PoI acceptance. This workspace does not execute model-supplied commands or tools.`;
+  renderHoldingsControls();
 }
 function renderConversation() {
   const messages = conversations.get(agentId()) || [];
@@ -812,6 +817,12 @@ document.querySelectorAll("dialog").forEach((dialog) =>
 $("pairButton").addEventListener("click", () => openDialog("pairDialog"));
 function clearLocalSession() {
   chatController?.abort();
+  walletController?.abort();
+  walletWatch?.close();
+  walletWatch = null;
+  currentLicense = null;
+  walletRevoked = true;
+  licenseRevision++;
   token = "";
   pendingAction = null;
   state = {
@@ -828,6 +839,7 @@ function clearLocalSession() {
   $("messageInput").value = "";
   $("packJson").value = "";
   $("packFile").value = "";
+  renderLicense(null);
   renderState();
   renderConversation();
   activity("Bridge disconnected. Pair again to continue your saved Timechain.");
@@ -875,6 +887,7 @@ $("pairForm").addEventListener("submit", (event) => {
     token = result.token;
     $("pairCode").value = "";
     applyState(await api("/api/state"));
+    await refreshLicense();
     closeDialog("pairDialog");
     toast("Local bridge paired.");
     try {
@@ -919,8 +932,12 @@ $("existingForm").addEventListener("submit", (event) => {
       await api("/api/agents/pair", { root: $("existingRoot").value.trim() }),
     );
     closeDialog("existingDialog");
-    toast("Existing Timechain verified and paired.");
-    if (!state.provider?.configured) openModel();
+    if (hasHoldingsAccess()) {
+      toast("Existing Timechain verified and paired.");
+      if (!state.provider?.configured) openModel();
+    } else {
+      toast("Timechain paired. Verify CPHY holdings to enable chat.");
+    }
   });
 });
 $("agentSelectButton").addEventListener("click", () =>
@@ -933,6 +950,7 @@ function openModel() {
   $("baseUrl").value = provider.baseUrl || "";
   $("apiKey").value = "";
   updateProviderPlaceholder();
+  renderHoldingsControls();
   openDialog("modelDialog");
 }
 $("modelButton").addEventListener("click", () => requirePair(openModel));
@@ -1000,6 +1018,10 @@ $("chatForm").addEventListener("submit", async (event) => {
     openModel();
     return;
   }
+  try { await ensureHoldings(); } catch (error) {
+    toast(error.message, true);
+    return;
+  }
   requestBusy = true;
   const chatSession = token;
   chatController = new AbortController();
@@ -1052,7 +1074,7 @@ $("chatForm").addEventListener("submit", async (event) => {
   } finally {
     chatController = null;
     requestBusy = false;
-    $("sendButton").disabled = false;
+    renderHoldingsControls();
     $("messageInput").disabled = false;
     $("messageInput").focus();
     await refreshState();
@@ -1205,6 +1227,7 @@ $("saveFork").addEventListener("click", () => {
         error.message;
     } finally {
       button.disabled = false;
+      renderHoldingsControls();
     }
   })();
 });
@@ -1276,6 +1299,7 @@ $("flushContinuum").addEventListener("click", () => {
         error.message;
     } finally {
       button.disabled = false;
+      renderHoldingsControls();
     }
   })();
 });
@@ -1587,7 +1611,7 @@ function renderPackPreview(result) {
   packReportList(panel, "Errors", report.errors, "Invalid pack");
   const ready = (report.imported?.length || 0) > 0 && !report.errors?.length;
   $("importPackButton").classList.remove("hidden");
-  $("importPackButton").disabled = !ready;
+  $("importPackButton").disabled = !ready || !hasHoldingsAccess();
   if (!ready)
     panel.append(
       el(
@@ -1744,7 +1768,7 @@ $("importPackButton").addEventListener("click", async () => {
     if (["STALE_HEAD", "PREVIEW_STALE"].includes(error.code)) {
       packPreviewState = null;
       button.disabled = true;
-    } else button.disabled = false;
+    } else button.disabled = !hasHoldingsAccess();
   }
 });
 $("selectAllExport").addEventListener("click", () => {
@@ -1786,148 +1810,205 @@ $("exportPackForm").addEventListener("submit", (event) => {
   });
 });
 let licenseDeployment = null,
-  licenseMethods = {},
   currentLicense = null,
-  walletBusy = false;
+  walletBusy = false,
+  licensePolling = false,
+  walletWatch = null,
+  walletController = null,
+  walletRevoked = false,
+  licenseRevision = 0;
+
+function hasHoldingsAccess() {
+  if (!token || !currentLicense?.identityVerified ||
+      !matchingConfiguration(licenseDeployment, currentLicense.configuration)) return false;
+  if (!licenseDeployment.required && currentLicense.status === "local-test-mode") return true;
+  if (walletRevoked) return false;
+  return currentLicense.status === "active" &&
+    currentLicense.session?.expiresAt > Date.now() &&
+    currentLicense.verification?.expiresAt > Date.now();
+}
 function licenseMessage(info) {
-  if (!info?.paymentsOpen)
-    return "Local beta testing is open. Payments are not open; do not send CPHY directly.";
-  if (info.status === "verification-unavailable")
-    return "Activation could not be verified. Check your network and try again; do not pay again.";
-  if (info.status === "choose-owner")
-    return "Enter the seat owner's public wallet address to check an existing seat, or purchase a new seat with your wallet.";
-  if (info.status === "active")
-    return `Instance active. Seat ${info.verification?.seatId || "verified"}; Base L2 confirmation is provisional.`;
-  return "This bridge has no active paid seat. Purchase one or rebind a seat owned by your wallet.";
+  if (!token) return "Pair your local bridge, then verify at least 21,000 CPHY held on Base.";
+  if (info?.status === "local-test-mode") return "Local test configuration: holdings enforcement is disabled.";
+  if (info?.status === "verification-unavailable")
+    return "Holdings could not be verified. New operations are paused; your saved history remains available.";
+  if (info?.status === "session-expired" || (info?.session && info.session.expiresAt <= Date.now()))
+    return "Your wallet sign-in has expired. Verify holdings again to continue.";
+  if (info?.status === "insufficient-balance")
+    return "This wallet holds less than 21,000 CPHY. New operations are paused; your saved history remains available.";
+  if (info?.status === "active" && hasHoldingsAccess())
+    return "Holdings verified. Keep at least 21,000 CPHY in this wallet while using ChainChat.";
+  if (info?.status === "active") return "Your balance verification needs a refresh. Recheck before continuing.";
+  return "Connect your wallet on Base and sign in to verify at least 21,000 CPHY. Your tokens stay yours.";
+}
+function renderHoldingsControls() {
+  const active = hasHoldingsAccess(), blocked = !!token && !active;
+  $("modelHoldingsNotice").classList.toggle("hidden", !blocked);
+  $("sendButton").disabled = requestBusy || blocked;
+  $("newAgentButton").disabled = blocked;
+  for (const selector of ['#genesisForm button[type="submit"]', '#modelForm button[type="submit"]',
+    '#continuumForm button[type="submit"]', '#ingestForm button[type="submit"]', '#saveFork', '#flushContinuum']) {
+    const control = document.querySelector(selector);
+    if (control) control.disabled = blocked || requestBusy;
+  }
+  $("recallAbility").disabled = blocked;
+  document.querySelectorAll(".faculty-card").forEach((card) => {
+    if (card.tagName === "BUTTON") card.disabled = blocked;
+  });
+  if (blocked) $("importPackButton").disabled = true;
+  $("holdingsPrompt").classList.toggle("verified", active);
+  $("holdingsPromptLabel").textContent = active
+    ? "CPHY holdings verified · your tokens remain in your wallet"
+    : token ? "Verify at least 21,000 CPHY to enable new operations" : "Hold 21,000 CPHY on Base to use ChainChat";
+  $("holdingsPromptAction").textContent = active ? "View access ↗" : "Verify holdings ↗";
+  $("sendButton").title = blocked ? "Verify your CPHY holdings to send a message" : "Send message";
 }
 function renderLicense(info) {
   currentLicense = info;
   $("licenseDeviceKey").value = info?.deviceKey || "";
-  if (info?.selectedOwner) $("licenseOwner").value = info.selectedOwner;
-  $("licenseStatus").textContent = licenseMessage(info);
-  $("licenseSummary").textContent = licenseMessage(info);
-  let enabled = false;
-  try {
-    validateDeployment(licenseDeployment);
-    enabled = Boolean(
-      info?.identityVerified &&
-        info.paymentsOpen &&
-        info.deviceKey &&
-        info.status !== "verification-unavailable" &&
-        matchingConfiguration(licenseDeployment, info.configuration),
-    );
-    if (
-      info?.paymentsOpen &&
-      !matchingConfiguration(licenseDeployment, info.configuration)
-    )
-      $("licenseError").textContent =
-        "The website and bridge have different license settings. Update the bridge before paying.";
-  } catch {}
-  $("purchaseSeatsButton").disabled = !enabled || walletBusy;
-  $("rotateSeatButton").disabled = !enabled || walletBusy;
-  $("purchaseSeatsButton").textContent = enabled
-    ? "Review purchase in wallet"
-    : info?.paymentsOpen
-      ? "Activation check required"
-      : "Payments are not open";
-  updateSeatTotal();
+  $("licenseOwner").value = info?.identityVerified ? info.selectedOwner || "" : "";
+  const status = licenseMessage(info);
+  $("licenseStatus").textContent = status;
+  $("licenseSummary").textContent = status;
+  $("holdingsBalance").textContent = info?.identityVerified
+    ? formatTokenBalance(info.verification?.balance) : "—";
+  $("holdingsChecked").textContent = info?.identityVerified && info.verification?.checkedAt
+    ? new Date(info.verification.checkedAt).toLocaleTimeString() : "Not verified";
+  $("holdingsExpiry").textContent = info?.identityVerified && info.session?.expiresAt
+    ? `Sign-in expires ${new Date(info.session.expiresAt).toLocaleTimeString()}` : "Sign in to begin a session";
+  const matched = !!(info?.identityVerified && matchingConfiguration(licenseDeployment, info.configuration));
+  $("verifyHoldingsButton").disabled = !token || !matched || walletBusy || !licenseDeployment?.required;
+  $("checkLicenseButton").disabled = !token || !info?.session || walletBusy;
+  $("logoutHoldingsButton").disabled = !token || !info?.session || walletBusy;
+  if (info?.identityVerified && !matched)
+    $("licenseError").textContent = "This website and local bridge use different holdings settings. Install the matching ChainChat bridge release.";
+  renderHoldingsControls();
 }
-async function readLicense(owner) {
-  const challenge = [...crypto.getRandomValues(new Uint8Array(32))]
-    .map((n) => n.toString(16).padStart(2, "0"))
-    .join("");
-  const info = await api("/api/license/check", {
-    challenge,
-    ...(owner ? { owner } : {}),
-  });
+async function readLicense() {
+  const challenge = freshChallenge(), sessionToken = token, revision = licenseRevision;
+  const info = await api("/api/license/check", { challenge });
   await verifyBridgeIdentity(info, challenge, location.origin);
+  if (!sessionToken || token !== sessionToken || revision !== licenseRevision)
+    throw new Error("The bridge or wallet session changed during verification. Verify again.");
+  if (!matchingConfiguration(licenseDeployment, info.configuration))
+    throw new Error("The website and local bridge have different holdings settings. Install the matching ChainChat release.");
+  if (walletRevoked && info.session)
+    throw new Error("This wallet sign-in was revoked. Sign out and verify holdings again.");
+  if (info.session && walletWatch) await walletWatch.check(info.selectedOwner);
+  if (token !== sessionToken || revision !== licenseRevision)
+    throw new Error("The wallet session changed during verification. Verify again.");
   return { ...info, identityVerified: true };
+}
+async function refreshLicense() {
+  if (!token || licensePolling || walletBusy) return;
+  licensePolling = true;
+  const revision = licenseRevision, sessionToken = token;
+  try {
+    const info = await readLicense();
+    if (revision === licenseRevision && sessionToken === token) renderLicense(info);
+  } catch (error) {
+    if (revision === licenseRevision && sessionToken === token) {
+      renderLicense(currentLicense ? { ...currentLicense, identityVerified: false, status: "verification-unavailable" } : null);
+      $("licenseError").textContent = error.message;
+    }
+  } finally { licensePolling = false; }
+}
+async function ensureHoldings() {
+  if (hasHoldingsAccess() && walletWatch) await walletWatch.check(currentLicense.selectedOwner);
+  if (hasHoldingsAccess()) return;
+  await refreshLicense();
+  if (hasHoldingsAccess()) return;
+  openDialog("licenseDialog");
+  throw new Error("Verify a wallet holding at least 21,000 CPHY before starting a new operation. Your saved history remains available.");
 }
 async function showLicense() {
   openDialog("licenseDialog");
-  $("licenseError").textContent = "";
-  try {
-    renderLicense(await readLicense());
-  } catch (error) {
-    $("licenseError").textContent = error.message;
+  await refreshLicense();
+}
+async function invalidateWalletSession(message = "Wallet account or network changed. Verify holdings again.") {
+  licenseRevision++;
+  walletRevoked = true;
+  walletController?.abort();
+  walletWatch?.close();
+  walletWatch = null;
+  chatController?.abort();
+  renderLicense(null);
+  $("licenseStatus").textContent = message;
+  $("licenseSummary").textContent = message;
+  const sessionToken = token;
+  if (sessionToken) {
+    try {
+      await api("/api/license/logout", {});
+      if (token === sessionToken) await refreshLicense();
+    } catch {
+      $("licenseError").textContent = "Could not confirm wallet sign-out with the bridge. End the bridge session or stop the local bridge before reconnecting.";
+    }
   }
 }
-$("licenseButton").addEventListener("click", () => requirePair(showLicense));
+for (const id of ["licenseButton", "holdingsPrompt"])
+  $(id).addEventListener("click", () => requirePair(showLicense));
+$("modelVerifyHoldings").addEventListener("click", () => {
+  closeDialog("modelDialog");
+  requirePair(showLicense);
+});
 $("loadAuditor").addEventListener("click", () => {
   $("auditFrame").src = "./audit/";
   $("auditFrame").classList.remove("hidden");
   $("loadAuditor").classList.add("hidden");
 });
-function updateSeatTotal() {
-  const count =
-    (currentLicense?.status === "active" ? 0 : 1) +
-    $("additionalDeviceKeys").value.trim().split(/\s+/).filter(Boolean).length;
-  $("seatPurchaseTotal").textContent =
-    `${count} instance${count === 1 ? "" : "s"} / ${(count * 21000).toLocaleString()} CPHY`;
-}
-$("additionalDeviceKeys").addEventListener("input", updateSeatTotal);
-$("checkLicenseButton").addEventListener("click", async () => {
-  $("checkLicenseButton").disabled = true;
-  $("licenseError").textContent = "";
-  try {
-    renderLicense(await readLicense($("licenseOwner").value.trim()));
-  } catch (error) {
-    $("licenseError").textContent = error.message;
-  } finally {
-    $("checkLicenseButton").disabled = false;
-  }
-});
-async function walletAction(action) {
-  if (walletBusy) return;
+$("checkLicenseButton").addEventListener("click", refreshLicense);
+$("logoutHoldingsButton").addEventListener("click", () => invalidateWalletSession("Wallet signed out. Your saved Timechain remains available."));
+$("verifyHoldingsButton").addEventListener("click", async () => {
+  if (walletBusy || !token) return;
   walletBusy = true;
+  walletController = new AbortController();
+  const sessionToken = token, revision = ++licenseRevision;
+  walletRevoked = true;
+  walletWatch?.close();
+  walletWatch = null;
   renderLicense(currentLicense);
   $("licenseError").textContent = "";
   try {
-    const result = await action((text) => {
-      $("licenseStatus").textContent = text;
+    await api("/api/license/logout", {});
+    if (token !== sessionToken || revision !== licenseRevision)
+      throw new Error("The bridge changed before wallet sign-in. Verify again.");
+    const info = await verifyHoldingsWithWallet({
+      wallet: window.ethereum,
+      config: licenseDeployment,
+      origin: location.origin,
+      deviceKey: currentLicense?.deviceKey,
+      api: (path, data) => {
+        if (token !== sessionToken) throw new Error("The bridge session changed during wallet verification.");
+        return api(path, data);
+      },
+      signal: walletController.signal,
+      report: (text) => { $("licenseStatus").textContent = text; },
+      onInvalidated: () => { void invalidateWalletSession(); },
     });
-    $("licenseOwner").value = result.owner;
-    renderLicense(await readLicense(result.owner));
-    $("licenseStatus").textContent =
-      `Transaction included on Base: ${result.hash}. Wait for two confirmations, then choose Check activation.`;
+    if (token !== sessionToken || revision !== licenseRevision)
+      throw new Error("The bridge or wallet changed during sign-in. Verify again.");
+    walletWatch = watchWallet(window.ethereum, () => { void invalidateWalletSession(); });
+    await walletWatch.check(info.selectedOwner);
+    if (token !== sessionToken || revision !== licenseRevision)
+      throw new Error("The bridge or wallet changed during sign-in. Verify again.");
+    walletRevoked = false;
+    renderLicense(info);
+    if (info.status === "active") toast("CPHY holdings verified. Your tokens remain in your wallet.");
   } catch (error) {
-    $("licenseError").textContent =
-      error.message || "Wallet request could not complete.";
+    if (sessionToken === token) {
+      walletRevoked = true;
+      walletWatch?.close();
+      walletWatch = null;
+      await api("/api/license/logout", {}).catch(() => {});
+      currentLicense = currentLicense ? { ...currentLicense, identityVerified: false } : null;
+      $("licenseError").textContent = error.message || "Wallet verification could not complete.";
+    }
   } finally {
     walletBusy = false;
-    const pendingStatus = $("licenseStatus").textContent;
+    walletController = null;
     renderLicense(currentLicense);
-    $("licenseStatus").textContent = pendingStatus;
+    await refreshLicense();
   }
-}
-$("purchaseSeatsForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const keys = [
-    ...(currentLicense?.status === "active" ? [] : [currentLicense?.deviceKey]),
-    ...$("additionalDeviceKeys").value.trim().split(/\s+/).filter(Boolean),
-  ];
-  walletAction((report) =>
-    purchaseBoundSeats({
-      config: licenseDeployment,
-      methods: licenseMethods,
-      wallet: window.ethereum,
-      keys,
-      report,
-    }),
-  );
-});
-$("rotateSeatForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  walletAction((report) =>
-    rebindSeat({
-      config: licenseDeployment,
-      methods: licenseMethods,
-      wallet: window.ethereum,
-      seatId: $("rotateSeatId").value.trim(),
-      key: currentLicense?.deviceKey,
-      report,
-    }),
-  );
 });
 async function start() {
   initMotifs();
@@ -1937,27 +2018,19 @@ async function start() {
   $("bridgePort").value = selectedBridgePort;
   $("hostedOrigin").textContent = location.origin;
   try {
-    const [config, registry] = await Promise.all([
-      fetch("./license-config.json", {
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-      }).then((r) => r.json()),
-      fetch("./seat-registry.json", {
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-      }).then((r) => r.json()),
-    ]);
-    licenseDeployment = config;
-    licenseMethods = registry.methodIdentifiers || {};
-    $("licenseSummary").textContent = config.required
-      ? "Pair a local bridge to check its paid instance. One seat costs 21,000 CPHY on Base."
-      : "Local beta testing is open. Paid activation is not open yet.";
+    const response = await fetch("./license-config.json", {
+      cache: "no-store", credentials: "omit", redirect: "error",
+    });
+    if (!response.ok) throw new Error("Holdings configuration unavailable.");
+    licenseDeployment = validateHoldingsConfig(await response.json());
+    renderLicense(null);
   } catch {
-    $("licenseSummary").textContent =
-      "Payment configuration unavailable. Do not send tokens.";
+    $("licenseSummary").textContent = "Holdings configuration unavailable. Update ChainChat before connecting your wallet.";
   }
+  setInterval(() => {
+    if (token && currentLicense?.session && !walletBusy) void refreshLicense();
+    renderHoldingsControls();
+  }, 20000);
   try {
     const response = await fetch("/catalogue.json", { cache: "no-store" });
     const data = await response.json();

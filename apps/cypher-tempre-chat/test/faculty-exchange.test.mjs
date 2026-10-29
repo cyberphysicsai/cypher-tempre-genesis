@@ -77,6 +77,7 @@ async function fixture(t, options = {}) {
   );
   const reviews = [];
   const app = await createApp({
+    licenseConfig: { mode: "holdings", required: false },
     dataDir,
     pairingCode: "FACULTY-TEST",
     generate: async () => ({
