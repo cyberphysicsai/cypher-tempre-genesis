@@ -52,6 +52,27 @@ const DIMENSIONS = [
 const err = (message, code = "INVALID_REQUEST", status = 400) =>
   Object.assign(new Error(message), { code, status });
 const bytes = (value) => Buffer.byteLength(JSON.stringify(value), "utf8");
+// Match portable_faculties.MAX_BYTES; the HTTP envelope has its own larger cap.
+const MAX_FACULTY_PACK_BYTES = 4 * 1024 * 1024;
+function optionalControlReason(input) {
+  if (input.reason === undefined) return undefined;
+  if (typeof input.reason !== "string" || input.reason.length > 4096)
+    throw err("Control purpose must be at most 4096 characters.");
+  return input.reason.trim() || undefined;
+}
+function replayRingFor(exchange) {
+  if (exchange.replayed === true && Number.isSafeInteger(exchange.replayRing) && exchange.replayRing >= 0)
+    return exchange.replayRing;
+  // Earlier pending blocks stored the ring index directly in replayed.
+  return Number.isSafeInteger(exchange.replayed) && exchange.replayed >= 0 ? exchange.replayed : null;
+}
+function reviewedControl(preview, inspected) {
+  if (typeof preview?.reviewAction?.input !== "string" || typeof preview?.reviewAction?.output !== "string" ||
+      !Array.isArray(preview.availableEvidence) || !Array.isArray(preview.recentHistory))
+    throw err("The native control preview returned no complete reviewable action.", "CONTROL_PROTOCOL", 422);
+  return { prepared: { ...inspected, availableEvidence: preview.availableEvidence, recentHistory: preview.recentHistory },
+    input: preview.reviewAction.input, output: preview.reviewAction.output };
+}
 const chainIdentity = root => process.platform === "win32" ? path.resolve(root).toLowerCase() : path.resolve(root);
 function utf8Parts(source, targetBytes) {
   const raw = Buffer.from(source, "utf8");
@@ -433,6 +454,7 @@ export async function createApp(options = {}) {
       settings: record?.settings || validateSettings({}),
       cognition: controlFor(record, inspected),
       faculties: inspected?.faculties || [],
+      operatorCompatibility: inspected?.operatorCompatibility || null,
       capabilities: CAPABILITIES,
       activity: record ? activityFor(session, record).snapshot() : null,
       pending: {
@@ -448,6 +470,11 @@ export async function createApp(options = {}) {
             pending: true,
             gate: describeGate(e.assessment),
             perspectives: e.perspectives,
+            search: e.search,
+            facultyExecution: e.facultyExecution,
+            replayed: e.replayed === true || replayRingFor(e) !== null,
+            replayRing: replayRingFor(e),
+            revisions: Number.isSafeInteger(e.revisions) ? e.revisions : 0,
             model: e.model,
           })),
       },
@@ -584,13 +611,14 @@ export async function createApp(options = {}) {
     if (cognitionFor(record).learning) {
       for (const exchange of pending.exchanges) {
         if (requestSession.getStore()?.signal?.aborted) break;
-        const labels = exchange.semanticLabels;
-        if (!labels || !(labels.senses?.length || labels.modalities?.length || Number.isSafeInteger(exchange.replayed))) continue;
+        const labels = exchange.semanticLabels || {};
+        const replayRing = replayRingFor(exchange);
+        if (!(labels.senses?.length || labels.modalities?.length || replayRing !== null)) continue;
         try {
           const feedback = await engine({ op: "teach", root: record.root, expectedHead: result.head?.hash || ringHash,
             input: exchange.input, output: exchange.output, scores: exchange.scores, assessment: exchange.assessment,
             usedRings: exchange.usedRings, loadout: exchange.loadout, labels, learning: true,
-            ...(Number.isSafeInteger(exchange.replayed) ? { replay: { action: "accept", ring: exchange.replayed } } : {}) });
+            ...(replayRing !== null ? { replay: { action: "accept", ring: replayRing } } : {}) });
           if (feedback.extractorTaught) result.learning.taught++;
         } catch {
           result.learning.held++;
@@ -630,13 +658,15 @@ export async function createApp(options = {}) {
             context.signal = controller.signal; controller.agentRoot = record.root; context.session.controllers.add(controller);
             try {
               const operation = { op: "maintenance", action: "dream", root: record.root,
-                expectedHead: inspected.head.hash, learning: true };
-              const preview = await engine({ ...operation, preview: true });
-              const assessment = await assess(providerFor(context.session), { ...inspected, availableEvidence: [] },
-                "Review this local agent control action: " + preview.plan.description,
-                JSON.stringify(preview.plan), [], controller.signal, []);
+                expectedHead: inspected.head.hash, learning: true,
+                reason: "Automatic consolidation explicitly enabled by the user in ChainChat" };
+              const preview = await engine({ ...operation, preview: true, confirmed: true });
+              const reviewable = reviewedControl(preview, inspected);
+              const assessment = await assess(providerFor(context.session), reviewable.prepared,
+                reviewable.input, reviewable.output, [], controller.signal);
               checkCancelled(controller.signal);
-              const result = await engine({ ...operation, confirmed: true, scores: assessment.scores, assessment });
+              const result = await engine({ ...operation, confirmed: true, scores: assessment.scores, assessment,
+                usedRings: assessment.usedRings });
               record.lastDreamHeight = result.head.index; await store.save();
             } finally { context.session.controllers.delete(controller); }
           });
@@ -841,7 +871,7 @@ export async function createApp(options = {}) {
           if (req.method === "GET" && url.pathname === "/api/cognition") {
             const current = await state(session);
             return send(200, { cognition: current.cognition, faculties: current.faculties,
-              capabilities: CAPABILITIES, state: current });
+              operatorCompatibility: current.operatorCompatibility, capabilities: CAPABILITIES, state: current });
           }
           if (req.method !== "POST") throw err("Not found.", "NOT_FOUND", 404);
           const input = await body(req);
@@ -958,6 +988,8 @@ export async function createApp(options = {}) {
             return send(200, { requested: true, activity: activityFor(session, record).snapshot() });
           }
           if (url.pathname === "/api/cognition") {
+            const reason = optionalControlReason(input);
+            assertCredentialIsolation(session.provider, reason);
             let next;
             try { next = validateCognition(input, cognitionFor(record)); }
             catch (error) { throw err(error.message); }
@@ -969,7 +1001,7 @@ export async function createApp(options = {}) {
             if (!isPause) await requireHoldings();
             const identity = process.platform === "win32" ? record.root.toLowerCase() : record.root;
             if (isPause) {
-              const allowed = new Set(["mode", "confirm"]);
+              const allowed = new Set(["mode", "confirm", "reason"]);
               if (Object.keys(input).some(key => !allowed.has(key)))
                 throw err("Pause separately from other settings changes.");
               pausing.add(identity); cancelAgent(record);
@@ -985,7 +1017,7 @@ export async function createApp(options = {}) {
                 if (modeChange) {
                   await engine({ op: "dormancy", root: record.root,
                     action: next.mode === "dormant" ? "pause" : "resume", confirmed: true,
-                    expectedHead: inspected.head.hash, reason: "Deliberate user control in ChainChat" });
+                    expectedHead: inspected.head.hash, reason: reason || "Deliberate user control in ChainChat" });
                   for (const paired of sessions.values()) paired.rawHistory?.delete(record.id);
                 } else next.mode = inspected.runtime.mode;
                 if (next.autoDream && !cognitionFor(record).autoDream) record.lastDreamHeight = inspected.head.index;
@@ -999,6 +1031,8 @@ export async function createApp(options = {}) {
             return await exclusive(record, async () => {
               if (input.confirm === true && input.preview !== true) await requireHoldings();
               const lifecycle = url.pathname.endsWith("lifecycle");
+              const reason = optionalControlReason(input);
+              assertCredentialIsolation(session.provider, reason);
               const allowed = lifecycle ? ["promote", "hibernate", "wake"] : ["index", "dream", "train"];
               if (!allowed.includes(input.action)) throw err("Choose an available native action.");
               const inspected = await engine({ op: "inspect", root: record.root });
@@ -1008,8 +1042,9 @@ export async function createApp(options = {}) {
                 throw err("Enable learning before changing faculties or running maintenance.", "LEARNING_PAUSED", 409);
               const operation = { op: lifecycle ? "faculty_action" : "maintenance", root: record.root,
                 action: input.action, ...(lifecycle ? { key: text(input.key, "Faculty identifier", 256) } : {}),
-                expectedHead: inspected.head.hash, learning: cognitionFor(record).learning };
-              const preview = await engine({ ...operation, preview: true });
+                expectedHead: inspected.head.hash, learning: cognitionFor(record).learning,
+                ...(reason ? { reason } : {}) };
+              const preview = await engine({ ...operation, preview: true, ...(input.confirm === true ? { confirmed: true } : {}) });
               if (input.preview === true) return send(200, { ...preview, preview: true });
               if (input.confirm !== true) throw err("Confirm the displayed native action.", "CONFIRMATION_REQUIRED", 409);
               await requireHoldings();
@@ -1018,10 +1053,9 @@ export async function createApp(options = {}) {
               requestSession.getStore().signal = controller.signal;
               res.once("close", () => { session.controllers.delete(controller); if (!res.writableEnded) controller.abort(); });
               try {
-                const description = JSON.stringify(preview.plan || { action: input.action, key: input.key });
-                const prepared = { ...inspected, availableEvidence: [], recentHistory: [] };
-                const assessment = await assess(config, prepared, "Review this local agent control action: " + preview.plan.description,
-                  description, [], controller.signal, []);
+                const reviewable = reviewedControl(preview, inspected);
+                const assessment = await assess(config, reviewable.prepared, reviewable.input,
+                  reviewable.output, [], controller.signal);
                 checkCancelled(controller.signal);
                 const changed = await engine({ ...operation, confirmed: true, scores: assessment.scores,
                   assessment, usedRings: assessment.usedRings });
@@ -1041,9 +1075,9 @@ export async function createApp(options = {}) {
               Array.isArray(input.pack)
             )
               throw err("Select a faculty pack JSON object.");
-            if (bytes(input.pack) > 262144)
+            if (bytes(input.pack) > MAX_FACULTY_PACK_BYTES)
               throw err(
-                "Faculty packs must be at most256 KiB.",
+                "Faculty packs must be at most 4 MiB.",
                 "PACK_TOO_LARGE",
                 413,
               );
@@ -1059,6 +1093,8 @@ export async function createApp(options = {}) {
             );
           }
           if (url.pathname === "/api/faculties/export") {
+            if (input.legacy !== undefined && typeof input.legacy !== "boolean")
+              throw err("Legacy export must be explicitly on or off.");
             if (
               !Array.isArray(input.keys) ||
               !input.keys.length ||
@@ -1071,19 +1107,19 @@ export async function createApp(options = {}) {
               "Pack name",
               100,
             );
-            return await exclusive(record, async () =>
-              send(
-                200,
-                await engine({
+            return await exclusive(record, async () => {
+                const exported = await engine({
                   op: "pack_export",
                   root: record.root,
                   keys: input.keys,
                   name,
                   version: input.version || "1.0.0",
                   domain: input.domain || "",
-                }),
-              ),
-            );
+                  legacy: input.legacy === true,
+                });
+                assertCredentialIsolation(session.provider, exported);
+                return send(200, exported);
+            });
           }
           if (url.pathname === "/api/faculties/import")
             return await exclusive(record, async () => {
@@ -1093,9 +1129,9 @@ export async function createApp(options = {}) {
                 Array.isArray(input.pack)
               )
                 throw err("Select a faculty pack JSON object.");
-              if (bytes(input.pack) > 262144)
+              if (bytes(input.pack) > MAX_FACULTY_PACK_BYTES)
                 throw err(
-                  "Faculty packs must be at most256 KiB.",
+                  "Faculty packs must be at most 4 MiB.",
                   "PACK_TOO_LARGE",
                   413,
                 );
@@ -1153,10 +1189,12 @@ export async function createApp(options = {}) {
               const config = providerFor(session);
               if (
                 typeof preview.action?.input !== "string" ||
-                typeof preview.action?.output !== "string"
+                typeof preview.action?.output !== "string" ||
+                ((Object.hasOwn(input.pack, "interaction_portability") || preview.planHash !== undefined) &&
+                  (typeof preview.planHash !== "string" || !/^[a-f0-9]{64}$/i.test(preview.planHash)))
               )
                 throw err(
-                  "The pack preview returned no reviewable action.",
+                  "The pack preview returned no complete reviewable action and plan digest.",
                   "PACK_PROTOCOL",
                   422,
                 );
@@ -1191,6 +1229,7 @@ export async function createApp(options = {}) {
                 root: record.root,
                 pack: input.pack,
                 expectedHead: preview.head.hash,
+                planHash: preview.planHash,
                 scores: assessment.scores,
                 assessment,
                 usedRings: assessment.usedRings,
@@ -1447,11 +1486,15 @@ export async function createApp(options = {}) {
               for (;;) {
                 checkCancelled(signal);
                 try {
-                  assessment = await assess(config, prepared, message, candidate, perspectives, signal, conversation);
-                  if (replayed && !assessment.usedRings.includes(route.antecedent.ring))
-                    throw err("Replay was not grounded by the current reviewer.", "REPLAY_UNSUPPORTED", 422);
-                  native = await nativeEvaluation(record, prepared, { input: message, output: candidate,
-                    assessment, scores: assessment.scores, usedRings: assessment.usedRings, perspectives });
+                  const evaluateCandidate = async () => {
+                    assessment = await assess(config, prepared, message, candidate, perspectives, signal, conversation);
+                    if (replayed && !assessment.usedRings.includes(route.antecedent.ring))
+                      throw err("Replay was not grounded by the current reviewer.", "REPLAY_UNSUPPORTED", 422);
+                    native = await nativeEvaluation(record, prepared, { input: message, output: candidate,
+                      assessment, scores: assessment.scores, usedRings: assessment.usedRings, perspectives });
+                  };
+                  if (replayed) await trace.step("replay", "Review recalled answer", evaluateCandidate);
+                  else await evaluateCandidate();
                   break;
                 } catch (error) {
                   if (replayed && ["REPLAY_UNSUPPORTED", "POI_REJECTED", "COVENANT_REJECTED", "SPAN_GUARD"].includes(error.code)) {
@@ -1488,8 +1531,9 @@ export async function createApp(options = {}) {
                 timestamp: new Date().toISOString(),
                 groundingContext: prepared.context,
                 loadout: keys(record.loadout),
-                ...(cognition.supported ? { semanticLabels: plan?.labels || null,
-                  replayed: replayed ? route.antecedent.ring : null, search } : {}),
+                facultyExecution: prepared.facultyExecution,
+                replayed, replayRing: replayed ? route.antecedent.ring : null, revisions,
+                ...(cognition.supported ? { semanticLabels: plan?.labels || null, search } : {}),
                 released: false,
               };
               if (signal.aborted)
@@ -1533,7 +1577,8 @@ export async function createApp(options = {}) {
                 }),
                 perspectives: exchange.perspectives,
                 blockedPerspectives: blocked,
-                search, replayed, revisions,
+                search, replayed, replayRing: exchange.replayRing, revisions,
+                facultyExecution: exchange.facultyExecution,
                 learning: committed?.learning || null,
               };
               return send(200, {

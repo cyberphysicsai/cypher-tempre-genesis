@@ -11,6 +11,8 @@ import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersi
 import {
   DEFAULT_COGNITION, normalizeCognition, normalizeActivity,
   abilityIndicators, facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
+  activityLineState, pollWithDeadline, routeControlState, reviewReceipt, facultyExecutionView, portabilityView,
+  operatorCompatibilityView, facultyIsExportable,
 } from "./cognition-display.js";
 import {
   bridgeApiUrl,
@@ -329,6 +331,7 @@ function applyState(result) {
   const incomingId = next.agent?.id || next.agent?.root;
   if (incomingId && incomingId !== agentId()) {
     delete state.faculties;
+    delete state.operatorCompatibility;
     state.cognition = { ...DEFAULT_COGNITION };
     lifecycleSelection = null;
     runtimeActivity = null;
@@ -348,6 +351,7 @@ function applyState(result) {
   if (next.cognition) state.cognition = normalizeCognition(next.cognition);
   if (next.faculties) state.faculties = next.faculties;
   else if (next.agent?.faculties) state.faculties = next.agent.faculties;
+  if (next.operatorCompatibility) state.operatorCompatibility = next.operatorCompatibility;
   renderState();
 }
 async function refreshState() {
@@ -410,8 +414,9 @@ function renderCognition() {
   $("gateStatus").textContent = dormant && paired ? "PAUSED" : held ? "CHAIN HELD" : "ACTIVE WITH CHAIN";
   $("gateAbility").classList.toggle("active", paired && !dormant);
   $("gateAbility").classList.toggle("locked", !dormant);
-  $("routeAbility").classList.toggle("active", paired && !dormant && current.autoRoute);
-  $("routeStatus").textContent = dormant ? "PAUSED" : current.autoRoute ? "AUTOMATIC" : "OFF";
+  const route = routeControlState(current, settings().recall);
+  $("routeAbility").classList.toggle("active", paired && route.enabled);
+  $("routeStatus").textContent = route.label;
   $("learningAbility").classList.toggle("active", paired && !dormant && current.learning);
   $("learningStatus").textContent = dormant ? "PAUSED" : current.learning ? "ENABLED" : "OFF · HISTORY ON";
   $("dreamAbility").classList.toggle("active", paired && !dormant && current.learning && current.autoDream);
@@ -434,7 +439,26 @@ function renderCognition() {
     $("loadoutAbility").querySelector(".slot-status").textContent = "LOADOUT SAVED";
   }
   $("sessionTag").textContent = paired && dormant ? "PLAIN CHAT · CHAIN PAUSED" : $("sessionTag").textContent;
+  renderOperatorCompatibility();
   renderRuntimeActivity();
+}
+
+function renderOperatorCompatibility() {
+  const panel = $("operatorCompatibility"), view = operatorCompatibilityView(state.operatorCompatibility);
+  panel.replaceChildren();
+  panel.append(el("div", "section-caption", "LOCAL OPERATOR COMPATIBILITY"));
+  if (!view) {
+    panel.append(el("p", "fine-print", "Pair or refresh your agent to inspect its local operator module. No browser action can approve authored code."));
+    return;
+  }
+  panel.append(el("strong", "", `${view.source} · ${view.label}`));
+  if (view.reason) panel.append(el("p", "fine-print", view.reason));
+  if (view.sha256) panel.append(el("p", "fine-print", "Detected module SHA-256"), el("code", "operator-digest", view.sha256));
+  if (view.environmentSha256) panel.append(el("p", "fine-print", "Environment SHA-256"), el("code", "operator-digest", view.environmentSha256));
+  if (view.declaredNames.length) panel.append(el("p", "fine-print", `Declared operators: ${view.declaredNames.join(", ")}`));
+  if (view.available) panel.append(el("p", "quarantine-note", "Locally approved code executes under your operating-system permissions. It is not sandboxed. Inspect the code and its dependencies before approving the exact digest in your local terminal."));
+  if (view.notice) panel.append(el("p", "fine-print", view.notice));
+  if (view.command) panel.append(el("p", "fine-print", "Companion CLI instructions · replace the agent-directory placeholder after review:"), el("code", "operator-command", view.command));
 }
 
 function renderRuntimeActivity() {
@@ -455,12 +479,12 @@ function renderRuntimeActivity() {
   $("cancelTurn").disabled = stoppingBusy;
   const events = runtimeActivity?.events || [];
   const last = events.at(-1);
+  const mainStatus = activityLineState(runtimeActivity, { paired, fresh, requestBusy });
   $("monitorStage").textContent = !paired ? "Pair a Timechain to see its actual runtime stages."
     : !fresh ? "Live activity is unavailable. No ability is shown as running until the bridge confirms it."
-      : running ? last?.label || runtimeActivity.stage || "Agent operation running"
+      : running ? mainStatus.text
         : last?.label || "Idle. Equipped abilities will light up when the bridge runs them.";
-  if (running) activity(last?.label || runtimeActivity.stage || "Agent operation running…", "busy");
-  else if (fresh && last && !requestBusy) activity(last.label || "Agent operation completed.", ["failed", "held"].includes(last.status) ? "error" : "");
+  if (mainStatus) activity(mainStatus.text, mainStatus.kind);
   const list = $("activityTimeline");
   list.replaceChildren();
   for (const event of events.slice(-30).reverse()) {
@@ -479,12 +503,12 @@ async function refreshActivity() {
   activityPolling = true;
   const sessionToken = token, id = agentId();
   try {
-    const result = await api("/api/activity");
+    const result = await pollWithDeadline(signal => api("/api/activity", undefined, { signal }));
     if (sessionToken !== token || id !== agentId()) return;
     const next = normalizeActivity(result.activity || result, id);
     if (!next || (runtimeActivity?.agentId === id && next.revision < runtimeActivity.revision)) return;
     runtimeActivity = next; activityReceivedAt = Date.now();
-  } catch { activityReceivedAt = 0; }
+  } catch { if (sessionToken === token && id === agentId()) activityReceivedAt = 0; }
   finally { activityPolling = false; renderRuntimeActivity(); }
 }
 
@@ -495,6 +519,8 @@ async function refreshCognition() {
   if (sessionToken !== token || id !== agentId()) return;
   state.cognition = normalizeCognition(result.cognition || result.state?.cognition);
   if (result.faculties) state.faculties = result.faculties;
+  const operatorCompatibility = result.operatorCompatibility || result.state?.operatorCompatibility;
+  if (operatorCompatibility) state.operatorCompatibility = operatorCompatibility;
   if (Array.isArray(result.capabilities)) capabilities = result.capabilities;
   renderState();
   renderLifecycle();
@@ -542,6 +568,9 @@ function isEquipped(faculty) {
 function renderFaculties() {
   const faculties = normalizeFaculties(),
     query = $("facultySearch").value.toLowerCase().trim();
+  const lastChainTurn = [...(conversations.get(agentId()) || historyMessages())].reverse()
+    .find(message => message.role === "assistant" && !message.held && !messageIsDormant(message));
+  const executions = facultyExecutionView(lastChainTurn?.facultyExecution);
   trackFacultyGrowth(faculties);
   const freshIds = newFacultyIds.get(agentId()) || new Set();
   const freshCount = faculties.filter(f => freshIds.has(facultyIdentity(f))).length;
@@ -555,9 +584,9 @@ function renderFaculties() {
   const equipped = state.agent ? faculties.filter(isEquipped).length : 0;
   $("equippedCount").textContent = equipped;
   $("facultyStatus").textContent = state.agent
-    ? `${equipped} EQUIPPED`
+    ? cognition().mode === "dormant" ? "LOADOUT SAVED" : `${equipped} EQUIPPED`
     : "LOADOUT";
-  $("loadoutAbility").classList.toggle("active", equipped > 0);
+  $("loadoutAbility").classList.toggle("active", equipped > 0 && cognition().mode !== "dormant");
   $("catalogueStatus").textContent = state.agent
     ? "LIVE AGENT\nCATALOGUE"
     : "BASE\nCATALOGUE";
@@ -565,6 +594,7 @@ function renderFaculties() {
     ? cognition().mode === "dormant" ? "Timechain is paused. Equipped faculties are saved for when you resume."
       : "Your live catalogue refreshes as this agent learns. New faculties wait for your equipment choice."
     : "Your catalogue grows as your agent learns. Pair a chain to equip faculties.";
+  if (executions.length) $("growthNote").textContent += " Receipt badges describe the last chain turn; equipped does not mean running.";
   const list = $("facultyList");
   list.replaceChildren();
   const shown = faculties
@@ -580,6 +610,7 @@ function renderFaculties() {
   }
   for (const faculty of shown) {
     const selected = !!state.agent && isEquipped(faculty);
+    const execution = executions.find(entry => entry.kind === faculty.kind && entry.key === facultyId(faculty));
     const button = el(
       "button",
       `faculty-card${selected ? " equipped" : ""}${faculty.equippable === false ? " emerging" : ""}${freshIds.has(facultyIdentity(faculty)) ? " new-faculty" : ""}`,
@@ -605,6 +636,13 @@ function renderFaculties() {
           "A faculty from this agent’s registry.",
       ),
     );
+    if (execution) {
+      const receipt = el("span", "faculty-execution", `LAST CHAIN TURN · ${execution.label}`);
+      receipt.dataset.mode = execution.mode;
+      receipt.title = [execution.mechanism, execution.reason].filter(Boolean).join(" · ");
+      copy.append(receipt);
+      button.setAttribute("aria-label", `${selected ? "Unequip" : "Equip"} ${faculty.name}. Last chain turn: ${execution.label.toLowerCase()}`);
+    }
     const meta = el("span", "faculty-meta");
     meta.append(
       el("span", "", (faculty.category || faculty.kind).toUpperCase()),
@@ -695,6 +733,10 @@ function historyMessages() {
         gate: payload.gate || payload.poi_verdict,
         perspectives: payload.perspectives,
         search: payload.search,
+        replayed: payload.replayed,
+        revisions: payload.revisions,
+        facultyExecution: payload.facultyExecution,
+        learning: payload.learning,
         fromHistory: true,
       });
   }
@@ -710,6 +752,10 @@ function historyMessages() {
         gate: pending.gate,
         perspectives: pending.perspectives,
         search: pending.search,
+        replayed: pending.replayed,
+        revisions: pending.revisions,
+        facultyExecution: pending.facultyExecution,
+        learning: pending.learning,
         fromHistory: true,
       });
   }
@@ -908,7 +954,22 @@ function renderConversation() {
         );
       if (message.gate?.brightness !== undefined)
         meta.append(el("span", "", `PoI ${message.gate.brightness}/255`));
+      for (const receipt of reviewReceipt(message)) meta.append(el("span", "review-receipt", receipt));
       node.append(meta);
+      const executions = messageIsDormant(message) ? [] : facultyExecutionView(message.facultyExecution);
+      if (executions.length) {
+        const details = el("details", "perspective-details faculty-execution-details");
+        details.append(el("summary", "", `Faculty receipts · ${executions.length} equipped`));
+        details.append(el("p", "fine-print", "Computed means the bridge completed a mechanism. Frame applied means a faculty instruction was added to model context. Neither label measures answer quality."));
+        for (const execution of executions) {
+          const row = el("div", "perspective-note");
+          row.dataset.mode = execution.mode;
+          row.append(el("strong", "", `${execution.name} · ${execution.label}`),
+            el("p", "fine-print", [execution.kind, execution.mechanism, execution.reason].filter(Boolean).join(" · ")));
+          details.append(row);
+        }
+        node.append(details);
+      }
       if (Number.isInteger(message.learning?.held) && message.learning.held > 0)
         node.append(el("p", "learning-note", `${message.learning.held} derived learning step${message.learning.held === 1 ? " was" : "s were"} held. The accepted conversation receipt above is unchanged; those learning updates were not applied.`));
       const review = covenantReview(message.gate);
@@ -969,6 +1030,7 @@ function renderConversation() {
       behavior: messages.length ? "smooth" : "instant",
     }),
   );
+  renderFaculties();
 }
 function addMessage(message) {
   const id = agentId();
@@ -1091,7 +1153,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Update and restart your local bridge to beta 0.5.0 or newer before pairing. This interface requires native cognition controls and live activity support.");
+      throw new Error("Update and restart your local bridge to beta 0.6.0 or newer before pairing. This interface requires complete faculty portability and native execution receipts.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -1970,6 +2032,23 @@ function renderPackPreview(result) {
     definitions.append(row);
   }
   panel.append(definitions);
+  const portability = portabilityView(report.portability);
+  if (portability) {
+    const details = el("details", "perspective-details portability-details");
+    details.open = true;
+    details.append(el("summary", "", `Mechanism compatibility${portability.formatVersion ? " · format " + portability.formatVersion : ""}`));
+    if (portability.requiresCompanion) details.append(el("p", "fine-print", "Portable mechanisms require a compatible ChainChat companion runtime. Check each faculty’s compatibility before importing into another skill installation."));
+    if (portability.quarantinedCodeCount) details.append(el("p", "quarantine-note", `${portability.quarantinedCodeCount} authored code item${portability.quarantinedCodeCount === 1 ? " is" : "s are"} preserved in quarantine. Importing does not authorize code execution.`));
+    for (const item of portability.items) {
+      const row = el("div", "perspective-note portability-item");
+      row.dataset.compatibility = item.compatibility;
+      row.append(el("strong", "", `${item.name} · ${item.label}`), el("p", "", `Mechanism: ${item.mechanism}`));
+      if (item.preservedFields.length) row.append(el("p", "fine-print", `Preserved fields: ${item.preservedFields.join(", ")}`));
+      if (item.reason) row.append(el("p", "fine-print", item.reason));
+      details.append(row);
+    }
+    panel.append(details);
+  } else panel.append(el("p", "fine-print", "This bridge did not provide a mechanism compatibility report. A verified checksum alone does not establish that a faculty can execute."));
   packReportList(
     panel,
     "Ready for covenant review",
@@ -2002,9 +2081,7 @@ function renderPackPreview(result) {
     );
 }
 function exportableFaculties() {
-  return normalizeFaculties().filter(
-    (f) => ["grown", "imported"].includes(f.source) && f.equippable !== false,
-  );
+  return normalizeFaculties().filter(facultyIsExportable);
 }
 function renderExportFaculties() {
   const list = $("exportFacultyList"),
@@ -2037,7 +2114,7 @@ function renderExportFaculties() {
       el(
         "small",
         "",
-        `${faculty.kind.toUpperCase()} · ${faculty.source.toUpperCase()}${faculty.dormant ? " · DORMANT" : ""}`,
+        `${faculty.kind.toUpperCase()} · ${faculty.source.toUpperCase()}${faculty.dormant ? " · DORMANT" : ""}${faculty.requiresLocalCodeReview ? " · CODE QUARANTINED" : ""}`,
       ),
       el("small", "", faculty.function),
     );
@@ -2071,9 +2148,9 @@ $("packFile").addEventListener("change", async (event) => {
   const generation = previewGeneration,
     file = event.target.files[0];
   if (!file) return;
-  if (file.size > 2 * 1024 * 1024) {
+  if (file.size > 4 * 1024 * 1024) {
     toast(
-      "This pack exceeds 2 MB. Share a smaller set of faculty definitions.",
+      "This pack exceeds 4 MiB. Share a smaller set of faculty definitions.",
       true,
     );
     return;

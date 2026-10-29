@@ -57,6 +57,104 @@ export function abilityIndicators(activity, fresh = true) {
   }));
 }
 
+export function activityLineState(activity, { paired, fresh, requestBusy = false } = {}) {
+  if (!paired) return null;
+  if (!fresh) return { text: "Live activity unavailable · execution status unknown", kind: "" };
+  const events = activity?.events || [], last = events.at(-1);
+  if (activity?.running) {
+    const current = [...events].reverse().find(event => event.status === "started" && activity.activeAbilities.includes(event.ability));
+    return { text: current?.label || activity.stage || "Agent operation running", kind: "busy" };
+  }
+  if (requestBusy) return { text: "Awaiting bridge response · no ability currently reported running", kind: "" };
+  return { text: last?.label || "Agent idle · waiting for your next turn", kind: ["failed", "held"].includes(last?.status) ? "error" : "" };
+}
+
+// A hung transport must not lock all later activity polls, even if it ignores abort.
+export async function pollWithDeadline(action, timeoutMs = 4000) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => action(controller.signal)),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error("Activity request timed out."));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
+export function routeControlState(cognition, recallEnabled) {
+  if (cognition?.mode === "dormant") return { enabled: false, label: "PAUSED" };
+  if (recallEnabled !== true) return { enabled: false, label: "RECALL OFF" };
+  return { enabled: cognition?.autoRoute === true, label: cognition?.autoRoute === true ? "AUTOMATIC" : "OFF" };
+}
+
+export function reviewReceipt(message) {
+  if (messageIsDormant(message)) return [];
+  const labels = [];
+  if (message?.replayed === true)
+    labels.push("Reviewed memory replay");
+  if (Number.isSafeInteger(message?.revisions) && message.revisions > 0 && message.revisions <= 3)
+    labels.push(`${message.revisions} revision${message.revisions === 1 ? "" : "s"} before acceptance`);
+  return labels;
+}
+
+export function facultyExecutionView(receipt) {
+  if (receipt?.scope !== "turn" || !Array.isArray(receipt.entries)) return [];
+  const modes = new Set(["computed", "frame", "unsupported", "quarantined"]), seen = new Set();
+  return receipt.entries.slice(0, 2000).flatMap(item => {
+    if (!item || !["modality", "sense"].includes(item.kind) || !modes.has(item.mode) ||
+      !["completed", "unavailable", "failed"].includes(item.status)) return [];
+    const key = bounded(item.key, 256);
+    if (!key || seen.has(`${item.kind}:${key}`)) return [];
+    seen.add(`${item.kind}:${key}`);
+    const status = ["unsupported", "quarantined"].includes(item.mode) && item.status === "completed" ? "unavailable" : item.status;
+    const label = item.mode === "quarantined" ? "CODE QUARANTINED"
+      : item.mode === "unsupported" ? "UNSUPPORTED"
+      : status === "failed" ? "EXECUTION FAILED"
+      : status === "unavailable" ? "UNAVAILABLE"
+      : item.mode === "frame" ? "FRAME APPLIED" : "COMPUTED";
+    return [{ key, kind: item.kind, name: bounded(item.name, 200) || key,
+      mode: item.mode, status, label, mechanism: bounded(item.mechanism, 120), reason: bounded(item.reason, 600) }];
+  });
+}
+
+export function portabilityView(report) {
+  if (!report || typeof report !== "object") return null;
+  const labels = { supported: "SUPPORTED", "frame-only": "FRAME ONLY", quarantined: "CODE QUARANTINED", unsupported: "UNSUPPORTED" };
+  const items = (Array.isArray(report.items) ? report.items : []).slice(0, 2000).filter(item => item && typeof item === "object").map(item => ({
+    name: bounded(item.name || item.key, 200) || "Faculty",
+    mechanism: bounded(item.mechanism, 120) || "Unspecified mechanism",
+    compatibility: Object.hasOwn(labels, item.compatibility) ? item.compatibility : "unsupported",
+    label: labels[item.compatibility] || "UNSUPPORTED",
+    preservedFields: (Array.isArray(item.preservedFields) ? item.preservedFields : []).slice(0, 40).map(name => bounded(name, 100)).filter(Boolean),
+    reason: bounded(item.reason, 600),
+  }));
+  return { formatVersion: bounded(String(report.formatVersion ?? ""), 40), items,
+    requiresCompanion: report.requiresCompanion === true,
+    quarantinedCodeCount: integerIn(report.quarantinedCodeCount, 0, 100000, items.filter(item => item.compatibility === "quarantined").length) };
+}
+
+export function operatorCompatibilityView(value) {
+  if (!value || typeof value !== "object") return null;
+  const digest = name => typeof value[name] === "string" && /^[a-f0-9]{64}$/i.test(value[name]) ? value[name].toLowerCase() : "";
+  const sha256 = digest("sha256"), available = value.available === true;
+  const approved = available && value.approved === true;
+  return { available, approved, label: !available ? "NO LOCAL MODULE" : approved ? "LOCALLY APPROVED" : "LOCAL REVIEW REQUIRED",
+    source: bounded(value.source, 120) || "active_ops.py", sha256, environmentSha256: digest("environmentSha256"),
+    declaredNames: (Array.isArray(value.declaredNames) ? value.declaredNames : []).slice(0, 200).map(name => bounded(name, 160)).filter(Boolean),
+    reason: bounded(value.reason, 600), notice: bounded(value.notice, 600),
+    command: available && sha256 && !approved ? `python skill_interop.py approve-code --root "<agent directory>" --sha256 ${sha256} --confirm` : "" };
+}
+
+export function facultyIsExportable(faculty) {
+  if (typeof faculty?.exportable === "boolean") return faculty.exportable;
+  return ["grown", "imported"].includes(faculty?.source) && faculty?.equippable !== false;
+}
+
 export function facultyIdentity(faculty) {
   return `${faculty.kind === "sense" ? "sense" : "modality"}:${String(faculty.key ?? faculty.id ?? faculty.name)}`;
 }

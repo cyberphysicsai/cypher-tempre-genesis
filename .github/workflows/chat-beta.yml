@@ -10,6 +10,9 @@ permissions:
 jobs:
   chat:
     runs-on: ubuntu-latest
+    env:
+      CT_PARITY_REFERENCE: ${{ github.workspace }}/skills/codex/cypher-tempre-self-model
+      CT_ORIGINAL_SKILL: ${{ github.workspace }}/skills/codex/cypher-tempre-self-model
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

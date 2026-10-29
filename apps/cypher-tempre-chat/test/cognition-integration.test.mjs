@@ -377,16 +377,21 @@ test("real engine: opted-in idle Dream runs after the turn and requires a fresh 
   f.record.lastDreamHeight = -100; await f.store.save();
   const result = await f.call("/api/chat", { message: "Consider this patiently before idle consolidation." }); ok(result);
   const end = Date.now() + 15000;
-  while (Date.now() < end && !f.calls.some(c => c.op === "maintenance" && c.confirmed === true))
+  while (Date.now() < end && !f.calls.some(c => c.op === "maintenance" && c.confirmed === true && c.preview !== true))
     await new Promise(resolve => setTimeout(resolve, 25));
-  const dream = f.calls.find(c => c.op === "maintenance" && c.confirmed === true);
+  const dream = f.calls.find(c => c.op === "maintenance" && c.confirmed === true && c.preview !== true);
   assert.ok(dream, JSON.stringify({ message: "Opted-in scheduled consolidation did not reach the native executor.",
     calls: f.calls.slice(-10).map(({ op, action, preview, confirmed }) => ({ op, action, preview, confirmed })),
     cognition: f.record.cognition, lastDreamHeight: f.record.lastDreamHeight,
     activity: (await f.call("/api/activity")).body }));
   assert.equal(dream.action, "dream"); assert.equal(dream.assessment.approved, true);
   assert.ok(f.calls.findIndex(c => c.op === "commit") < f.calls.indexOf(dream));
-  assert.ok(f.reviewed.some(r => r.args.input.startsWith("Review this local agent control action:")));
+  const reviewedDream = f.reviewed.find(r => {
+    try { return JSON.parse(r.args.candidate).action === "dream"; } catch { return false; }
+  });
+  assert.ok(reviewedDream, "Native Dream plan must receive a semantic review before mutation.");
+  assert.equal(JSON.parse(reviewedDream.args.candidate).userConfirmed, true);
+  assert.equal(JSON.parse(reviewedDream.args.candidate).userReason, dream.reason);
   while (Date.now() < end && (await f.call("/api/activity")).body.running)
     await new Promise(resolve => setTimeout(resolve, 25));
   const state = await f.call("/api/state"); ok(state);

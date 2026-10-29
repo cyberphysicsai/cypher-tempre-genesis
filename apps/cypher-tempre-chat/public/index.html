@@ -105,7 +105,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.5.0</span>
+        ><span class="mono" id="appVersion">v0.6.0</span>
       </div>
       <div class="top-actions">
         <button
@@ -473,7 +473,7 @@
         </button>
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.5.0"
+          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.6.0"
           target="_blank"
           rel="noopener noreferrer"
           >Download local bridge</a
@@ -1034,7 +1034,8 @@
       <h2>Share what your agent learns.</h2>
       <p>
         Exchange portable packs of modalities and senses. Each agent keeps its
-        own identity, history, and calibration.
+        own identity, history, and calibration. Preview each mechanism’s runtime
+        compatibility and the metadata it preserves before importing.
       </p>
       <div
         class="exchange-tabs"
@@ -1083,8 +1084,10 @@
           </label>
           <p class="fine-print">
             Preview verifies the pack checksum and checks which faculties are
-            new to this agent. Importing requires your connected model to review
-            the definitions against the genesis covenant.
+            new to this agent. Portable recipes and context frames have different
+            execution support. Authored code is preserved in quarantine and can
+            only be approved locally through the companion CLI. Importing requires
+            your connected model to review the definitions against the genesis covenant.
           </p>
           <div class="dialog-error" role="alert"></div>
           <button type="submit" class="secondary-button full-width">
@@ -1146,9 +1149,12 @@
           <div class="export-faculty-list" id="exportFacultyList"></div>
           <p class="fine-print">
             Your pack includes the selected faculty definitions and their
-            provenance, not your conversation history. Base faculties are
-            already included in every agent; emerging proposals become shareable
-            after promotion.
+            provenance and portable mechanism metadata, not your conversation history.
+            Authored code remains quarantined until separately approved locally. Base faculties are
+            already included in every agent. The bridge lists which learned or
+            quarantined faculties can be shared; sharing does not equip or execute them.
+            Authored packs may include the whole operator module and helper functions.
+            Review definitions, learned metadata and source for private material before sharing.
           </p>
           <div class="dialog-error" role="alert"></div>
           <button
@@ -1187,13 +1193,14 @@
       </div>
       <form id="cognitionForm">
         <label class="toggle-row"><span>Real-time learning<small>Train from accepted experience and allow faculty growth. When off, active Timechain conversations still record history.</small></span><input id="learningEnabled" type="checkbox" role="switch" checked /></label>
-        <label class="toggle-row"><span>Route before generation<small>Check verified memory for replay or useful partial context.</small></span><input id="autoRoute" type="checkbox" role="switch" checked /></label>
-        <label class="toggle-row"><span>Semantic recall selection<small>Let the model select relevant evidence beyond lexical retrieval.</small></span><input id="semanticRecall" type="checkbox" role="switch" checked /></label>
+        <label class="toggle-row"><span>Route before generation<small>Requires Recall equipped. Check verified memory for replay or useful partial context.</small></span><input id="autoRoute" type="checkbox" role="switch" checked /></label>
+        <label class="toggle-row"><span>Semantic recall selection<small>Requires Recall equipped. Let the model select relevant evidence beyond lexical retrieval.</small></span><input id="semanticRecall" type="checkbox" role="switch" checked /></label>
         <label class="toggle-row"><span>Automatic sprouting<small>Allow new safe faculties to grow. New faculties are shown for your equipment choice.</small></span><input id="autoSprout" type="checkbox" role="switch" checked /></label>
         <label class="toggle-row"><span>Consolidate when due<small>Run native Dream consolidation while idle after every 100 new blocks, while learning is enabled. Off by default.</small></span><input id="autoDream" type="checkbox" role="switch" /></label>
         <label class="field">Maximum response revisions<input id="revisionLimit" type="number" min="0" max="3" value="1" /></label>
         <button class="primary-button" type="submit">Apply cognition settings</button>
       </form>
+      <section class="monitor-section operator-compatibility" id="operatorCompatibility" aria-label="Local operator compatibility"></section>
       <section class="monitor-section" aria-labelledby="liveMonitorTitle">
         <div class="section-caption"><span id="liveMonitorTitle">LIVE ACTIVITY</span><span id="monitorConnection">NOT CONNECTED</span></div>
         <p id="monitorStage">Pair a Timechain to see its actual runtime stages.</p>
