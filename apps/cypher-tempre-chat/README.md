@@ -100,6 +100,8 @@ The official website does not upload entered model keys or chain history to its 
 
 OpenCode Go can use the OpenAI Responses adapter with base URL `https://opencode.ai/inference/go/openai/v1`. ChainChat sends its own user agent and a random session identifier to the official Go endpoint. For example, `muse-spark-1.3-contributor` requires the user's existing Go access and applicable privacy settings. Its provider terms permit training on prompts and completions; use synthetic or otherwise shareable content. Consult the [current provider documentation](https://opencode.ai/v2/docs/console/go) for access, pricing and retention.
 
+Reviews for that exact Muse model through the official Go Responses endpoint receive an output allowance of **8,192 tokens**. An initial real-model benchmark exhausted the former 2,048-token review allowance before completing the required assessment. Other model/provider reviews retain 2,048 tokens, and answer-generation allowances are unchanged. The larger ceiling can increase latency and cost; it does not guarantee completion or a passing assessment. Incomplete or malformed reviews still hold the answer, with no automatic retry or unreviewed release.
+
 The server binds to loopback, validates Host and Origin, requires a terminal pairing code and an in-memory bearer token, and rejects cross-origin requests by default. `CT_CHAT_PUBLIC_ORIGINS` can explicitly allow a trusted hosted frontend; local serving is the tested preview path. The application does not upload a whole chain, but selected recall content can be sensitive. Agent state and pending conversation files are local sensitive data; protect the account and disk accordingly.
 
 ## Compatibility and limits

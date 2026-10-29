@@ -83,6 +83,26 @@ function isLocal(hostname) {
   );
 }
 
+function openCodeGoEndpoint(config) {
+  const endpoint = new URL(config.baseUrl);
+  return endpoint.protocol === "https:" &&
+    endpoint.hostname === "opencode.ai" &&
+    !endpoint.port &&
+    endpoint.pathname.startsWith("/inference/go/")
+    ? endpoint
+    : null;
+}
+
+function reviewTokenAllowance(config) {
+  const normalized = validateProvider(config);
+  const endpoint = openCodeGoEndpoint(normalized);
+  return normalized.provider === "openai" &&
+    normalized.model === "muse-spark-1.3-contributor" &&
+    endpoint?.pathname === "/inference/go/openai/v1"
+    ? 8192
+    : 2048;
+}
+
 export function validateProvider(config) {
   if (!config || typeof config !== "object" || Array.isArray(config))
     invalid("Choose a provider and model.");
@@ -385,13 +405,7 @@ export async function generate(
 ) {
   const config = validateProvider(rawConfig);
   assertCredentialIsolation(config, { system, messages });
-  const endpoint = new URL(config.baseUrl);
-  if (
-    endpoint.protocol === "https:" &&
-    endpoint.hostname === "opencode.ai" &&
-    !endpoint.port &&
-    endpoint.pathname.startsWith("/inference/go/")
-  ) {
+  if (openCodeGoEndpoint(config)) {
     // A provider configuration belongs to one bridge session. Weak ownership
     // keeps the random identifier stable across generation/review without
     // persisting it or linking it to a wallet, machine, or Timechain.
@@ -632,7 +646,9 @@ export async function review(
         }),
       },
     ],
-    maxTokens: 2048,
+    // This exact model/endpoint exhausted the old allowance during a real
+    // review benchmark. Keep the larger ceiling scoped to that reviewer.
+    maxTokens: reviewTokenAllowance(config),
     signal,
   });
   // Review text contains another JSON layer; inspect decoded strings before
