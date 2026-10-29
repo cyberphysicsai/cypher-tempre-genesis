@@ -7,7 +7,7 @@ import {
   verifyBridgeIdentity,
   matchingConfiguration,
 } from "./holdings-wallet.js";
-import { blockHeight, formatTokenBalance, requiresHoldings } from "./chainchat-display.js";
+import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersion } from "./chainchat-display.js";
 import {
   bridgeApiUrl,
   bridgePort,
@@ -209,7 +209,7 @@ function covenantReview(gate) {
 }
 
 async function api(path, data, options = {}) {
-  if (!localBridgePage && !token && path !== "/api/pair")
+  if (!localBridgePage && !token && !["/api/pair", "/api/status"].includes(path))
     throw new Error("Pair your local bridge before connecting to it.");
   if (requiresHoldings(path, data)) await ensureHoldings();
   const requestToken = token;
@@ -883,6 +883,9 @@ $("pairForm").addEventListener("submit", (event) => {
   runForm(event.currentTarget, async () => {
     if (!localBridgePage)
       selectedBridgePort = bridgePort($("bridgePort").value);
+    const bridge = await api("/api/status");
+    if (!supportedBridgeVersion(bridge.version))
+      throw new Error("Update and restart your local bridge to beta 0.4.1 or newer before pairing. This interface requires the credential and grounding fixes in that release.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -2048,7 +2051,9 @@ async function start() {
   }
   try {
     const status = await api("/api/status");
-    $("bridgeStatus").textContent = "LOCAL BRIDGE READY";
+    $("bridgeStatus").textContent = supportedBridgeVersion(status.version)
+      ? "LOCAL BRIDGE READY"
+      : "BRIDGE UPDATE REQUIRED";
     if (status.version) $("appVersion").textContent = `v${status.version}`;
   } catch {
     activity("Start the local bridge to connect your agent.", "error");
