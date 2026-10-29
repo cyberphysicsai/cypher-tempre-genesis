@@ -29,6 +29,8 @@ npm test
 
 Compilation is deterministic with the pinned lockfile, Solidity 0.8.38, optimizer enabled for 200 runs, and EVM Paris. `artifacts/CypherTempreSeats.json` contains ABI, bytecode, method identifiers, immutable locations, and the expected runtime for the Base settings above. `artifacts/CypherTempreSeats.abi.json` is the standalone public ABI. `artifacts/base-deployment.json` contains a prepared creation transaction and its hashes. Compiling does not connect to a wallet, estimate fees, broadcast a transaction, or spend money.
 
+The lockfile explicitly marks Ganache's nested `fsevents` package as optional, matching its `chokidar` dependency declaration. Ganache's bundled lock omits that metadata; retaining the correction lets `npm ci --ignore-scripts` skip the macOS-only watcher on Windows and Linux without `--force`. Package versions and integrity values remain unchanged.
+
 Tests use a disposable in-process Ganache EVM with mock tokens. They cover exact payment and ownership, bounded batch purchases, atomic rollback, absent or insufficient allowance/balance, duplicate keys, owner-only binding and rotation, generation invalidation, false and empty ERC-20 returns, under-receipt, malicious reentrancy, constructor validation, raw-transfer non-activation, ETH rejection, and predicted-versus-actual runtime equality. They do not establish production security or live CPHY behavior.
 
 ## Methods and binding semantics
