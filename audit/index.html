@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cypher Tempre Timechain Dashboard</title>
+    <link rel="preload" href="../fonts/orbitron/Orbitron-Variable.ttf" as="font" type="font/ttf" crossorigin>
+    <link rel="stylesheet" href="styles.css?v=20260707-organs">
+  </head>
+  <body>
+    <canvas id="motifCanvas" aria-hidden="true"></canvas>
+    <main class="shell">
+      <section id="bridgeGate" class="gate hidden">
+        <div class="gate-copy">
+          <p class="eyebrow">Local Bridge</p>
+          <h1>Audit Your Agent&rsquo;s Timechain</h1>
+          <p class="lede">Free and private. This page is only a shell &mdash; your agent&rsquo;s memory is read by a bridge on <em>your</em> machine and never leaves it.</p>
+          <ol class="pair-steps">
+            <li>
+              <span>Run the bridge on this machine</span>
+              <pre><code>git clone https://github.com/cyberphysicsai/cypher-tempre-genesis
+cd cypher-tempre-genesis/dashboard
+npm install
+npm run bridge</code></pre>
+            </li>
+            <li>
+              <span>Copy the pairing code from the terminal</span>
+              <p class="step-note">It looks like <code>1A2B-3C4D-5E</code> and changes each run.</p>
+            </li>
+            <li>
+              <span>Enter it in the panel &mdash; the dashboard loads instantly</span>
+              <p class="step-note">No account, no payment, no outbound calls. This page talks only to <code>127.0.0.1:8788</code>.</p>
+            </li>
+          </ol>
+        </div>
+        <div class="gate-panel">
+          <div id="bridgeState" class="status">Bridge disconnected</div>
+          <label class="field">
+            <span>Bridge URL</span>
+            <input id="bridgeUrl" spellcheck="false" value="http://127.0.0.1:8788">
+          </label>
+          <button id="checkBridge" class="secondary">Check Bridge</button>
+          <label class="field">
+            <span>Pairing code</span>
+            <input id="pairCode" spellcheck="false" placeholder="XXXX-XXXX">
+          </label>
+          <button id="pairBridge" class="primary">Pair Bridge</button>
+          <p id="bridgeMessage" class="message"></p>
+          <p class="step-note">Pairing tokens stay in this page only. Reloading requires a new pairing. The auditor uses its own bridge on port 8788.</p>
+        </div>
+      </section>
+
+      <section id="dashboard" class="dashboard hidden">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Personal Chain Agent</p>
+            <h1>Timechain Audit</h1>
+          </div>
+          <div class="root-pill" id="rootPath"></div>
+        </header>
+
+        <section class="stats-grid" id="statsGrid"></section>
+
+        <section class="band" id="vitalsBand">
+          <div class="section-head">
+            <h2>Vitals</h2>
+            <span id="vitalsMeta"></span>
+          </div>
+          <div id="vitalsChecks" class="vitals-grid"></div>
+          <div class="stats-grid cphy-stats" id="vitalsStats"></div>
+        </section>
+
+        <section class="band" id="learningBand">
+          <div class="section-head">
+            <h2>Learning Membrane</h2>
+            <span id="learningMeta"></span>
+          </div>
+          <div class="triptych">
+            <article class="integrity-card" id="intChain"><h3>Hash Chain</h3><strong>—</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="intQuorum"><h3>Witness Quorum</h3><strong>—</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="intDigests"><h3>Telemetry Digests</h3><strong>—</strong><span class="meta"></span></article>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Economics</h3>
+              <div id="economicsStats" class="economics"></div>
+              <div id="tokensSpark" class="spark-wrap"></div>
+            </div>
+            <div>
+              <h3>Seal Quality <span class="meta">(brightness over chain height)</span></h3>
+              <div id="qualitySpark" class="spark-wrap"></div>
+            </div>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Operators <span class="meta">(adoptions &amp; rollbacks — sealed, falsifiable)</span></h3>
+              <div id="operatorList" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Dream Cycles</h3>
+              <div id="dreamList" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="cphyBand">
+          <div class="section-head">
+            <h2>CPHY &mdash; Token Metaprogramming</h2>
+            <span id="cphyMeta"></span>
+          </div>
+          <p class="doctrine">Two lanes, one law: <em>salience, never truth</em>. The <strong>CPHY token (Base)</strong> is the real, external coin &mdash; this dashboard never mints or moves it; the skill only <em>observes</em> burns to keyless deposit addresses (read-only oracle, pinned contract, allowlisted RPCs) and applies them with your consent. <strong>Attention credits</strong> are the internal metering earned by sealed rings (brightness/255) that fund local basins &mdash; they are <em>not</em> the token, exist on no blockchain, and external burns never mint them (I5). Both only reshape what the agent reads of itself (clamped 0.25&times;&ndash;4&times;); PoI judgment is never for sale.</p>
+          <div class="section-head lane-head">
+            <h3>CPHY Token (Base) <span class="meta">&mdash; registers only what the contract shows at your deposit addresses</span></h3>
+            <button id="syncOnchain" class="secondary">Sync on-chain now</button>
+          </div>
+          <section class="stats-grid cphy-stats" id="cphyTokenStats"></section>
+          <div id="cphyConsent"></div>
+          <div class="section-head lane-head">
+            <h3>Attention Credits <span class="meta">&mdash; earned locally, not the token</span></h3>
+          </div>
+          <section class="stats-grid cphy-stats" id="cphyCreditStats"></section>
+          <div class="section-head landscape-head">
+            <h3>Attention Landscape <span class="meta">(every block; hover to audit, click to open)</span></h3>
+            <span id="landscapeMeta" class="meta"></span>
+          </div>
+          <div class="landscape-wrap">
+            <canvas id="landscapeCanvas" height="96"></canvas>
+            <div id="landscapeTip" class="landscape-tip hidden"></div>
+          </div>
+          <div class="landscape-legend meta" id="landscapeLegend"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Active Locks <span class="meta">(OP1 &mdash; credit-funded; basins raise, shadows lower)</span></h3>
+              <div id="lockList" class="domain-list"></div>
+              <form id="lockForm" class="inline-form">
+                <select id="lockOp"><option value="basin">basin</option><option value="shadow">shadow</option></select>
+                <input id="lockFrom" type="number" min="0" placeholder="from #">
+                <input id="lockTo" type="number" min="0" placeholder="to #">
+                <input id="lockAmount" type="number" min="0" step="0.5" placeholder="credits">
+                <input id="lockMemo" placeholder="memo">
+                <button type="submit" class="secondary">Lock</button>
+              </form>
+            </div>
+            <div>
+              <h3>Etches <span class="meta">(real-token burns = positive scars; echelon 1&ndash;21 sets depth)</span></h3>
+              <div id="etchList" class="domain-list"></div>
+              <div id="targetList" class="domain-list"></div>
+              <form id="etchNForm" class="inline-form">
+                <label class="meta">surfaced per turn (etch n)</label>
+                <input id="etchN" type="number" min="0" max="64">
+                <button type="submit" class="secondary">Set</button>
+              </form>
+              <form id="targetForm" class="inline-form">
+                <input id="targetFrom" type="number" min="0" placeholder="ring from">
+                <input id="targetTo" type="number" min="0" placeholder="ring to">
+                <button type="submit" class="secondary">Get deposit addresses</button>
+              </form>
+            </div>
+          </div>
+          <p id="cphyMessage" class="message"></p>
+        </section>
+
+        <section class="band" id="retrievalBand">
+          <div class="section-head">
+            <h2>Relevance Realization &mdash; Retrieval Order</h2>
+            <span id="retrievalMeta"></span>
+          </div>
+          <form id="previewForm" class="preview-controls">
+            <input id="previewQuery" placeholder="Ask the chain: which blocks would surface, in what order?">
+            <button type="submit" class="primary">Preview retrieval</button>
+          </form>
+          <div id="previewResult"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Most-Retrieved Blocks <span class="meta">(lifetime, from the offer log)</span></h3>
+              <div id="retrievalLeaders" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Recent Retrievals <span class="meta">(what actually surfaced, ranked)</span></h3>
+              <div id="offerList" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="immuneBand">
+          <div class="section-head">
+            <h2>Scars &amp; Immunity</h2>
+            <span id="immuneMeta"></span>
+          </div>
+          <div class="triptych">
+            <article class="integrity-card" id="immLock"><h3>Membrane</h3><strong>&mdash;</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="immQuarantine"><h3>Quarantine</h3><strong>&mdash;</strong><span class="meta"></span></article>
+            <article class="integrity-card" id="immScars"><h3>Scars</h3><strong>&mdash;</strong><span class="meta"></span></article>
+          </div>
+          <div id="scarList" class="domain-list"></div>
+          <p id="immuneMessage" class="message"></p>
+        </section>
+
+        <section class="band" id="forkBand">
+          <div class="section-head">
+            <h2>Lineage &mdash; Forks, Grafts &amp; Splices</h2>
+            <span id="forkMeta"></span>
+          </div>
+          <div id="forkTreeWrap" class="fork-wrap"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Exchange <span class="meta">(export a slice of blockspace as a priced, hash-sealed pack)</span></h3>
+              <form id="exportForm" class="inline-form">
+                <input id="exportFrom" type="number" min="1" placeholder="from #">
+                <input id="exportTo" type="number" min="1" placeholder="to #">
+                <input id="exportPrice" type="number" min="0" step="0.5" placeholder="price (credits)">
+                <input id="exportMemo" placeholder="memo">
+                <button type="submit" class="secondary">Export pack</button>
+              </form>
+              <h3>Splice <span class="meta">(import a pack &mdash; grafts arrive quarantined, I7: histories are never inherited)</span></h3>
+              <form id="importForm" class="inline-form">
+                <input id="importFile" type="file" accept="application/json">
+                <button type="submit" class="secondary">Import pack</button>
+              </form>
+            </div>
+            <div>
+              <h3>Edit <span class="meta">(append-only: an edit is a new sealed ring, PoI-gated)</span></h3>
+              <form id="sealForm" class="inline-form seal-form">
+                <input id="sealSummary" placeholder="Annotation to seal into the chain&hellip;">
+                <button type="submit" class="secondary">Seal ring</button>
+              </form>
+              <h3>Quarantine <span class="meta">(exclusion, not deletion &mdash; quarantines the FIRST BAD ring and everything after it)</span></h3>
+              <form id="rollbackForm" class="inline-form">
+                <input id="rollbackHeight" type="number" min="0" placeholder="first bad ring #">
+                <input id="rollbackLesson" placeholder="lesson">
+                <input id="rollbackConfirm" placeholder='type: QUARANTINE &lt;first bad ring&gt;'>
+                <button type="submit" class="secondary danger">Rollback</button>
+              </form>
+            </div>
+          </div>
+          <p id="forkMessage" class="message"></p>
+        </section>
+
+        <section class="band" id="nurseryBand">
+          <div class="section-head">
+            <h2>Emergent Nursery &mdash; Modalities &amp; Senses</h2>
+            <span id="nurseryMeta"></span>
+          </div>
+          <p class="doctrine">The Dream Cache proposes; the owner disposes. <em>Copy</em> a faculty as JSON to carry it to another chain; <em>paste</em> one to enable it &mdash; a plain modality/sense is grown straight into the active self (with a real effect attached), while a paste carrying <code>code</code> is staged INERT for review; <em>activate</em> registers a waiting proposal. Model-authored code never runs until you place it in <code>active_ops.py</code> with your own hands.</p>
+          <div class="learning-grid">
+            <div>
+              <h3>Dream Cache <span class="meta">(emergent &amp; proposed &mdash; awaiting your hand)</span></h3>
+              <div id="emergentList" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Paste a faculty <span class="meta">(JSON copied from any dashboard, or your own design &mdash; enables on paste; include "code" to stage inert instead)</span></h3>
+              <form id="pasteForm" class="paste-form">
+                <textarea id="pasteJson" rows="7" spellcheck="false" placeholder='{"kind":"sense","name":"Drift-Onset Sensing","function":"Detect early drift from...","seed_terms":["drift","onset"],"code":"(optional op body — including it stages the paste inert for review)"}'></textarea>
+                <button type="submit" class="secondary">Paste into the self</button>
+              </form>
+              <h3>Activated <span class="meta">(already registered in the active self)</span></h3>
+              <div id="activatedList" class="domain-list"></div>
+            </div>
+          </div>
+          <pre id="nurseryOpCode" class="op-code hidden"></pre>
+          <p id="nurseryMessage" class="message"></p>
+        </section>
+
+        <section class="band" id="continuumBand">
+          <div class="section-head">
+            <h2>Continuum &mdash; Long-Horizon Ingestion</h2>
+            <span id="continuumMeta"></span>
+          </div>
+          <p class="doctrine">Corpora larger than any context window, sealed into bounded blocks (256&ndash;1536 tokens each) on per-task chains &mdash; with cursor state, secret redaction, and O(1) resume. Ingestion is not review: the audit cursor tracks what was actually read.</p>
+          <div class="stats-grid cphy-stats" id="continuumStats"></div>
+          <div id="continuumTasks" class="domain-list"></div>
+        </section>
+
+        <section class="band" id="chronoBand">
+          <div class="section-head">
+            <h2>Chronosynaptic Tree &mdash; Forked Perspectives</h2>
+            <span id="chronoMeta"></span>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Latest Collapse <span class="meta">(parallel selves considered, one sealed)</span></h3>
+              <div id="chronoLatest" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Winning Perspectives <span class="meta">(lifetime leaderboard)</span></h3>
+              <div id="chronoLeaders" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="cambiumBand">
+          <div class="section-head">
+            <h2>Cambium &mdash; Faculty Ecology</h2>
+            <span id="cambiumMeta"></span>
+          </div>
+          <div class="stats-grid cphy-stats" id="cambiumStats"></div>
+          <div class="learning-grid">
+            <div>
+              <h3>Most-Lived Faculties <span class="meta">(fires across all sealed rings)</span></h3>
+              <div id="mostLivedList" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Hibernation <span class="meta">(rent-delinquent faculties sleep, never die)</span></h3>
+              <div id="hibernationList" class="domain-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="conscienceBand">
+          <div class="section-head">
+            <h2>Conscience &mdash; PoI Gate</h2>
+            <span id="conscienceMeta"></span>
+          </div>
+          <div class="stats-grid cphy-stats" id="conscienceStats"></div>
+          <div id="conscienceDetail" class="domain-list"></div>
+        </section>
+
+        <section class="band" id="reflectiveBand">
+          <div class="section-head">
+            <h2>Reflection &mdash; Self-Portrait, Dreams &amp; Recall Index</h2>
+            <span id="reflectiveMeta"></span>
+          </div>
+          <div class="learning-grid">
+            <div>
+              <h3>Self-Portrait <span class="meta">(autobiography rings)</span></h3>
+              <div id="portraitCard" class="domain-list"></div>
+            </div>
+            <div>
+              <h3>Recall Substrate</h3>
+              <div class="stats-grid cphy-stats" id="reflectiveStats"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band" id="censusBand">
+          <div class="section-head">
+            <h2>Ledger Census</h2>
+            <span id="censusMeta"></span>
+          </div>
+          <div class="stats-grid cphy-stats" id="censusStats"></div>
+          <div id="censusTypes" class="census-bars"></div>
+        </section>
+
+        <section class="band split">
+          <div>
+            <div class="section-head">
+              <h2>Domain Context</h2>
+              <span id="domainMeta"></span>
+            </div>
+            <div id="domainList" class="domain-list"></div>
+          </div>
+          <div>
+            <div class="section-head">
+              <h2>Faculty Surface</h2>
+              <span id="facultyMeta"></span>
+            </div>
+            <div class="faculty-bars">
+              <div>
+                <h3>Modalities</h3>
+                <div id="modalityBars"></div>
+              </div>
+              <div>
+                <h3>Senses</h3>
+                <div id="senseBars"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band">
+          <div class="section-head">
+            <h2>Rings</h2>
+            <div class="filters">
+              <input id="ringSearch" placeholder="Search rings">
+              <select id="ringType">
+                <option value="">All types</option>
+              </select>
+            </div>
+          </div>
+          <div class="ring-layout">
+            <div id="ringList" class="ring-list"></div>
+            <article id="ringDetail" class="detail-panel">
+              <h3>Select a ring</h3>
+              <pre></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="band">
+          <div class="section-head">
+            <h2>Blockspace</h2>
+            <span id="blockspaceMeta"></span>
+          </div>
+          <div id="blockspaceList" class="blob-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="blobDialog">
+      <div class="dialog-head">
+        <h2>Blockspace Blob</h2>
+        <button id="closeBlob" class="ghost">Close</button>
+      </div>
+      <pre id="blobPreview"></pre>
+    </dialog>
+
+    <script src="config.js?v=20260707-organs"></script>
+    <script type="module" src="app.js?v=20260707-organs"></script>
+  </body>
+</html>

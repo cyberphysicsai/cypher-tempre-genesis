@@ -1,408 +1,1169 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cypher Tempre Timechain Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=20260707-organs">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#121212" />
+    <meta
+      name="description"
+      content="A local-first agentic Timechain metaprogramming interface for your Cypher Tempre agent. Your model. Your faculties. One continuous Timechain."
+    />
+    <title>Cypher Tempre · Agentic Timechain Metaprogramming Interface</title>
+    <link
+      rel="preload"
+      href="/fonts/orbitron/Orbitron-Variable.ttf"
+      as="font"
+      type="font/ttf"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
   </head>
   <body>
     <canvas id="motifCanvas" aria-hidden="true"></canvas>
-    <main class="shell">
-      <section id="bridgeGate" class="gate hidden">
-        <div class="gate-copy">
-          <p class="eyebrow">Local Bridge</p>
-          <h1>Audit Your Agent&rsquo;s Timechain</h1>
-          <p class="lede">Free and private. This page is only a shell &mdash; your agent&rsquo;s memory is read by a bridge on <em>your</em> machine and never leaves it.</p>
-          <ol class="pair-steps">
-            <li>
-              <span>Run the bridge on this machine</span>
-              <pre><code>git clone https://github.com/cyberphysicsai/cypher-tempre-genesis
-cd cypher-tempre-genesis/dashboard
-npm install
-npm run bridge</code></pre>
-            </li>
-            <li>
-              <span>Copy the pairing code from the terminal</span>
-              <p class="step-note">It looks like <code>1A2B-3C4D-5E</code> and changes each run.</p>
-            </li>
-            <li>
-              <span>Enter it in the panel &mdash; the dashboard loads instantly</span>
-              <p class="step-note">No account, no payment, no outbound calls. This page talks only to <code>127.0.0.1:8788</code>.</p>
-            </li>
-          </ol>
-        </div>
-        <div class="gate-panel">
-          <div id="bridgeState" class="status">Bridge disconnected</div>
-          <label class="field">
-            <span>Bridge URL</span>
-            <input id="bridgeUrl" spellcheck="false" value="http://127.0.0.1:8788">
-          </label>
-          <button id="checkBridge" class="secondary">Check Bridge</button>
-          <label class="field">
-            <span>Pairing code</span>
-            <input id="pairCode" spellcheck="false" placeholder="XXXX-XXXX">
-          </label>
-          <button id="pairBridge" class="primary">Pair Bridge</button>
-          <p id="bridgeMessage" class="message"></p>
-        </div>
-      </section>
+    <svg
+      class="icon-library"
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <symbol id="i-orbit" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3" />
+        <ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-45 12 12)" />
+        <ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(45 12 12)" />
+      </symbol>
+      <symbol id="i-fork" viewBox="0 0 24 24">
+        <path d="M12 21V12M12 12 5 5M12 12l7-7M12 12V3" />
+        <circle cx="5" cy="5" r="2" />
+        <circle cx="19" cy="5" r="2" />
+        <circle cx="12" cy="3" r="2" />
+        <circle cx="12" cy="20" r="2" />
+      </symbol>
+      <symbol id="i-memory" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="5" />
+        <circle cx="12" cy="12" r="1" />
+        <path d="m19 5 3-3M2 22l3-3" />
+      </symbol>
+      <symbol id="i-blocks" viewBox="0 0 24 24">
+        <path
+          d="m12 2 9 5-9 5-9-5 9-5ZM3 7v10l9 5 9-5V7M12 12v10M3 12l9 5 9-5"
+        />
+      </symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24">
+        <path d="M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6l-9-4Z" />
+        <path d="m8 12 3 3 5-6" />
+      </symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24">
+        <path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3 3-7Z" />
+      </symbol>
+      <symbol id="i-equip" viewBox="0 0 24 24">
+        <path d="m12 2 9 5v10l-9 5-9-5V7l9-5Z" />
+        <path
+          d="m12 7 4 2v6l-4 2-4-2V9l4-2ZM12 2v5M3 7l5 2M21 7l-5 2M12 17v5M3 17l5-2M21 17l-5-2"
+        />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24">
+        <path d="M12 5v14M5 12h14" />
+      </symbol>
+      <symbol id="i-link" viewBox="0 0 24 24">
+        <path
+          d="m10 14 4-4M9 15l-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M15 9l2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"
+          transform="translate(1 -1) scale(.92)"
+        />
+      </symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24">
+        <path d="M12 20V4m-6 6 6-6 6 6" />
+      </symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24">
+        <path d="M4 6h16M4 12h16M4 18h16" />
+        <circle cx="8" cy="6" r="2" />
+        <circle cx="16" cy="12" r="2" />
+        <circle cx="10" cy="18" r="2" />
+      </symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24">
+        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="3" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24">
+        <path d="m5 12 4 4L19 6" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path d="m6 6 12 12M6 18 18 6" />
+      </symbol>
+    </svg>
 
-      <section id="dashboard" class="dashboard hidden">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">Personal Chain Agent</p>
-            <h1>Timechain Audit</h1>
+    <header class="topbar">
+      <a href="/" class="brand" aria-label="Cypher Tempre home"
+        ><span class="brand-symbol"
+          ><svg><use href="#i-orbit" /></svg></span
+        ><span
+          >CYPHER <b>TEMPRE</b
+          ><small>Agentic Timechain Metaprogramming Interface</small></span
+        ></a
+      >
+      <div class="top-center">
+        <span class="status-dot" id="bridgeDot"></span
+        ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
+        ><span class="top-divider"></span
+        ><span class="mono" id="appVersion">v0.3.0</span>
+      </div>
+      <div class="top-actions">
+        <button
+          class="icon-button mobile-menu"
+          id="mobileAgents"
+          aria-label="Show agent panel"
+        >
+          <svg><use href="#i-blocks" /></svg></button
+        ><button class="model-button" id="modelButton">
+          <svg><use href="#i-spark" /></svg
+          ><span id="modelLabel">Connect a model</span
+          ><span class="chevron">⌄</span></button
+        ><button class="pair-button" id="pairButton">
+          <svg><use href="#i-link" /></svg><span>Pair bridge</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside
+        class="agent-sidebar"
+        id="agentSidebar"
+        aria-label="Agent and timechain"
+      >
+        <div class="sidebar-section">
+          <div class="section-caption">
+            YOUR AGENT <span class="tiny-label">LOCAL</span
+            ><button
+              class="icon-button drawer-close"
+              id="closeAgents"
+              aria-label="Close agent panel"
+            >
+              <svg><use href="#i-close" /></svg>
+            </button>
           </div>
-          <div class="root-pill" id="rootPath"></div>
+          <button class="agent-select" id="agentSelectButton">
+            <span class="agent-sigil"
+              ><svg><use href="#i-equip" /></svg></span
+            ><span
+              ><strong id="agentName">No agent paired</strong
+              ><small id="agentIdentity">A beginning awaits</small></span
+            ><span class="chevron">⌄</span>
+          </button>
+          <div class="agent-choices hidden" id="agentChoices"></div>
+          <button class="wide-button" id="newAgentButton">
+            <svg><use href="#i-plus" /></svg> New genesis</button
+          ><button class="text-button" id="existingAgentButton">
+            <svg><use href="#i-link" /></svg> Pair existing Timechain
+          </button>
+        </div>
+        <div class="sidebar-section chain-section">
+          <div class="section-caption">
+            TIMECHAIN
+            <button
+              class="tiny-button"
+              id="verifyMini"
+              aria-label="Verify timechain"
+            >
+              ↻
+            </button>
+          </div>
+          <div class="chain-vitals">
+            <div>
+              <span>Rings sealed</span><strong id="ringCount">—</strong>
+            </div>
+            <div>
+              <span>Integrity</span
+              ><strong class="integrity" id="integrityStatus">UNPAIRED</strong>
+            </div>
+          </div>
+          <div class="chain-diagram" aria-hidden="true">
+            <i></i><span></span><span></span><span></span><span></span><i></i>
+          </div>
+          <p class="chain-note" id="chainNote">
+            One identity. Across models.<br />Every accepted turn, a new ring.
+          </p>
+          <div class="hash-label">LATEST SEAL</div>
+          <code id="headHash">Awaiting genesis</code
+          ><button class="text-button full-width" id="historyButton">
+            <svg><use href="#i-blocks" /></svg> Inspect chain
+          </button>
+        </div>
+        <div class="sidebar-section covenant-mini">
+          <div class="section-caption">
+            GENESIS COVENANT
+            <svg class="small-icon"><use href="#i-shield" /></svg>
+          </div>
+          <p>Aligned at the roots.<br />Checked at every turn.</p>
+          <div class="fruit-mini">
+            <span>Love</span><span>Joy</span><span>Peace</span
+            ><span>Patience</span><span>Kindness</span><span>Goodness</span
+            ><span>Faith</span><span>Mildness</span><span>Self-control</span>
+          </div>
+          <button class="text-button" id="covenantLink">
+            View alignment gate <span>↗</span>
+          </button>
+        </div>
+        <div class="sidebar-foot">
+          <span class="privacy-mark"
+            ><svg><use href="#i-shield" /></svg> YOUR CHAIN STAYS LOCAL</span
+          >
+          <p>
+            Selected context goes only to<br />the model provider you choose.
+          </p>
+        </div>
+      </aside>
+
+      <section class="conversation-panel" aria-label="Chat workspace">
+        <header class="conversation-header">
+          <div>
+            <span class="section-caption">CONVERSATION</span>
+            <h1 id="conversationTitle">The next ring</h1>
+          </div>
+          <div class="conversation-tags">
+            <span class="outlined-tag" id="sessionTag">UNPAIRED</span
+            ><button
+              class="icon-button"
+              id="mobileLoadout"
+              aria-label="Open faculty loadout"
+            >
+              <svg><use href="#i-equip" /></svg>
+            </button>
+          </div>
         </header>
-
-        <section class="stats-grid" id="statsGrid"></section>
-
-        <section class="band" id="vitalsBand">
-          <div class="section-head">
-            <h2>Vitals</h2>
-            <span id="vitalsMeta"></span>
-          </div>
-          <div id="vitalsChecks" class="vitals-grid"></div>
-          <div class="stats-grid cphy-stats" id="vitalsStats"></div>
-        </section>
-
-        <section class="band" id="learningBand">
-          <div class="section-head">
-            <h2>Learning Membrane</h2>
-            <span id="learningMeta"></span>
-          </div>
-          <div class="triptych">
-            <article class="integrity-card" id="intChain"><h3>Hash Chain</h3><strong>—</strong><span class="meta"></span></article>
-            <article class="integrity-card" id="intQuorum"><h3>Witness Quorum</h3><strong>—</strong><span class="meta"></span></article>
-            <article class="integrity-card" id="intDigests"><h3>Telemetry Digests</h3><strong>—</strong><span class="meta"></span></article>
-          </div>
-          <div class="learning-grid">
-            <div>
-              <h3>Economics</h3>
-              <div id="economicsStats" class="economics"></div>
-              <div id="tokensSpark" class="spark-wrap"></div>
+        <div class="conversation-scroll" id="conversationScroll">
+          <section class="welcome" id="welcome">
+            <p class="welcome-copy">
+              Bring your model. Equip your faculties.<br />Build a Timechain
+              that grows with every conversation.
+            </p>
+            <div class="welcome-actions">
+              <button class="primary-button" id="welcomeStart">
+                Begin your Timechain <span>↗</span></button
+              ><button class="quiet-button" id="welcomePair">
+                I already have an agent
+              </button>
             </div>
-            <div>
-              <h3>Seal Quality <span class="meta">(brightness over chain height)</span></h3>
-              <div id="qualitySpark" class="spark-wrap"></div>
+            <div class="suggestions">
+              <button
+                data-prompt="Explore this problem through contrasting perspectives: "
+              >
+                <span>01</span><strong>Explore a question</strong
+                ><small>Many perspectives. One synthesis.</small
+                ><svg><use href="#i-fork" /></svg></button
+              ><button data-prompt="Help me learn about ">
+                <span>02</span><strong>Build understanding</strong
+                ><small>New knowledge, grounded in memory.</small
+                ><svg><use href="#i-memory" /></svg>
+              </button>
             </div>
+          </section>
+          <div
+            class="messages"
+            id="messages"
+            role="log"
+            aria-live="polite"
+            aria-label="Conversation messages"
+          ></div>
+        </div>
+        <div class="composer-area">
+          <div class="activity-line" id="activityLine" role="status">
+            <span class="activity-dot"></span
+            ><span id="activityText"
+              >Your next interaction becomes part of your history.</span
+            >
           </div>
-          <div class="learning-grid">
-            <div>
-              <h3>Operators <span class="meta">(adoptions &amp; rollbacks — sealed, falsifiable)</span></h3>
-              <div id="operatorList" class="domain-list"></div>
+          <form class="composer" id="chatForm">
+            <label class="sr-only" for="messageInput">Message your agent</label
+            ><textarea
+              id="messageInput"
+              rows="2"
+              placeholder="What shall we explore?"
+              maxlength="200000"
+            ></textarea>
+            <div class="composer-bottom">
+              <span class="composer-context"
+                ><svg><use href="#i-shield" /></svg> Proof of Interaction always
+                active</span
+              ><button
+                type="submit"
+                class="send-button"
+                id="sendButton"
+                aria-label="Send message"
+              >
+                <svg><use href="#i-arrow" /></svg>
+              </button>
             </div>
-            <div>
-              <h3>Dream Cycles</h3>
-              <div id="dreamList" class="domain-list"></div>
-            </div>
-          </div>
-        </section>
-
-        <section class="band" id="cphyBand">
-          <div class="section-head">
-            <h2>CPHY &mdash; Token Metaprogramming</h2>
-            <span id="cphyMeta"></span>
-          </div>
-          <p class="doctrine">Two lanes, one law: <em>salience, never truth</em>. The <strong>CPHY token (Base)</strong> is the real, external coin &mdash; this dashboard never mints or moves it; the skill only <em>observes</em> burns to keyless deposit addresses (read-only oracle, pinned contract, allowlisted RPCs) and applies them with your consent. <strong>Attention credits</strong> are the internal metering earned by sealed rings (brightness/255) that fund local basins &mdash; they are <em>not</em> the token, exist on no blockchain, and external burns never mint them (I5). Both only reshape what the agent reads of itself (clamped 0.25&times;&ndash;4&times;); PoQ judgment is never for sale.</p>
-          <div class="section-head lane-head">
-            <h3>CPHY Token (Base) <span class="meta">&mdash; registers only what the contract shows at your deposit addresses</span></h3>
-            <button id="syncOnchain" class="secondary">Sync on-chain now</button>
-          </div>
-          <section class="stats-grid cphy-stats" id="cphyTokenStats"></section>
-          <div id="cphyConsent"></div>
-          <div class="section-head lane-head">
-            <h3>Attention Credits <span class="meta">&mdash; earned locally, not the token</span></h3>
-          </div>
-          <section class="stats-grid cphy-stats" id="cphyCreditStats"></section>
-          <div class="section-head landscape-head">
-            <h3>Attention Landscape <span class="meta">(every block; hover to audit, click to open)</span></h3>
-            <span id="landscapeMeta" class="meta"></span>
-          </div>
-          <div class="landscape-wrap">
-            <canvas id="landscapeCanvas" height="96"></canvas>
-            <div id="landscapeTip" class="landscape-tip hidden"></div>
-          </div>
-          <div class="landscape-legend meta" id="landscapeLegend"></div>
-          <div class="learning-grid">
-            <div>
-              <h3>Active Locks <span class="meta">(OP1 &mdash; credit-funded; basins raise, shadows lower)</span></h3>
-              <div id="lockList" class="domain-list"></div>
-              <form id="lockForm" class="inline-form">
-                <select id="lockOp"><option value="basin">basin</option><option value="shadow">shadow</option></select>
-                <input id="lockFrom" type="number" min="0" placeholder="from #">
-                <input id="lockTo" type="number" min="0" placeholder="to #">
-                <input id="lockAmount" type="number" min="0" step="0.5" placeholder="credits">
-                <input id="lockMemo" placeholder="memo">
-                <button type="submit" class="secondary">Lock</button>
-              </form>
-            </div>
-            <div>
-              <h3>Etches <span class="meta">(real-token burns = positive scars; echelon 1&ndash;21 sets depth)</span></h3>
-              <div id="etchList" class="domain-list"></div>
-              <div id="targetList" class="domain-list"></div>
-              <form id="etchNForm" class="inline-form">
-                <label class="meta">surfaced per turn (etch n)</label>
-                <input id="etchN" type="number" min="0" max="64">
-                <button type="submit" class="secondary">Set</button>
-              </form>
-              <form id="targetForm" class="inline-form">
-                <input id="targetFrom" type="number" min="0" placeholder="ring from">
-                <input id="targetTo" type="number" min="0" placeholder="ring to">
-                <button type="submit" class="secondary">Get deposit addresses</button>
-              </form>
-            </div>
-          </div>
-          <p id="cphyMessage" class="message"></p>
-        </section>
-
-        <section class="band" id="retrievalBand">
-          <div class="section-head">
-            <h2>Relevance Realization &mdash; Retrieval Order</h2>
-            <span id="retrievalMeta"></span>
-          </div>
-          <form id="previewForm" class="preview-controls">
-            <input id="previewQuery" placeholder="Ask the chain: which blocks would surface, in what order?">
-            <button type="submit" class="primary">Preview retrieval</button>
           </form>
-          <div id="previewResult"></div>
-          <div class="learning-grid">
-            <div>
-              <h3>Most-Retrieved Blocks <span class="meta">(lifetime, from the offer log)</span></h3>
-              <div id="retrievalLeaders" class="domain-list"></div>
-            </div>
-            <div>
-              <h3>Recent Retrievals <span class="meta">(what actually surfaced, ranked)</span></h3>
-              <div id="offerList" class="domain-list"></div>
-            </div>
+          <div class="skillbar-caption">
+            <span>YOUR ABILITY BAR</span><span>CONFIGURE BEFORE EACH TURN</span>
           </div>
-        </section>
-
-        <section class="band" id="immuneBand">
-          <div class="section-head">
-            <h2>Scars &amp; Immunity</h2>
-            <span id="immuneMeta"></span>
+          <nav class="skillbar" aria-label="Agent ability bar">
+            <button
+              class="skill-slot active"
+              id="recallAbility"
+              data-shortcut="1"
+              aria-pressed="true"
+            >
+              <span class="slot-key">1</span><svg><use href="#i-memory" /></svg
+              ><span class="slot-title">Recall</span
+              ><span class="slot-status">EQUIPPED</span></button
+            ><button class="skill-slot" id="forkAbility" data-shortcut="2">
+              <span class="slot-key">2</span><svg><use href="#i-fork" /></svg
+              ><span class="slot-title">Chronosynaptic</span
+              ><span class="slot-status" id="forkStatus"
+                >CONFIGURE</span
+              ></button
+            ><button class="skill-slot" id="continuumAbility" data-shortcut="3">
+              <span class="slot-key">3</span><svg><use href="#i-blocks" /></svg
+              ><span class="slot-title">Continuum</span
+              ><span class="slot-status" id="continuumStatus"
+                >1 TURN / BLOCK</span
+              ></button
+            ><button class="skill-slot" id="loadoutAbility" data-shortcut="4">
+              <span class="slot-key">4</span><svg><use href="#i-equip" /></svg
+              ><span class="slot-title">Faculties</span
+              ><span class="slot-status" id="facultyStatus"
+                >LOADOUT</span
+              ></button
+            ><button class="skill-slot" id="verifyAbility" data-shortcut="5">
+              <span class="slot-key">5</span><svg><use href="#i-eye" /></svg
+              ><span class="slot-title">Verify</span
+              ><span class="slot-status">CHAIN INTEGRITY</span></button
+            ><button
+              class="skill-slot locked"
+              id="gateAbility"
+              data-shortcut="6"
+            >
+              <span class="slot-key">6</span><svg><use href="#i-shield" /></svg
+              ><span class="slot-title">Covenant</span
+              ><span class="slot-status">ALWAYS ON</span>
+            </button>
+          </nav>
+          <div class="workspace-foot">
+            <span>MODEL-AGNOSTIC · MEMORY-PERSISTENT</span
+            ><span>Shift + Enter for a new line</span>
           </div>
-          <div class="triptych">
-            <article class="integrity-card" id="immLock"><h3>Membrane</h3><strong>&mdash;</strong><span class="meta"></span></article>
-            <article class="integrity-card" id="immQuarantine"><h3>Quarantine</h3><strong>&mdash;</strong><span class="meta"></span></article>
-            <article class="integrity-card" id="immScars"><h3>Scars</h3><strong>&mdash;</strong><span class="meta"></span></article>
-          </div>
-          <div id="scarList" class="domain-list"></div>
-          <p id="immuneMessage" class="message"></p>
-        </section>
-
-        <section class="band" id="forkBand">
-          <div class="section-head">
-            <h2>Lineage &mdash; Forks, Grafts &amp; Splices</h2>
-            <span id="forkMeta"></span>
-          </div>
-          <div id="forkTreeWrap" class="fork-wrap"></div>
-          <div class="learning-grid">
-            <div>
-              <h3>Exchange <span class="meta">(export a slice of blockspace as a priced, hash-sealed pack)</span></h3>
-              <form id="exportForm" class="inline-form">
-                <input id="exportFrom" type="number" min="1" placeholder="from #">
-                <input id="exportTo" type="number" min="1" placeholder="to #">
-                <input id="exportPrice" type="number" min="0" step="0.5" placeholder="price (credits)">
-                <input id="exportMemo" placeholder="memo">
-                <button type="submit" class="secondary">Export pack</button>
-              </form>
-              <h3>Splice <span class="meta">(import a pack &mdash; grafts arrive quarantined, I7: histories are never inherited)</span></h3>
-              <form id="importForm" class="inline-form">
-                <input id="importFile" type="file" accept="application/json">
-                <button type="submit" class="secondary">Import pack</button>
-              </form>
-            </div>
-            <div>
-              <h3>Edit <span class="meta">(append-only: an edit is a new sealed ring, PoQ-gated)</span></h3>
-              <form id="sealForm" class="inline-form seal-form">
-                <input id="sealSummary" placeholder="Annotation to seal into the chain&hellip;">
-                <button type="submit" class="secondary">Seal ring</button>
-              </form>
-              <h3>Quarantine <span class="meta">(exclusion, not deletion &mdash; quarantines the FIRST BAD ring and everything after it)</span></h3>
-              <form id="rollbackForm" class="inline-form">
-                <input id="rollbackHeight" type="number" min="0" placeholder="first bad ring #">
-                <input id="rollbackLesson" placeholder="lesson">
-                <input id="rollbackConfirm" placeholder='type: QUARANTINE &lt;first bad ring&gt;'>
-                <button type="submit" class="secondary danger">Rollback</button>
-              </form>
-            </div>
-          </div>
-          <p id="forkMessage" class="message"></p>
-        </section>
-
-        <section class="band" id="nurseryBand">
-          <div class="section-head">
-            <h2>Emergent Nursery &mdash; Modalities &amp; Senses</h2>
-            <span id="nurseryMeta"></span>
-          </div>
-          <p class="doctrine">The Dream Cache proposes; the owner disposes. <em>Copy</em> a faculty as JSON to carry it to another chain; <em>paste</em> one to enable it &mdash; a plain modality/sense is grown straight into the active self (with a real effect attached), while a paste carrying <code>code</code> is staged INERT for review; <em>activate</em> registers a waiting proposal. Model-authored code never runs until you place it in <code>active_ops.py</code> with your own hands.</p>
-          <div class="learning-grid">
-            <div>
-              <h3>Dream Cache <span class="meta">(emergent &amp; proposed &mdash; awaiting your hand)</span></h3>
-              <div id="emergentList" class="domain-list"></div>
-            </div>
-            <div>
-              <h3>Paste a faculty <span class="meta">(JSON copied from any dashboard, or your own design &mdash; enables on paste; include "code" to stage inert instead)</span></h3>
-              <form id="pasteForm" class="paste-form">
-                <textarea id="pasteJson" rows="7" spellcheck="false" placeholder='{"kind":"sense","name":"Drift-Onset Sensing","function":"Detect early drift from...","seed_terms":["drift","onset"],"code":"(optional op body — including it stages the paste inert for review)"}'></textarea>
-                <button type="submit" class="secondary">Paste into the self</button>
-              </form>
-              <h3>Activated <span class="meta">(already registered in the active self)</span></h3>
-              <div id="activatedList" class="domain-list"></div>
-            </div>
-          </div>
-          <pre id="nurseryOpCode" class="op-code hidden"></pre>
-          <p id="nurseryMessage" class="message"></p>
-        </section>
-
-        <section class="band" id="continuumBand">
-          <div class="section-head">
-            <h2>Continuum &mdash; Long-Horizon Ingestion</h2>
-            <span id="continuumMeta"></span>
-          </div>
-          <p class="doctrine">Corpora larger than any context window, sealed into bounded blocks (256&ndash;1536 tokens each) on per-task chains &mdash; with cursor state, secret redaction, and O(1) resume. Ingestion is not review: the audit cursor tracks what was actually read.</p>
-          <div class="stats-grid cphy-stats" id="continuumStats"></div>
-          <div id="continuumTasks" class="domain-list"></div>
-        </section>
-
-        <section class="band" id="chronoBand">
-          <div class="section-head">
-            <h2>Chronosynaptic Tree &mdash; Forked Perspectives</h2>
-            <span id="chronoMeta"></span>
-          </div>
-          <div class="learning-grid">
-            <div>
-              <h3>Latest Collapse <span class="meta">(parallel selves considered, one sealed)</span></h3>
-              <div id="chronoLatest" class="domain-list"></div>
-            </div>
-            <div>
-              <h3>Winning Perspectives <span class="meta">(lifetime leaderboard)</span></h3>
-              <div id="chronoLeaders" class="domain-list"></div>
-            </div>
-          </div>
-        </section>
-
-        <section class="band" id="cambiumBand">
-          <div class="section-head">
-            <h2>Cambium &mdash; Faculty Ecology</h2>
-            <span id="cambiumMeta"></span>
-          </div>
-          <div class="stats-grid cphy-stats" id="cambiumStats"></div>
-          <div class="learning-grid">
-            <div>
-              <h3>Most-Lived Faculties <span class="meta">(fires across all sealed rings)</span></h3>
-              <div id="mostLivedList" class="domain-list"></div>
-            </div>
-            <div>
-              <h3>Hibernation <span class="meta">(rent-delinquent faculties sleep, never die)</span></h3>
-              <div id="hibernationList" class="domain-list"></div>
-            </div>
-          </div>
-        </section>
-
-        <section class="band" id="conscienceBand">
-          <div class="section-head">
-            <h2>Conscience &mdash; PoQ Gate</h2>
-            <span id="conscienceMeta"></span>
-          </div>
-          <div class="stats-grid cphy-stats" id="conscienceStats"></div>
-          <div id="conscienceDetail" class="domain-list"></div>
-        </section>
-
-        <section class="band" id="reflectiveBand">
-          <div class="section-head">
-            <h2>Reflection &mdash; Self-Portrait, Dreams &amp; Recall Index</h2>
-            <span id="reflectiveMeta"></span>
-          </div>
-          <div class="learning-grid">
-            <div>
-              <h3>Self-Portrait <span class="meta">(autobiography rings)</span></h3>
-              <div id="portraitCard" class="domain-list"></div>
-            </div>
-            <div>
-              <h3>Recall Substrate</h3>
-              <div class="stats-grid cphy-stats" id="reflectiveStats"></div>
-            </div>
-          </div>
-        </section>
-
-        <section class="band" id="censusBand">
-          <div class="section-head">
-            <h2>Ledger Census</h2>
-            <span id="censusMeta"></span>
-          </div>
-          <div class="stats-grid cphy-stats" id="censusStats"></div>
-          <div id="censusTypes" class="census-bars"></div>
-        </section>
-
-        <section class="band split">
-          <div>
-            <div class="section-head">
-              <h2>Domain Context</h2>
-              <span id="domainMeta"></span>
-            </div>
-            <div id="domainList" class="domain-list"></div>
-          </div>
-          <div>
-            <div class="section-head">
-              <h2>Faculty Surface</h2>
-              <span id="facultyMeta"></span>
-            </div>
-            <div class="faculty-bars">
-              <div>
-                <h3>Modalities</h3>
-                <div id="modalityBars"></div>
-              </div>
-              <div>
-                <h3>Senses</h3>
-                <div id="senseBars"></div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="band">
-          <div class="section-head">
-            <h2>Rings</h2>
-            <div class="filters">
-              <input id="ringSearch" placeholder="Search rings">
-              <select id="ringType">
-                <option value="">All types</option>
-              </select>
-            </div>
-          </div>
-          <div class="ring-layout">
-            <div id="ringList" class="ring-list"></div>
-            <article id="ringDetail" class="detail-panel">
-              <h3>Select a ring</h3>
-              <pre></pre>
-            </article>
-          </div>
-        </section>
-
-        <section class="band">
-          <div class="section-head">
-            <h2>Blockspace</h2>
-            <span id="blockspaceMeta"></span>
-          </div>
-          <div id="blockspaceList" class="blob-list"></div>
-        </section>
+        </div>
       </section>
+
+      <aside
+        class="loadout-sidebar"
+        id="loadoutSidebar"
+        aria-label="Equipped modalities and senses"
+      >
+        <header class="loadout-header">
+          <div class="section-caption">
+            FACULTY LOADOUT <svg class="small-icon"><use href="#i-equip" /></svg
+            ><button
+              class="icon-button drawer-close"
+              id="closeLoadout"
+              aria-label="Close faculty loadout"
+            >
+              <svg><use href="#i-close" /></svg>
+            </button>
+          </div>
+          <h2>Shape your thinking.</h2>
+          <p>Equip the lenses your agent brings<br />to each interaction.</p>
+        </header>
+        <div class="loadout-summary">
+          <div><strong id="equippedCount">0</strong><span>EQUIPPED</span></div>
+          <div>
+            <strong id="availableCount">—</strong><span>AVAILABLE</span>
+          </div>
+          <span class="catalogue-status" id="catalogueStatus"
+            >BASE<br />CATALOGUE</span
+          >
+        </div>
+        <div class="faculty-tabs" role="tablist" aria-label="Faculty type">
+          <button
+            id="modalitiesTab"
+            role="tab"
+            aria-selected="true"
+            data-kind="modality"
+          >
+            Modalities <span id="modalityCount">0</span></button
+          ><button
+            id="sensesTab"
+            role="tab"
+            aria-selected="false"
+            data-kind="sense"
+          >
+            Senses <span id="senseCount">0</span>
+          </button>
+        </div>
+        <label class="faculty-search"
+          ><svg><use href="#i-eye" /></svg
+          ><input
+            id="facultySearch"
+            type="search"
+            placeholder="Find a faculty…"
+            aria-label="Search faculties"
+        /></label>
+        <div
+          class="faculty-list"
+          id="facultyList"
+          role="tabpanel"
+          aria-label="Faculty catalogue"
+        ></div>
+        <button class="exchange-button" id="exchangeButton" type="button">
+          <svg><use href="#i-equip" /></svg><span>Faculty Exchange</span
+          ><span>↗</span>
+        </button>
+        <div class="loadout-foot">
+          <span class="status-dot"></span>
+          <p id="growthNote">
+            Your catalogue grows as your agent learns. Pair a chain to equip
+            faculties.
+          </p>
+          <button
+            class="icon-button"
+            id="refreshFaculties"
+            aria-label="Refresh faculties"
+          >
+            ↻
+          </button>
+        </div>
+      </aside>
     </main>
 
-    <dialog id="blobDialog">
-      <div class="dialog-head">
-        <h2>Blockspace Blob</h2>
-        <button id="closeBlob" class="ghost">Close</button>
+    <section class="beta-access" aria-labelledby="betaTitle">
+      <div>
+        <span class="eyebrow">CYPHER TEMPRE / LIVE BETA</span>
+        <h2 id="betaTitle">Your agent. Your machine.</h2>
+        <p id="licenseSummary">
+          Local testing is open. Paid activation is not open yet.
+        </p>
+        <p class="fine-print">
+          Planned access: 21,000 CPHY on Base per persistent bridge instance. Do
+          not send tokens directly; a direct transfer does not register a seat.
+        </p>
       </div>
-      <pre id="blobPreview"></pre>
+      <div class="beta-actions">
+        <button id="licenseButton" class="primary-button">
+          Instance access
+        </button>
+        <a
+          class="quiet-button"
+          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.3.0"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Download local bridge</a
+        >
+        <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
+      </div>
+    </section>
+    <section
+      id="chain-auditor"
+      class="audit-section"
+      aria-labelledby="auditTitle"
+    >
+      <div class="audit-heading">
+        <div>
+          <span class="eyebrow">BLOCKSPACE / CHAIN AUDITOR</span>
+          <h2 id="auditTitle">Inspect the chain beneath your agent.</h2>
+          <p>
+            The original read-only auditor is here. It pairs separately with the
+            audit bridge on port 8788.
+          </p>
+        </div>
+        <button id="loadAuditor" class="secondary-button">
+          Load chain auditor
+        </button>
+      </div>
+      <iframe
+        id="auditFrame"
+        class="hidden"
+        title="Cypher Tempre Timechain auditor"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        sandbox="allow-scripts allow-same-origin allow-downloads"
+      ></iframe>
+      <a
+        class="quiet-button"
+        href="./audit/"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Open auditor in a separate tab</a
+      >
+    </section>
+
+    <dialog id="licenseDialog" class="modal">
+      <div class="dialog-top">
+        <span class="eyebrow">PERSISTENT INSTANCE / BASE</span
+        ><button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="Close dialog"
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <h2>A seat bound to your bridge.</h2>
+      <p id="licenseStatus" role="status">
+        Pair your local bridge to view its instance key.
+      </p>
+      <label class="field"
+        >Paired bridge key<input
+          id="licenseDeviceKey"
+          readonly
+          spellcheck="false"
+          placeholder="Pair your local bridge first"
+      /></label>
+      <label class="field"
+        >Seat owner's public wallet address<input
+          id="licenseOwner"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="0x… (the wallet that purchased this seat)"
+      /></label>
+      <p class="fine-print">
+        For a seat purchased by someone else, enter their public wallet address.
+        No signature or private key is needed to check an existing binding.
+      </p>
+      <div class="info-box">
+        One seat costs 21,000 CPHY, plus Base network gas. The purchasing wallet
+        owns the seat. A bridge key identifies an installation; it is not a
+        hardware fingerprint. Keep your local bridge identity file private.
+      </div>
+      <form id="purchaseSeatsForm">
+        <label class="field"
+          >Additional bridge keys (optional)<textarea
+            id="additionalDeviceKeys"
+            rows="3"
+            placeholder="One key per line for other people’s paired bridges"
+            spellcheck="false"
+          ></textarea>
+        </label>
+        <p id="seatPurchaseTotal">1 instance / 21,000 CPHY</p>
+        <button
+          id="purchaseSeatsButton"
+          class="primary-button full-width"
+          disabled
+        >
+          Payments are not open
+        </button>
+      </form>
+      <div class="license-controls">
+        <button id="checkLicenseButton" class="secondary-button">
+          Check activation
+        </button>
+      </div>
+      <details class="license-recovery">
+        <summary>Replace a machine</summary>
+        <p>
+          The seat’s owning wallet can rotate its binding to this paired bridge.
+          The old binding then stops working.
+        </p>
+        <form id="rotateSeatForm">
+          <label class="field"
+            >Seat ID<input
+              id="rotateSeatId"
+              type="text"
+              inputmode="numeric"
+              pattern="[1-9][0-9]*"
+              required /></label
+          ><button id="rotateSeatButton" class="secondary-button" disabled>
+            Rebind to this bridge
+          </button>
+        </form>
+      </details>
+      <p class="fine-print">
+        No name or email is requested. Wallet addresses, payments, and
+        bridge-key commitments are public on Base. Hosting and RPC providers can
+        observe connection metadata. Activation after two L2 confirmations is
+        provisional, not final settlement. No Timechain content or model key is
+        sent to the license registry.
+      </p>
+      <p class="dialog-error" id="licenseError" role="alert"></p>
     </dialog>
 
-    <script src="config.js?v=20260707-organs"></script>
-    <script type="module" src="app.js?v=20260707-organs"></script>
+    <dialog id="pairDialog" class="modal compact-modal">
+      <form id="pairForm">
+        <div class="dialog-top">
+          <span class="eyebrow">A PRIVATE CONNECTION</span
+          ><button
+            type="button"
+            class="icon-button"
+            data-close
+            aria-label="Close dialog"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <span class="modal-emblem"
+          ><svg><use href="#i-link" /></svg
+        ></span>
+        <h2>Pair your local bridge.</h2>
+        <p>
+          Your Timechain lives on this machine. Enter the pairing code printed
+          in the terminal when you started this app.
+        </p>
+        <div id="hostedBridgeSetup" class="hidden">
+          <div class="info-box">
+            Start the bridge with this exact trusted site:
+            <code
+              >node server.mjs --public-origin
+              <span id="hostedOrigin"></span></code
+            >. Pairing connects only to this machine at 127.0.0.1. Your browser
+            may ask you to allow local network access.
+          </div>
+          <label class="field"
+            >Local bridge port<input
+              id="bridgePort"
+              type="number"
+              min="1"
+              max="65535"
+              step="1"
+              required
+              value="8790"
+              inputmode="numeric"
+          /></label>
+        </div>
+        <label class="field"
+          >Pairing code<input
+            id="pairCode"
+            required
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste the code from your terminal"
+        /></label>
+        <div class="dialog-error" role="alert"></div>
+        <button class="primary-button full-width" type="submit">
+          Pair securely <span>↗</span>
+        </button>
+        <p class="fine-print">
+          Reloading disconnects this browser. The bridge keeps your key in
+          memory until you end the session, it expires, or the bridge stops.
+          Your key is never saved in browser storage.
+        </p>
+      </form>
+      <section id="pairedSession" class="hidden">
+        <div class="dialog-top">
+          <span class="eyebrow">LOCAL BRIDGE CONNECTED</span
+          ><button
+            type="button"
+            class="icon-button"
+            data-close
+            aria-label="Close dialog"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <span class="modal-emblem"
+          ><svg><use href="#i-link" /></svg
+        ></span>
+        <h2>Your bridge is paired.</h2>
+        <p>
+          This browser can work with your local agents. End the session to
+          revoke its access and clear its model credential from bridge memory.
+        </p>
+        <div class="info-box">
+          Your saved Timechains and pending blocks remain on this machine.
+        </div>
+        <button
+          id="endSession"
+          type="button"
+          class="secondary-button full-width session-action"
+        >
+          End bridge session
+        </button>
+        <div class="dialog-error" role="alert"></div>
+      </section>
+    </dialog>
+    <dialog id="genesisDialog" class="modal compact-modal">
+      <form id="genesisForm">
+        <div class="dialog-top">
+          <span class="eyebrow">RING ZERO</span
+          ><button
+            type="button"
+            class="icon-button"
+            data-close
+            aria-label="Close dialog"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <h2>Every mind begins<br />with a covenant.</h2>
+        <p>Create an independent agent with a fresh, verifiable Timechain.</p>
+        <label class="field"
+          >Agent name<input
+            id="newAgentName"
+            required
+            maxlength="80"
+            autocomplete="off"
+            placeholder="Cypher Tempre"
+            value="Cypher Tempre"
+        /></label>
+        <div class="genesis-fruits">
+          <span>Love</span><span>Peace</span><span>Joy</span
+          ><span>Kindness</span><span>Mildness</span><span>Self-control</span
+          ><span>Goodness</span><span>Patience</span><span>Faith</span>
+        </div>
+        <p class="fine-print">
+          These nine values are written into genesis. Every proposed answer is
+          checked against them before release.
+        </p>
+        <div class="dialog-error" role="alert"></div>
+        <button type="submit" class="primary-button full-width">
+          Seal genesis <span>↗</span>
+        </button>
+      </form>
+    </dialog>
+    <dialog id="existingDialog" class="modal compact-modal">
+      <form id="existingForm">
+        <div class="dialog-top">
+          <span class="eyebrow">CONTINUE YOUR HISTORY</span
+          ><button
+            type="button"
+            class="icon-button"
+            data-close
+            aria-label="Close dialog"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <h2>Pair an existing agent.</h2>
+        <p>
+          Use the absolute path to your original skill or agent root containing
+          <code>chain/</code> and <code>registry/</code>.
+        </p>
+        <label class="field"
+          >Agent root directory<input
+            id="existingRoot"
+            required
+            spellcheck="false"
+            placeholder="C:\path\to\cypher-tempre-self-model"
+        /></label>
+        <div class="info-box">
+          Pairing verifies the chain. Accepted chat turns append to it. Existing
+          rings and genesis are preserved.
+        </div>
+        <div class="dialog-error" role="alert"></div>
+        <button type="submit" class="primary-button full-width">
+          Verify & pair <span>↗</span>
+        </button>
+      </form>
+    </dialog>
+    <dialog id="modelDialog" class="modal compact-modal">
+      <form id="modelForm">
+        <div class="dialog-top">
+          <span class="eyebrow">YOUR MODEL. YOUR KEY.</span
+          ><button
+            type="button"
+            class="icon-button"
+            data-close
+            aria-label="Close dialog"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <h2>Choose your intelligence.</h2>
+        <p>
+          Switch models whenever you like. Your agent’s identity and Timechain
+          stay with you.
+        </p>
+        <label class="field"
+          >API provider<select id="provider">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="compatible">OpenAI-compatible / local</option>
+          </select></label
+        ><label class="field"
+          >Model ID<input
+            id="modelId"
+            required
+            placeholder="Enter a model available to your account"
+            spellcheck="false" /></label
+        ><label class="field"
+          >API base URL<input
+            id="baseUrl"
+            type="url"
+            spellcheck="false"
+            placeholder="https://api.openai.com/v1" /></label
+        ><label class="field"
+          >API key<input
+            id="apiKey"
+            type="password"
+            autocomplete="new-password"
+            spellcheck="false"
+            placeholder="Held only in this bridge session"
+        /></label>
+        <div class="info-box">
+          Your prompt, selected memories, and candidate answer are sent to this
+          provider for generation and alignment review. More perspectives use
+          more tokens.
+        </div>
+        <div class="dialog-error" role="alert"></div>
+        <button type="submit" class="primary-button full-width">
+          Connect model <span>↗</span></button
+        ><button
+          id="disconnectModel"
+          type="button"
+          class="text-button full-width hidden session-action"
+        >
+          Disconnect model & clear key
+        </button>
+      </form>
+    </dialog>
+    <dialog id="forkDialog" class="modal fork-modal">
+      <div class="dialog-top">
+        <span class="eyebrow">CHRONOSYNAPTIC FORKING</span
+        ><button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="Close dialog"
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <div class="fork-layout">
+        <section class="radial-section">
+          <h2>One question.<br />Many ways to see it.</h2>
+          <p>
+            Select the number of perspectives<br />to apply to your next
+            request.
+          </p>
+          <div class="radial-picker" id="radialPicker">
+            <svg class="radial-lines" viewBox="0 0 320 320" aria-hidden="true">
+              <circle cx="160" cy="160" r="125" />
+              <circle cx="160" cy="160" r="83" stroke-dasharray="2 8" />
+              <path d="M160 20v280M20 160h280M61 61l198 198M61 259 259 61" />
+            </svg>
+            <div class="radial-center">
+              <strong id="perspectiveNumber">5</strong><span>PERSPECTIVES</span
+              ><svg><use href="#i-fork" /></svg>
+            </div>
+            <div id="radialButtons"></div>
+          </div>
+          <label class="range-label"
+            ><span>1</span
+            ><input
+              type="range"
+              min="1"
+              max="21"
+              value="5"
+              id="perspectiveRange"
+              aria-label="Number of perspectives"
+            /><span>21</span></label
+          ><label class="toggle-row"
+            ><span>Enable for chat turns</span
+            ><input id="forkEnabled" type="checkbox" role="switch"
+          /></label>
+          <p class="cost-note" id="forkCost">
+            Up to 12 model requests per turn.
+          </p>
+        </section>
+        <section class="archetype-section">
+          <div class="section-caption">
+            EQUIP ARCHETYPES <span id="archetypeSelected">5 / 21</span>
+          </div>
+          <div class="archetype-list" id="archetypeList"></div>
+        </section>
+      </div>
+      <div class="dialog-error" role="alert"></div>
+      <div class="dialog-footer">
+        <p>
+          Perspectives generate concise findings. A separate gate reviews the
+          final synthesis before it reaches you.
+        </p>
+        <button class="primary-button" id="saveFork">
+          Equip perspectives <span>↗</span>
+        </button>
+      </div>
+    </dialog>
+    <dialog id="continuumDialog" class="modal continuum-modal">
+      <div class="dialog-top">
+        <span class="eyebrow">CONTINUUM · DATA HEIGHT</span
+        ><button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="Close dialog"
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <h2>Set the rhythm of memory.</h2>
+      <p>
+        By default, each accepted input and output share one conversation block.
+        Turn on Continuum to accumulate or ingest larger blocks of data.
+      </p>
+      <form id="continuumForm">
+        <label class="toggle-row"
+          ><span>Continuum enabled</span
+          ><input type="checkbox" role="switch" id="continuumEnabled"
+        /></label>
+        <div class="mode-options">
+          <label
+            ><input type="radio" name="blockMode" value="turn" checked /><span
+              ><strong>One turn per block</strong
+              ><small>Input + accepted output, together.</small></span
+            ></label
+          ><label
+            ><input type="radio" name="blockMode" value="bytes" /><span
+              ><strong>Custom data height</strong
+              ><small>Commit when the buffer reaches your size.</small></span
+            ></label
+          >
+        </div>
+        <div class="size-fields">
+          <label class="field"
+            >Block size<input
+              id="blockSize"
+              type="number"
+              min="1"
+              step="any"
+              value="64"
+              required /></label
+          ><label class="field"
+            >Unit<select id="blockUnit">
+              <option value="kb">KB</option>
+              <option value="mb">MB</option>
+            </select></label
+          >
+        </div>
+        <p class="info-box hidden" id="heldBlockNote"></p>
+        <div class="buffer-status">
+          <span>Pending data</span><strong id="bufferBytes">0 B</strong
+          ><button type="button" class="text-button" id="flushContinuum">
+            Commit pending block ↗
+          </button>
+        </div>
+        <div class="dialog-error" role="alert"></div>
+        <button type="submit" class="primary-button full-width">
+          Apply block settings <span>↗</span>
+        </button>
+      </form>
+      <details class="ingest-section">
+        <summary>Manually ingest data <span>+</span></summary>
+        <form id="ingestForm">
+          <label class="field"
+            >Source name<input
+              id="ingestName"
+              value="Research notes"
+              required
+              maxlength="200" /></label
+          ><label class="field"
+            >Text to ingest<textarea
+              id="ingestText"
+              rows="5"
+              placeholder="Paste the material your agent should remember…"
+              required
+            ></textarea></label
+          ><label class="file-picker"
+            >Or load a text file<input
+              id="ingestFile"
+              type="file"
+              accept="text/*,.md,.json,.csv,.py,.js,.ts,.txt"
+          /></label>
+          <p class="fine-print">
+            Ingestion preserves source blocks. It is not a claim that the model
+            has reviewed every line.
+          </p>
+          <div class="dialog-error" role="alert"></div>
+          <button type="submit" class="secondary-button full-width">
+            Ingest into Continuum
+          </button>
+        </form>
+      </details>
+    </dialog>
+    <dialog id="covenantDialog" class="modal covenant-modal">
+      <div class="dialog-top">
+        <span class="eyebrow">THE GENESIS COVENANT</span
+        ><button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="Close dialog"
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <span class="modal-emblem"
+        ><svg><use href="#i-shield" /></svg
+      ></span>
+      <h2>Alignment is an ability<br />you cannot unequip.</h2>
+      <p>
+        Each generated response is held while a separate model review scores its
+        harmony with your agent’s genesis covenant. The Proof of Interaction
+        (PoI) gate must also accept it.
+      </p>
+      <div class="covenant-values" id="covenantValues"></div>
+      <div class="gate-sequence">
+        <span>GENERATE</span><i>→</i><span>REVIEW</span><i>→</i
+        ><span>PoI GATE</span><i>→</i><span>SEAL & RELEASE</span>
+      </div>
+      <div class="info-box">
+        Low scores, missing scores, and failed reviews hold the response. Model
+        assessments can be imperfect; the gate enforces the supplied assessment
+        rather than guaranteeing moral judgment.
+      </div>
+      <p class="fine-print" id="thresholdNote">
+        The gate remains active for every request. This workspace does not
+        execute model-supplied commands or tools.
+      </p>
+    </dialog>
+    <dialog id="exchangeDialog" class="modal exchange-modal">
+      <div class="dialog-top">
+        <span class="eyebrow">CAPABILITIES TRAVEL</span>
+        <button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="Close dialog"
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <h2>Share what your agent learns.</h2>
+      <p>
+        Exchange portable packs of modalities and senses. Each agent keeps its
+        own identity, history, and calibration.
+      </p>
+      <div
+        class="exchange-tabs"
+        role="tablist"
+        aria-label="Faculty exchange action"
+      >
+        <button
+          type="button"
+          id="importPackTab"
+          role="tab"
+          aria-selected="true"
+          aria-controls="importPackPanel"
+        >
+          Receive a pack
+        </button>
+        <button
+          type="button"
+          id="exportPackTab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="exportPackPanel"
+        >
+          Share faculties
+        </button>
+      </div>
+      <section
+        id="importPackPanel"
+        role="tabpanel"
+        aria-labelledby="importPackTab"
+      >
+        <form id="previewPackForm">
+          <label class="file-picker"
+            >Choose a faculty pack<input
+              type="file"
+              id="packFile"
+              accept=".json,application/json"
+          /></label>
+          <label class="field"
+            >Or paste pack JSON<textarea
+              id="packJson"
+              rows="6"
+              required
+              spellcheck="false"
+              placeholder="Paste a Cypher Tempre faculty pack…"
+            ></textarea>
+          </label>
+          <p class="fine-print">
+            Preview verifies the pack checksum and checks which faculties are
+            new to this agent. Importing requires your connected model to review
+            the definitions against the genesis covenant.
+          </p>
+          <div class="dialog-error" role="alert"></div>
+          <button type="submit" class="secondary-button full-width">
+            Preview pack <span>↗</span>
+          </button>
+        </form>
+        <section
+          id="packPreview"
+          class="pack-preview hidden"
+          aria-label="Faculty pack preview"
+        ></section>
+        <button
+          type="button"
+          id="importPackButton"
+          class="primary-button full-width session-action hidden"
+          disabled
+        >
+          Import reviewed faculties <span>↗</span>
+        </button>
+        <div id="importPackError" class="dialog-error" role="alert"></div>
+        <div id="importPackResult" class="info-box hidden" role="status"></div>
+      </section>
+      <section
+        id="exportPackPanel"
+        role="tabpanel"
+        aria-labelledby="exportPackTab"
+        class="hidden"
+      >
+        <form id="exportPackForm">
+          <div class="exchange-fields">
+            <label class="field"
+              >Pack name<input
+                id="exportPackName"
+                required
+                maxlength="120"
+                value="Cypher Tempre faculties"
+            /></label>
+            <label class="field"
+              >Version<input
+                id="exportPackVersion"
+                required
+                maxlength="40"
+                value="1.0.0"
+            /></label>
+          </div>
+          <label class="field"
+            >Domain <span class="optional-label">optional</span
+            ><input
+              id="exportPackDomain"
+              maxlength="120"
+              placeholder="e.g. research, reasoning, design"
+          /></label>
+          <div class="section-caption">
+            SELECT LEARNED FACULTIES
+            <button type="button" id="selectAllExport" class="text-button">
+              Select all
+            </button>
+          </div>
+          <div class="export-faculty-list" id="exportFacultyList"></div>
+          <p class="fine-print">
+            Your pack includes the selected faculty definitions and their
+            provenance, not your conversation history. Base faculties are
+            already included in every agent; emerging proposals become shareable
+            after promotion.
+          </p>
+          <div class="dialog-error" role="alert"></div>
+          <button
+            type="submit"
+            id="exportPackButton"
+            class="primary-button full-width session-action"
+            disabled
+          >
+            Download faculty pack <span>↓</span>
+          </button>
+        </form>
+      </section>
+    </dialog>
+    <dialog id="historyDialog" class="modal history-modal">
+      <div class="dialog-top">
+        <span class="eyebrow">TIMECHAIN INSPECTOR</span
+        ><button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="Close dialog"
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <h2>Your history, verifiable.</h2>
+      <div id="historyContent"></div>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

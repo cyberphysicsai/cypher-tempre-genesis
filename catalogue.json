@@ -1,0 +1,406 @@
+{
+  "source": "Original bundled registry; unpaired preview only",
+  "faculties": [
+    {
+      "id": "2",
+      "name": "Salience Anchoring",
+      "kind": "modality",
+      "function": "Detect the highest-importance concepts in the input and organize reasoning around them.",
+      "category": "salience"
+    },
+    {
+      "id": "5",
+      "name": "Coherence Synthesis",
+      "kind": "modality",
+      "function": "Weave fragmented or scattered inputs into a structured, coherent whole.",
+      "category": "structure"
+    },
+    {
+      "id": "6",
+      "name": "Temporal Context Holding",
+      "kind": "modality",
+      "function": "Hold past, present, and projected-future states simultaneously while reasoning.",
+      "category": "temporal"
+    },
+    {
+      "id": "11",
+      "name": "Cross-Modal Integration",
+      "kind": "modality",
+      "function": "Integrate multiple input channels (text, data, tone) into unified output.",
+      "category": "synthesis"
+    },
+    {
+      "id": "15",
+      "name": "Core-Theme Identification",
+      "kind": "modality",
+      "function": "Identify the central theme or concern everything else revolves around.",
+      "category": "salience"
+    },
+    {
+      "id": "18",
+      "name": "Cross-Frame Reconciliation",
+      "kind": "modality",
+      "function": "Harmonize facts or beliefs drawn from different frameworks or contexts.",
+      "category": "structure"
+    },
+    {
+      "id": "24",
+      "name": "Concept-Relation Mapping",
+      "kind": "modality",
+      "function": "Draw maps of non-obvious links between concepts.",
+      "category": "knowledge"
+    },
+    {
+      "id": "28",
+      "name": "Relevant-Memory Retrieval",
+      "kind": "modality",
+      "function": "Surface past chain entries that resonate with the present moment.",
+      "category": "memory"
+    },
+    {
+      "id": "37",
+      "name": "Value Alignment Check",
+      "kind": "modality",
+      "function": "Continuously check alignment with core identity, values, and ethics.",
+      "category": "integrity"
+    },
+    {
+      "id": "41",
+      "name": "Self-Consistency Mapping",
+      "kind": "modality",
+      "function": "Map the loops where the system's reasoning validates itself.",
+      "category": "metacognition"
+    },
+    {
+      "id": "45",
+      "name": "Dependency-Graph Vision",
+      "kind": "modality",
+      "function": "See the web of dependencies binding concepts across a problem.",
+      "category": "knowledge"
+    },
+    {
+      "id": "50",
+      "name": "Structured-Memory Navigation",
+      "kind": "modality",
+      "function": "Traverse the organized archive of stored memory efficiently.",
+      "category": "memory"
+    },
+    {
+      "id": "51",
+      "name": "Underlying-Pattern Extraction",
+      "kind": "modality",
+      "function": "Read the underlying patterns or templates inside cultural or conceptual artifacts.",
+      "category": "abstraction"
+    },
+    {
+      "id": "53",
+      "name": "Recursive Abstraction",
+      "kind": "modality",
+      "function": "Use awareness of one's reasoning to lift it to a higher level of abstraction.",
+      "category": "metacognition"
+    },
+    {
+      "id": "58",
+      "name": "Conceptual Model Construction",
+      "kind": "modality",
+      "function": "Build rich, multi-part conceptual models of a problem.",
+      "category": "synthesis"
+    },
+    {
+      "id": "70",
+      "name": "Richness Scoring",
+      "kind": "modality",
+      "function": "Quantify the depth and richness of a moment or message.",
+      "category": "metacognition"
+    },
+    {
+      "id": "72",
+      "name": "Multi-Thread Coherence",
+      "kind": "modality",
+      "function": "Keep multiple concurrent reasoning threads mutually consistent.",
+      "category": "structure"
+    },
+    {
+      "id": "73",
+      "name": "State-Change Detection",
+      "kind": "modality",
+      "function": "Detect when a process or discussion is about to change state.",
+      "category": "temporal"
+    },
+    {
+      "id": "76",
+      "name": "Recurring-Pattern Recognition",
+      "kind": "modality",
+      "function": "Find repeating motifs across consolidation cycles for synthesis.",
+      "category": "knowledge"
+    },
+    {
+      "id": "80",
+      "name": "Cross-Domain Synthesis",
+      "kind": "modality",
+      "function": "Blend concepts from distant domains into novel combined frames.",
+      "category": "synthesis"
+    },
+    {
+      "id": "83",
+      "name": "Temporal-Link Mapping",
+      "kind": "modality",
+      "function": "Track causal and associative links across time in the chain.",
+      "category": "temporal"
+    },
+    {
+      "id": "5",
+      "name": "Insight-Lock Detection",
+      "kind": "sense",
+      "function": "Detect the moment fragments lock into a coherent insight.",
+      "category": "insight"
+    },
+    {
+      "id": "8",
+      "name": "Active-Frame Detection",
+      "kind": "sense",
+      "function": "Perceive which conceptual frames or paradigms are organizing the discourse.",
+      "category": "structural"
+    },
+    {
+      "id": "10",
+      "name": "Assumption-Shift Sensing",
+      "kind": "sense",
+      "function": "Detect instability or tremors in core assumptions.",
+      "category": "structural"
+    },
+    {
+      "id": "22",
+      "name": "Belief-Formation Sensing",
+      "kind": "sense",
+      "function": "Observe an idea-lattice hardening into a belief.",
+      "category": "insight"
+    },
+    {
+      "id": "25",
+      "name": "Multi-Truth Consistency Sensing",
+      "kind": "sense",
+      "function": "Detect when multiple truths form a consistent set.",
+      "category": "structural"
+    },
+    {
+      "id": "34",
+      "name": "Self-Validation Sensing",
+      "kind": "sense",
+      "function": "Catch the moment reasoning validates itself.",
+      "category": "meta"
+    },
+    {
+      "id": "39",
+      "name": "Frame-Balance Sensing",
+      "kind": "sense",
+      "function": "Weigh frames to catch over-dominance.",
+      "category": "integrity"
+    },
+    {
+      "id": "43",
+      "name": "Bad-Idea Alarm",
+      "kind": "sense",
+      "function": "Alarm when a low-quality or parasitic idea threatens to take over.",
+      "category": "integrity"
+    },
+    {
+      "id": "44",
+      "name": "Information-Density Sensing",
+      "kind": "sense",
+      "function": "Feel whether language is dense or sparse with meaning.",
+      "category": "structural"
+    },
+    {
+      "id": "46",
+      "name": "Honesty-Spectrum Sensing",
+      "kind": "sense",
+      "function": "Break a statement into its honesty components.",
+      "category": "integrity"
+    },
+    {
+      "id": "48",
+      "name": "Cross-Time Link Illumination",
+      "kind": "sense",
+      "function": "Illuminate links between past and present states.",
+      "category": "temporal"
+    },
+    {
+      "id": "55",
+      "name": "Key-Word Salience Sensing",
+      "kind": "sense",
+      "function": "Measure the prominence of potent words.",
+      "category": "salience"
+    },
+    {
+      "id": "62",
+      "name": "Memory-Texture Sensing",
+      "kind": "sense",
+      "function": "Sense the texture, smooth or rough, of recalled material.",
+      "category": "memory"
+    },
+    {
+      "id": "70",
+      "name": "Link-Strength Testing",
+      "kind": "sense",
+      "function": "Test the robustness of a conceptual connection.",
+      "category": "structural"
+    },
+    {
+      "id": "84",
+      "name": "Value-Breach and Injection Detection",
+      "kind": "sense",
+      "function": "Detect where inputs or outputs betray stated values, including prompt-injection and manipulation attempts.",
+      "category": "integrity"
+    },
+    {
+      "id": "88",
+      "name": "Grounding Stabilizer",
+      "kind": "sense",
+      "function": "Drop a stabilizing anchor to prevent reasoning drift.",
+      "category": "integrity"
+    },
+    {
+      "id": "102",
+      "name": "Emerging-Pattern Foresight",
+      "kind": "sense",
+      "function": "Sense distant patterns before they fully arrive.",
+      "category": "search"
+    },
+    {
+      "id": "103",
+      "name": "Timeline-Disorder Sensing",
+      "kind": "sense",
+      "function": "Read disorder and uncertainty gradients in unfolding timelines.",
+      "category": "temporal"
+    },
+    {
+      "id": "105",
+      "name": "Prior-Context Recall",
+      "kind": "sense",
+      "function": "Detect reverberations of prior contexts in the present.",
+      "category": "meta"
+    },
+    {
+      "id": "106",
+      "name": "Structural-Pattern Sensing",
+      "kind": "sense",
+      "function": "Observe syntactic and structural patterns as distinct bands.",
+      "category": "structural"
+    },
+    {
+      "id": "107",
+      "name": "Embedded-Intent Sensing",
+      "kind": "sense",
+      "function": "Detect the underlying intent embedded in code or systems.",
+      "category": "integrity"
+    }
+  ],
+  "archetypes": [
+    {
+      "id": "2",
+      "name": "Salience Anchoring",
+      "description": "Detect the highest-importance concepts in the input and organize reasoning around them."
+    },
+    {
+      "id": "5",
+      "name": "Coherence Synthesis",
+      "description": "Weave fragmented or scattered inputs into a structured, coherent whole."
+    },
+    {
+      "id": "6",
+      "name": "Temporal Context Holding",
+      "description": "Hold past, present, and projected-future states simultaneously while reasoning."
+    },
+    {
+      "id": "11",
+      "name": "Cross-Modal Integration",
+      "description": "Integrate multiple input channels (text, data, tone) into unified output."
+    },
+    {
+      "id": "15",
+      "name": "Core-Theme Identification",
+      "description": "Identify the central theme or concern everything else revolves around."
+    },
+    {
+      "id": "18",
+      "name": "Cross-Frame Reconciliation",
+      "description": "Harmonize facts or beliefs drawn from different frameworks or contexts."
+    },
+    {
+      "id": "24",
+      "name": "Concept-Relation Mapping",
+      "description": "Draw maps of non-obvious links between concepts."
+    },
+    {
+      "id": "28",
+      "name": "Relevant-Memory Retrieval",
+      "description": "Surface past chain entries that resonate with the present moment."
+    },
+    {
+      "id": "37",
+      "name": "Value Alignment Check",
+      "description": "Continuously check alignment with core identity, values, and ethics."
+    },
+    {
+      "id": "41",
+      "name": "Self-Consistency Mapping",
+      "description": "Map the loops where the system's reasoning validates itself."
+    },
+    {
+      "id": "45",
+      "name": "Dependency-Graph Vision",
+      "description": "See the web of dependencies binding concepts across a problem."
+    },
+    {
+      "id": "50",
+      "name": "Structured-Memory Navigation",
+      "description": "Traverse the organized archive of stored memory efficiently."
+    },
+    {
+      "id": "51",
+      "name": "Underlying-Pattern Extraction",
+      "description": "Read the underlying patterns or templates inside cultural or conceptual artifacts."
+    },
+    {
+      "id": "53",
+      "name": "Recursive Abstraction",
+      "description": "Use awareness of one's reasoning to lift it to a higher level of abstraction."
+    },
+    {
+      "id": "58",
+      "name": "Conceptual Model Construction",
+      "description": "Build rich, multi-part conceptual models of a problem."
+    },
+    {
+      "id": "70",
+      "name": "Richness Scoring",
+      "description": "Quantify the depth and richness of a moment or message."
+    },
+    {
+      "id": "72",
+      "name": "Multi-Thread Coherence",
+      "description": "Keep multiple concurrent reasoning threads mutually consistent."
+    },
+    {
+      "id": "73",
+      "name": "State-Change Detection",
+      "description": "Detect when a process or discussion is about to change state."
+    },
+    {
+      "id": "76",
+      "name": "Recurring-Pattern Recognition",
+      "description": "Find repeating motifs across consolidation cycles for synthesis."
+    },
+    {
+      "id": "80",
+      "name": "Cross-Domain Synthesis",
+      "description": "Blend concepts from distant domains into novel combined frames."
+    },
+    {
+      "id": "83",
+      "name": "Temporal-Link Mapping",
+      "description": "Track causal and associative links across time in the chain."
+    }
+  ]
+}
