@@ -1,5 +1,21 @@
 # Preview validation
 
+## Security and functional audit: beta 0.4.1
+
+The audit found and corrected integration gaps that earlier fixture tests did not cover. It does not certify the application as vulnerability-free or prove identical answer quality to every workflow in the skill.
+
+- The complete backend/provider suite with the external parity reference passed **116 tests**, with one expected Windows case-sensitivity skip. A further frontend version-gate test passed alongside the existing three display tests. The Python adapter suite passed **39 tests**. All 65 native engine files remain byte-identical to the published engine.
+- Exact active credentials are rejected in model-bound context, raw provider output, nested decoded review data and injected transports before release, pending storage or native commitment. Synthetic reflection tests verified that credentials do not reach output or saved records. This is exact active-key protection, not general secret detection.
+- The reviewer now receives bounded canonical evidence and recent conversational context, and explicitly declares the evidence it relied on. The native adapter resolves that evidence from verified, released, nonquarantined chain records. Aggregate-coverage and optional entity-grounding fixtures that previously passed incorrectly now match the original engine's uncertainty decisions.
+- Source ingestion now applies the native secret-pattern redactor before model calls and storage. Regressions cover small UTF-8 block boundaries through redaction markers, exact safe-source hashes, and false marker lookalikes. Continuum labeling now respects the actual equipped loadout, including an empty loadout.
+- A real HTTP bridge/provider-transport/native-engine probe with synthetic model responses verified recall off/on, empty/equipped faculties, 1/3/21 perspective requests, size-based pending blocks, re-reviewed flush, malformed and low reviews, unchanged rejected-chain heads and final chain verification. The 21-perspective case produced 21 candidates plus a synthesis, each with a review: 44 provider requests.
+- Existing-chain tests use the genuine original skill engine. Historical chain and policy bytes remain unchanged after pairing and new-schema continuation; both verifiers pass. Native scoring parity still covers 44 cases spanning all four decisions.
+- Independent wallet review passed all 28 focused wallet tests. The active flow requests a scoped message signature, not spending approval, a permit or a transaction. Privacy boundaries include the browser, chosen model provider and RPC provider; wallet use is not anonymous.
+- The deployed 0.4.0 public assets were verified against their release Git blobs, with expected security headers. Probes for environment, Git, local state and bridge-source paths returned denial or the public page, not private files. The 0.4.1 frontend requires an updated bridge before sending a pairing code; a browser fixture confirmed zero pairing requests to a 0.4.0 bridge.
+- OpenCode Go transport adds an honest client user agent and a random in-memory session identifier. Its provider-specific access, model support, data-use terms and billing remain external dependencies.
+
+The deliberate false-arithmetic fixture can still pass both original and wrapped gates when a synthetic reviewer supplies high scores. Mechanical checks cannot independently determine arbitrary factual truth. A model benchmark measures only its stated tasks and settings; it is not a hallucination-elimination guarantee. Router/replay, full iterative MCTS and complete training/consolidation workflows are not automatically invoked by the chat surface. Real-model benchmark evidence is recorded separately from these no-cost regression results.
+
 ## ChainChat beta 0.4.0
 
 - Full Node suite with the external original-engine parity reference: **100 passed, 0 failed, 1 Windows-only skip**. This includes 19 holdings backend tests, 9 wallet-flow tests and 3 display/access-routing tests.

@@ -11,6 +11,7 @@ import { StateStore } from "../lib/state.mjs";
 
 const HASH = (index) => index.toString(16).padStart(64, "0");
 const goodReview = () => ({
+  usedRings: [],
   approved: true,
   decision: "approve",
   scores: Object.fromEntries(DIMENSIONS.map((k) => [k, 230])),
@@ -39,6 +40,16 @@ async function fixture(t, overrides = {}) {
     reviewCalls = [];
   const engine = async (request) => {
     calls.push(structuredClone(request));
+    if (request.op === "sanitize_source")
+      return {
+        text: request.text,
+        redactionCount: 0,
+        bytes: Buffer.byteLength(request.text, "utf8"),
+        sourceHash: (await import("node:crypto"))
+          .createHash("sha256")
+          .update(request.text)
+          .digest("hex"),
+      };
     if (request.op === "init") {
       chains.set(request.root, { name: request.name, index: 0 });
       return inspect(chains.get(request.root));
@@ -59,6 +70,7 @@ async function fixture(t, overrides = {}) {
         loadout: request.loadout,
         frames: [],
         computed: {},
+        ...(overrides.prepare ? overrides.prepare(request, chain) : {}),
       };
     if (request.op === "evaluate")
       return overrides.evaluate
@@ -291,6 +303,93 @@ test("credentials remain in session memory and model switches preserve the chain
   assert.ok(
     f.calls.every((call) => !JSON.stringify(call).includes("memory-only-key")),
   );
+});
+
+test("reflected credentials from generation or review never reach pending files, native writes, state or response", async (t) => {
+  for (const stage of ["generation", "review"]) {
+    const secret = "never-persist-this-key";
+    const f = await fixture(t, {
+      generate: () => ({
+        text:
+          stage === "generation"
+            ? `Reflected credential: ${secret}`
+            : "A safe candidate.",
+      }),
+      review: () => ({
+        ...goodReview(),
+        rationale: `Reflected credential: ${secret}`,
+      }),
+    });
+    await f.ready();
+    const response = await f.request("/api/chat", {
+      message: "Synthetic reflection check",
+    });
+    assert.equal(response.status, 502, stage);
+    assert.equal(response.body.code, "PROVIDER_CREDENTIAL_REFLECTION");
+    assert.ok(!JSON.stringify(response.body).includes(secret));
+    assert.equal(f.reviewCalls.length, stage === "generation" ? 0 : 1);
+    assert.equal(
+      f.calls.some((call) =>
+        ["evaluate", "commit", "ingest", "pack_import"].includes(call.op),
+      ),
+      false,
+    );
+    assert.ok(!JSON.stringify(f.calls).includes(secret));
+    assert.ok(
+      !JSON.stringify((await f.request("/api/state")).body).includes(secret),
+    );
+    assert.ok(!(await allText(f.dataDir)).includes(secret));
+    assert.equal(
+      (await f.store.pending(f.store.agents[0])).exchanges.length,
+      0,
+    );
+  }
+});
+
+test("an active API key pasted into chat is held before provider or native preparation", async (t) => {
+  const f = await fixture(t);
+  await f.ready();
+  const before = f.calls.length;
+  const response = await f.request("/api/chat", {
+    message: "Accidental credential: never-persist-this-key",
+  });
+  assert.equal(response.status, 502);
+  assert.equal(response.body.code, "PROVIDER_CREDENTIAL_REFLECTION");
+  assert.equal(f.modelCalls.length, 0);
+  assert.equal(f.reviewCalls.length, 0);
+  assert.equal(f.calls.length, before);
+  assert.ok(!(await allText(f.dataDir)).includes("never-persist-this-key"));
+});
+
+test("expanded legacy evidence and conversation are bounded after normalization without changing canonical metadata", async (t) => {
+  const retired = ["qua", "lia"].join("");
+  const original = (retired + " ").repeat(1100);
+  assert.ok(Buffer.byteLength(original) <= 8192);
+  const hash = "ab".repeat(32);
+  const f = await fixture(t, {
+    prepare: () => ({
+      availableEvidence: [{ index: 1, hash, text: original, truncated: false }],
+      recentHistory: [{ input: original, output: original }],
+    }),
+  });
+  await f.ready();
+  const reply = await f.request("/api/chat", {
+    message: "A bounded-context request.",
+  });
+  assert.equal(reply.status, 200, JSON.stringify(reply.body));
+  const context = f.reviewCalls[0].args;
+  assert.equal(context.availableEvidence[0].hash, hash);
+  assert.equal(context.availableEvidence[0].index, 1);
+  assert.equal(context.availableEvidence[0].truncated, true);
+  for (const value of [
+    context.availableEvidence[0].text,
+    ...context.recentConversation.map((entry) => entry.content),
+  ]) {
+    assert.ok(Buffer.byteLength(value, "utf8") <= 8192);
+    assert.ok(!value.includes(retired));
+    assert.ok(value.includes("interaction"));
+  }
+  assert.ok(context.recentConversation.every((entry) => entry.truncated));
 });
 
 test("low fruitage holds the candidate, ignores browser score overrides and never commits", async (t) => {

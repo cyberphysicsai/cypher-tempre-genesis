@@ -36,6 +36,7 @@ const retired = new RegExp(`${priorName}|${priorGate}`, "i");
 const score = (value = 240) =>
   Object.fromEntries(DIMENSIONS.map((key) => [key, value]));
 const reviewed = () => ({
+  usedRings: [],
   decision: "approve",
   approved: true,
   scores: score(),

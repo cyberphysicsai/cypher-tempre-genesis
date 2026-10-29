@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blockHeight, formatTokenBalance, requiresHoldings } from "../public/chainchat-display.js";
+import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersion } from "../public/chainchat-display.js";
+
+test("pairing requires a bridge with the credential and grounding fixes", () => {
+  for (const old of [undefined, null, "", "0.3.0", "0.4.0", "0.4.1-beta", "garbage", "0.04.1", "0.4.9007199254740993"])
+    assert.equal(supportedBridgeVersion(old), false);
+  for (const current of ["0.4.1", "0.4.2", "0.5.0", "1.0.0"])
+    assert.equal(supportedBridgeVersion(current), true);
+});
 
 test("current block height is the last sealed index, including genesis zero", () => {
   assert.equal(blockHeight(null), "—");

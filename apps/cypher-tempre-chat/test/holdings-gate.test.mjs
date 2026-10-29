@@ -563,6 +563,13 @@ async function httpFixture(t, overrides = {}) {
     licenseNow: () => clock,
     engine: async (request) => {
       calls.push(request.op);
+      if (request.op === "sanitize_source")
+        return {
+          text: request.text,
+          redactionCount: 0,
+          bytes: Buffer.byteLength(request.text, "utf8"),
+          sourceHash: createHash("sha256").update(request.text).digest("hex"),
+        };
       if (overrides.engine) {
         const result = await overrides.engine(request, view);
         if (result !== undefined) return result;
@@ -571,6 +578,7 @@ async function httpFixture(t, overrides = {}) {
       return view;
     },
     review: async () => ({
+      usedRings: [],
       approved: true,
       decision: "approve",
       scores: Object.fromEntries(DIMENSIONS.map((key) => [key, 230])),

@@ -20,6 +20,7 @@ const exec = promisify(execFile);
 const answer =
   "We can consider the question patiently and clearly, and acknowledge uncertainty where information is missing.";
 const reviewResult = () => ({
+  usedRings: [],
   approved: true,
   decision: "approve",
   scores: Object.fromEntries(DIMENSIONS.map((k) => [k, 240])),
@@ -440,6 +441,148 @@ const megabyteSource = () => {
     "We consider each question with patience, kindness, and care, while acknowledging uncertainty.\n";
   return sentence.repeat(Math.ceil((1024 * 1024 + 4096) / sentence.length));
 };
+
+test(
+  "source credentials are sanitized before provider requests, byte splitting and native persistence",
+  { timeout: 300000 },
+  async (t) => {
+    const f = await start(t);
+    const secret = "sk-proj-" + "A1".repeat(24);
+    const source = `We consider this information patiently. ${secret} Kindness and uncertainty guide the discussion.`;
+    const response = await f.call("/api/continuum", {
+      name: "synthetic-secret-fixture",
+      text: source,
+      targetBytes: 64,
+    });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.body.redactionCount, 1);
+    assert.ok(!JSON.stringify(f.generated).includes(secret));
+    assert.ok(!JSON.stringify(f.reviewed).includes(secret));
+    const sourceRings = (await rings(f.root)).filter(
+      (ring) => ring.ring_type === "continuum",
+    );
+    const stored = sourceRings
+      .map((ring) => ring.payload.data.content)
+      .join("");
+    assert.ok(!stored.includes(secret));
+    assert.ok(stored.includes("[REDACTED_OPENAI_KEY]"));
+    assert.ok(
+      sourceRings.every(
+        (ring) => Buffer.byteLength(ring.payload.data.content, "utf8") <= 64,
+      ),
+    );
+    assert.equal(response.body.bytes, Buffer.byteLength(stored, "utf8"));
+    const allFiles = async (directory) => {
+      for (const entry of await fs.readdir(directory, {
+        withFileTypes: true,
+      })) {
+        const file = path.join(directory, entry.name);
+        if (entry.isDirectory()) await allFiles(file);
+        else
+          assert.ok(
+            !(await fs.readFile(file)).includes(Buffer.from(secret)),
+            file,
+          );
+      }
+    };
+    await allFiles(f.root);
+  },
+);
+
+test(
+  "review identifies actual canonical history and forwards only selected ring references to native commitment",
+  { timeout: 300000 },
+  async (t) => {
+    const fact = "CadenceBay has a value of 7.";
+    const f = await start(t, {
+      generate: () => ({ text: fact }),
+      review: (_config, args) => ({
+        ...reviewResult(),
+        usedRings: args.input.includes("prior")
+          ? args.availableEvidence
+              .filter((item) => item.text.includes(fact))
+              .slice(0, 1)
+              .map((item) => item.index)
+          : [],
+      }),
+    });
+    const first = await f.call("/api/chat", {
+      message: fact + " Repeat this supplied fact.",
+    });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(
+      (
+        await f.call("/api/settings", {
+          fork: true,
+          perspectives: 2,
+          archetypes: ["2", "5"],
+          continuum: { enabled: true, mode: "bytes", targetBytes: 16384 },
+        })
+      ).status,
+      200,
+    );
+    const response = await f.call("/api/chat", {
+      message: "Repeat the prior name and value.",
+    });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.body.message.pending, true);
+    assert.equal(response.body.message.perspectives.length, 2);
+    const reviewed = f.reviewed.at(-1).args;
+    assert.ok(
+      reviewed.availableEvidence.some((item) => item.text.includes(fact)),
+    );
+    assert.ok(
+      reviewed.recentConversation.some((item) => item.content.includes(fact)),
+    );
+    const selected = reviewed.availableEvidence.find((item) =>
+      item.text.includes(fact),
+    ).index;
+    assert.ok(
+      response.body.message.perspectives.every(
+        (perspective) =>
+          JSON.stringify(perspective.usedRings) === JSON.stringify([selected]),
+      ),
+    );
+    assert.deepEqual(
+      (await f.store.pending(f.store.agents[0])).exchanges[0].usedRings,
+      [selected],
+    );
+    const flushed = await f.call("/api/continuum/flush", {});
+    assert.equal(flushed.status, 200, JSON.stringify(flushed.body));
+    const exchange = (await chatRings(f.root)).at(-1).payload.exchanges[0];
+    assert.deepEqual(exchange.used_rings ?? exchange.usedRings, [selected]);
+  },
+);
+
+test(
+  "redacted assignment markers split across small source blocks retain exact byte limits",
+  { timeout: 300000 },
+  async (t) => {
+    const f = await start(t);
+    const secret = "synthetic-source-value";
+    const response = await f.call("/api/continuum", {
+      name: "assignment-secret",
+      text: `password=${secret}\nWe consider the matter with patience.`,
+      targetBytes: 16,
+    });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    const sourceRings = (await rings(f.root)).filter(
+      (ring) => ring.ring_type === "continuum",
+    );
+    const stored = sourceRings
+      .map((ring) => ring.payload.data.content)
+      .join("");
+    assert.equal(response.body.redactionCount, 1);
+    assert.ok(stored.includes("password=[REDACTED_SECRET]"));
+    assert.ok(!stored.includes(secret));
+    assert.ok(!JSON.stringify(f.generated).includes(secret));
+    assert.ok(
+      sourceRings.every(
+        (ring) => Buffer.byteLength(ring.payload.data.content, "utf8") <= 16,
+      ),
+    );
+  },
+);
 
 test(
   "a source larger than one MiB keeps its two MiB commitment boundary across reviewed semantic windows",
