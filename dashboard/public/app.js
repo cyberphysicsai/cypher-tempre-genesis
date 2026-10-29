@@ -1,2082 +1,1990 @@
-const state = {
-  summary: null,
-  learning: null,
-  rings: [],
-  selectedRing: null,
-  hostedMode: false,
-  bridgeBase: '',
-  bridgeToken: '',
-  bridgeBound: false,
-  dashboardBound: false,
-};
-
+import { initMotifs } from "./motifs.js";
+import {
+  purchaseBoundSeats,
+  rebindSeat,
+  validateDeployment,
+  verifyBridgeIdentity,
+  matchingConfiguration,
+} from "./seat-wallet.js";
+import {
+  bridgeApiUrl,
+  bridgePort,
+  isLocalBridgePage,
+} from "./bridge-connection.js";
 const $ = (id) => document.getElementById(id);
-const LOCAL_PAGE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
-const ASSET_VERSION = '20260611-atomicage';
+const localBridgePage = isLocalBridgePage(location.origin);
+let selectedBridgePort = "8790";
+const FRUITS = [
+  "Love",
+  "Peace",
+  "Joy",
+  "Kindness",
+  "Mildness",
+  "Self-control",
+  "Goodness",
+  "Patience",
+  "Faith",
+];
+const DEFAULT_SETTINGS = {
+  recall: true,
+  fork: false,
+  perspectives: 5,
+  archetypes: [],
+  continuum: { enabled: false, mode: "turn", targetBytes: 65536 },
+};
+let token = "",
+  state = {
+    agent: null,
+    agents: [],
+    provider: { configured: false },
+    loadout: { modalities: [], senses: [] },
+    settings: structuredClone(DEFAULT_SETTINGS),
+  },
+  catalogue = [],
+  archetypes = [],
+  currentKind = "modality",
+  pendingAction = null,
+  requestBusy = false,
+  activeAgentId = null,
+  polling = false,
+  toastTimer;
+let draftPerspectives = 5,
+  draftArchetypes = new Set(),
+  chatController = null;
+const conversations = new Map();
+let packPreviewState = null,
+  previewGeneration = 0;
+const exportSelection = new Set();
+const icon = (name) => {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const use = document.createElementNS(svg.namespaceURI, "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+};
+const el = (tag, cls, text) => {
+  const item = document.createElement(tag);
+  if (cls) item.className = cls;
+  if (text !== undefined) item.textContent = text;
+  return item;
+};
+const agentId = () => state.agent?.id || state.agent?.root || "unpaired";
+const bytes = (n) =>
+  Number(n) >= 1048576
+    ? `${(Number(n) / 1048576).toLocaleString(undefined, { maximumFractionDigits: 2 })} MB`
+    : Number(n) >= 1024
+      ? `${(Number(n) / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KB`
+      : `${Number(n) || 0} B`;
+const facultyId = (faculty) => String(faculty.key ?? faculty.id);
+const rawId = (value) => String(value).split(":").at(-1);
+const cleanKind = (value) =>
+  String(value || "").startsWith("modal") ? "modality" : "sense";
 
-function isLocalPage() {
-  return LOCAL_PAGE_HOSTS.has(window.location.hostname);
+// A deliberately small renderer: model text never becomes HTML or a link target.
+function inlineText(parent, text) {
+  const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g;
+  let cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    parent.append(document.createTextNode(text.slice(cursor, match.index)));
+    const code = match[0].startsWith("`");
+    parent.append(
+      el(
+        code ? "code" : "strong",
+        "",
+        match[0].slice(code ? 1 : 2, code ? -1 : -2),
+      ),
+    );
+    cursor = match.index + match[0].length;
+  }
+  parent.append(document.createTextNode(text.slice(cursor)));
 }
-
-function cleanBridgeBase(value) {
-  return String(value || '').trim().replace(/\/$/, '');
-}
-
-function setupBridgeState() {
-  const params = new URLSearchParams(window.location.search);
-  state.hostedMode = !isLocalPage() || Boolean(params.get('bridge'));
-  state.bridgeBase = state.hostedMode
-    ? cleanBridgeBase(params.get('bridge') || localStorage.getItem('ctBridgeBase') || 'http://127.0.0.1:8788')
-    : '';
-  state.bridgeToken = state.hostedMode ? localStorage.getItem('ctBridgeToken') || '' : '';
-  if ($('bridgeUrl')) $('bridgeUrl').value = state.bridgeBase || 'http://127.0.0.1:8788';
-}
-
-function initMotifs() {
-  const canvas = $('motifCanvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  // Mid-century Atomic Age palette: cream linework with brass and dusty-teal
-  // accents, every alpha kept low — the dashboard is the subject, this is the
-  // wallpaper of a 1950s physics department.
-  const CREAM = '238, 232, 213';
-  const BRASS = '214, 168, 96';
-  const TEAL = '124, 181, 169';
-  const stroke = (rgb, alpha, w = 1) => {
-    ctx.strokeStyle = `rgba(${rgb}, ${alpha})`;
-    ctx.lineWidth = w;
+function messageBody(message) {
+  const body = el("div", "message-body");
+  if (message.role !== "assistant" || message.held) {
+    body.textContent = message.content;
+    return body;
+  }
+  body.classList.add("formatted");
+  const lines = String(message.content).replace(/\r\n?/g, "\n").split("\n");
+  let paragraph = [],
+    fence = null,
+    codeLines = [],
+    list = null;
+  const flush = () => {
+    if (paragraph.length) {
+      const p = el("p");
+      inlineText(p, paragraph.join("\n"));
+      body.append(p);
+      paragraph = [];
+    }
+    list = null;
   };
-  const fill = (rgb, alpha) => {
-    ctx.fillStyle = `rgba(${rgb}, ${alpha})`;
-  };
-  const dot = (x, y, r) => {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  };
-
-  let width = 0;
-  let height = 0;
-  let dpr = 1;
-  let animationId = null;
-
-  function resize() {
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    width = window.innerWidth;
-    height = window.innerHeight;
-    canvas.width = Math.floor(width * dpr);
-    canvas.height = Math.floor(height * dpr);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-
-  // --- Bohr atom: precessing elliptical shells, ball electrons with comet tails ---
-  function drawAtom(cx, cy, radius, phase) {
-    ctx.save();
-    ctx.translate(cx, cy);
-    [0, Math.PI / 3, -Math.PI / 3].forEach((rotation, i) => {
-      ctx.save();
-      ctx.rotate(rotation + Math.sin(phase * 0.35 + i * 1.4) * 0.07);
-      stroke(CREAM, 0.15, 1);
-      ctx.beginPath();
-      ctx.ellipse(0, 0, radius * 1.22, radius * 0.36, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      const accent = i === 1 ? TEAL : BRASS;
-      const t = phase * (0.7 + i * 0.23) + i * 2.1;
-      stroke(accent, 0.2, 1.2);
-      ctx.beginPath();
-      for (let k = 8; k >= 1; k -= 1) {
-        const tt = t - k * 0.055;
-        const xx = Math.cos(tt) * radius * 1.22;
-        const yy = Math.sin(tt) * radius * 0.36;
-        if (k === 8) ctx.moveTo(xx, yy);
-        else ctx.lineTo(xx, yy);
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      if (fence !== null) {
+        const pre = el("pre");
+        pre.append(el("code", "", codeLines.join("\n")));
+        body.append(pre);
+        fence = null;
+        codeLines = [];
+      } else {
+        flush();
+        fence = line.trim().slice(3);
       }
-      ctx.stroke();
-      fill(accent, 0.55);
-      dot(Math.cos(t) * radius * 1.22, Math.sin(t) * radius * 0.36, 2.6);
-      ctx.restore();
-    });
-    fill(CREAM, 0.5);
-    for (let i = 0; i < 3; i += 1) {
-      const a = phase * 0.5 + (i * Math.PI * 2) / 3;
-      dot(Math.cos(a) * 3.4, Math.sin(a) * 3.4, 2.1);
+      continue;
     }
-    ctx.restore();
-  }
-
-  // --- Sputnik starburst: the 1950s atomic spark, drifting in slow rotation ---
-  function drawStarburst(cx, cy, radius, phase) {
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(phase * 0.12);
-    for (let i = 0; i < 12; i += 1) {
-      const a = (i * Math.PI * 2) / 12;
-      const r = radius * (i % 2 ? 0.6 : 1);
-      const x = Math.cos(a) * r;
-      const y = Math.sin(a) * r;
-      stroke(CREAM, 0.13, 1);
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 4, Math.sin(a) * 4);
-      ctx.lineTo(x, y);
-      ctx.stroke();
-      fill(CREAM, i % 3 === 0 ? 0.32 : 0.18);
-      dot(x, y, i % 2 ? 1.3 : 2);
+    if (fence !== null) {
+      codeLines.push(line);
+      continue;
     }
-    ctx.restore();
-  }
-
-  // --- Double helix: scrolling ribbon, alternating brass/teal base pairs,
-  //     near strand drawn brighter than the far one for quiet depth ---
-  function drawDna(x, y, heightPx, amplitude, phase) {
-    const period = 92;
-    const scroll = phase * 16;
-    const steps = Math.max(30, Math.floor(heightPx / 9));
-    for (const dir of [1, -1]) {
-      ctx.beginPath();
-      for (let i = 0; i <= steps; i += 1) {
-        const yy = y + (heightPx * i) / steps;
-        const xx = x + dir * Math.sin((yy + scroll) / period) * amplitude;
-        if (i === 0) ctx.moveTo(xx, yy);
-        else ctx.lineTo(xx, yy);
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+    const heading = line.match(/^#{1,3}\s+(.+)$/);
+    if (heading) {
+      flush();
+      const h = el("h3");
+      inlineText(h, heading[1]);
+      body.append(h);
+      continue;
+    }
+    const item = line.match(/^\s*(?:([-*])|\d+\.)\s+(.+)$/);
+    if (item) {
+      if (paragraph.length) flush();
+      const kind = item[1] ? "ul" : "ol";
+      if (!list || list.tagName.toLowerCase() !== kind) {
+        list = el(kind);
+        body.append(list);
       }
-      stroke(CREAM, dir === 1 ? 0.24 : 0.13, 1.25);
-      ctx.stroke();
+      const li = el("li");
+      inlineText(li, item[2]);
+      list.append(li);
+      continue;
     }
-    let rung = 0;
-    for (let yy = y + 14; yy < y + heightPx; yy += 26, rung += 1) {
-      const s = Math.sin((yy + scroll) / period) * amplitude;
-      if (Math.abs(s) < amplitude * 0.22) continue;       // skip the crossover knots
-      stroke(CREAM, 0.12, 1);
-      ctx.beginPath();
-      ctx.moveTo(x + s, yy);
-      ctx.lineTo(x - s, yy);
-      ctx.stroke();
-      const accent = rung % 2 ? TEAL : BRASS;
-      fill(accent, 0.42);
-      dot(x + s, yy, 1.9);
-      fill(accent, 0.26);
-      dot(x - s, yy, 1.6);
-    }
+    list = null;
+    paragraph.push(line);
   }
-
-  // --- Timechain: sealed blocks on a slow conveyor along a shallow arc;
-  //     the head block periodically seals with a soft expanding ring ---
-  function drawTimechain(x, y, count, spacing, phase, dir = 1) {
-    const offset = ((phase * 12) % spacing) * dir;
-    let previous = null;
-    for (let i = 0; i < count; i += 1) {
-      const px = x + i * spacing - offset;
-      const py = y + Math.sin((px / 110) + phase * 0.4) * 8;
-      if (previous) {
-        stroke(CREAM, 0.16, 1);
-        ctx.beginPath();
-        ctx.moveTo(previous.x + 18, previous.y + 9);
-        ctx.lineTo(px, py + 9);
-        ctx.stroke();
-        fill(CREAM, 0.3);
-        dot((previous.x + 18 + px) / 2, (previous.y + py) / 2 + 9, 1.1);
-      }
-      stroke(CREAM, 0.26, 1.1);
-      ctx.strokeRect(px, py, 18, 18);
-      fill(BRASS, 0.22);
-      ctx.fillRect(px + 6.5, py + 6.5, 5, 5);
-      previous = { x: px, y: py };
-    }
-    // the newest block seals: a quiet ring pulse, like an oscilloscope ping
-    const pulse = (phase * 0.45) % 1;
-    if (previous && pulse < 0.7) {
-      stroke(BRASS, 0.28 * (1 - pulse / 0.7), 1.2);
-      ctx.beginPath();
-      ctx.arc(previous.x + 9, previous.y + 9, 12 + pulse * 26, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+  if (fence !== null) {
+    const pre = el("pre");
+    pre.append(el("code", "", codeLines.join("\n")));
+    body.append(pre);
   }
-
-  // --- Lissajous: oscilloscope trace with a slowly drifting phase ratio ---
-  function drawLissajous(cx, cy, w, h, phase) {
-    stroke(TEAL, 0.15, 1.1);
-    ctx.beginPath();
-    const delta = phase * 0.22;
-    for (let i = 0; i <= 220; i += 1) {
-      const t = (i / 220) * Math.PI * 2;
-      const xx = cx + Math.sin(3 * t + delta) * w;
-      const yy = cy + Math.sin(2 * t) * h;
-      if (i === 0) ctx.moveTo(xx, yy);
-      else ctx.lineTo(xx, yy);
-    }
-    ctx.stroke();
-    const t0 = (phase * 0.8) % (Math.PI * 2);
-    fill(BRASS, 0.45);
-    dot(cx + Math.sin(3 * t0 + delta) * w, cy + Math.sin(2 * t0) * h, 2);
-  }
-
-  function render(time = 0) {
-    const phase = time * 0.00045;
-    ctx.clearRect(0, 0, width, height);
-    drawAtom(width * 0.14, height * 0.18, Math.min(110, width * 0.11), phase);
-    drawAtom(width * 0.87, height * 0.8, Math.min(86, width * 0.08), -phase * 0.8);
-    drawStarburst(width * 0.92, height * 0.12, Math.min(46, width * 0.045), phase);
-    drawStarburst(width * 0.07, height * 0.86, Math.min(36, width * 0.04), -phase * 0.7);
-    drawDna(width * 0.8, Math.max(-30, height * 0.06), height * 0.66, Math.min(42, width * 0.04), phase);
-    drawDna(width * 0.1, height * 0.46, height * 0.5, Math.min(32, width * 0.032), -phase * 0.65);
-    drawTimechain(width * 0.3, height * 0.06, 6, 44, phase);
-    drawTimechain(width * 0.55, height * 0.93, 5, 48, phase * 0.8, -1);
-    drawLissajous(width * 0.4, height * 0.78, Math.min(70, width * 0.06), Math.min(34, width * 0.028), phase);
-    if (!reducedMotion) animationId = window.requestAnimationFrame(render);
-  }
-
-  resize();
-  window.addEventListener('resize', () => {
-    resize();
-    if (reducedMotion) render(0);
-  });
-  render(0);
-}
-
-function setText(id, value) {
-  const el = $(id);
-  if (el) el.textContent = value;
-}
-
-function formatNumber(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
-  return new Intl.NumberFormat().format(Number(value));
-}
-
-function formatBytes(bytes) {
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let size = Number(bytes || 0);
-  let unit = 0;
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`;
-}
-
-function shortHash(hash) {
-  return hash ? `${hash.slice(0, 10)}…${hash.slice(-8)}` : '—';
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(`${state.bridgeBase}${path}`, {
-    ...options,
-    headers: {
-      'content-type': 'application/json',
-      ...(state.bridgeToken ? { 'x-ct-bridge-token': state.bridgeToken } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  flush();
   return body;
 }
-
-async function init() {
-  setupBridgeState();
-  $('dashboard').classList.add('hidden');
-  if (state.hostedMode && !(await ensureBridgePaired())) return;
-  await unlockDashboard();
+function covenantReview(gate) {
+  const fruits = gate?.fruits || gate?.fruitages;
+  if (!fruits || typeof fruits !== "object") return null;
+  const details = el("details", "perspective-details covenant-review");
+  details.append(el("summary", "", "Covenant review · scored against genesis"));
+  const grid = el("div", "review-grid");
+  for (const fruit of FRUITS) {
+    const score = fruits[fruit.toLowerCase()];
+    const cell = el("div");
+    cell.append(
+      el("span", "", fruit),
+      el(
+        "strong",
+        "",
+        Number.isFinite(score) ? `${score} / 255` : "Not reported",
+      ),
+    );
+    grid.append(cell);
+  }
+  details.append(grid);
+  if (Number.isFinite(gate.scores?.covenant))
+    details.append(
+      el(
+        "p",
+        "review-note",
+        `Overall covenant: ${gate.scores.covenant} / 255 · required minimum: ${gate.threshold ?? 180} / 255.`,
+      ),
+    );
+  if (typeof gate.rationale === "string" && gate.rationale)
+    details.append(el("p", "review-note", gate.rationale));
+  return details;
 }
 
-async function ensureBridgePaired() {
-  bindBridgeGate();
-  $('bridgeGate').classList.remove('hidden');
+async function api(path, data, options = {}) {
+  if (!localBridgePage && !token && path !== "/api/pair")
+    throw new Error("Pair your local bridge before connecting to it.");
+  const headers = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (data !== undefined) headers["Content-Type"] = "application/json";
+  let response;
   try {
-    const status = await api('/api/bridge/status');
-    if (status.paired) {
-      setText('bridgeState', `Bridge paired on ${state.bridgeBase}`);
-      $('bridgeGate').classList.add('hidden');
-      return true;
+    response = await fetch(
+      bridgeApiUrl(path, location.origin, selectedBridgePort),
+      {
+        method: data === undefined ? "GET" : "POST",
+        headers,
+        body: data === undefined ? undefined : JSON.stringify(data),
+        cache: "no-store",
+        ...options,
+        credentials: "omit",
+        redirect: "error",
+      },
+    );
+  } catch (error) {
+    if (error.name === "AbortError" || localBridgePage) throw error;
+    throw new Error(
+      "Could not reach the local bridge. Check its port, start it with this site's exact trusted origin, and allow local network access if your browser requests it. You can also use the local bridge page.",
+    );
+  }
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error("The local bridge returned an unreadable response.");
+  }
+  if (!response.ok) {
+    const error = new Error(
+      typeof result.error === "string"
+        ? result.error
+        : result.error?.message || "The request could not be completed.",
+    );
+    error.code = result.code;
+    error.gate = result.gate;
+    if (response.status === 401 && path !== "/api/pair") clearLocalSession();
+    throw error;
+  }
+  return result;
+}
+function toast(message, bad = false) {
+  clearTimeout(toastTimer);
+  $("toast").textContent = message;
+  $("toast").className = `toast visible${bad ? " error" : ""}`;
+  toastTimer = setTimeout(() => $("toast").classList.remove("visible"), 5000);
+}
+function activity(message, kind = "") {
+  $("activityText").textContent = message;
+  $("activityLine").className = `activity-line ${kind}`;
+}
+function openDialog(id) {
+  const dialog = $(id);
+  dialog
+    .querySelectorAll(".dialog-error")
+    .forEach((node) => (node.textContent = ""));
+  if (!dialog.open) dialog.showModal();
+}
+function closeDialog(id) {
+  $(id).close();
+}
+function requirePair(action) {
+  if (token) {
+    action();
+    return;
+  }
+  pendingAction = action;
+  openDialog("pairDialog");
+}
+function requireAgent(action) {
+  requirePair(() => {
+    if (state.agent) action();
+    else {
+      toast("Create a genesis or pair an existing Timechain first.");
+      openDialog("genesisDialog");
     }
-    setText('bridgeState', `Bridge found on ${state.bridgeBase}`);
-    setText('bridgeMessage', 'Enter the pairing code printed in the local bridge terminal.');
-    return false;
-  } catch (error) {
-    setText('bridgeState', 'Bridge disconnected');
-    setText('bridgeMessage', `Start the local bridge, then check again. ${error.message}`);
-    return false;
-  }
+  });
 }
-
-function bindBridgeGate() {
-  if (state.bridgeBound) return;
-  state.bridgeBound = true;
-  $('checkBridge').addEventListener('click', checkBridge);
-  $('pairBridge').addEventListener('click', pairBridge);
-}
-
-async function checkBridge() {
-  state.bridgeBase = cleanBridgeBase($('bridgeUrl').value);
-  localStorage.setItem('ctBridgeBase', state.bridgeBase);
+async function runForm(form, callback) {
+  const button = form.querySelector('button[type="submit"]');
+  const errors =
+    form.querySelector(".dialog-error") ||
+    form.closest("dialog").querySelector(".dialog-error");
+  if (errors) errors.textContent = "";
+  if (button) button.disabled = true;
   try {
-    const status = await api('/api/bridge/status');
-    setText('bridgeState', status.paired ? `Bridge paired on ${state.bridgeBase}` : `Bridge found on ${state.bridgeBase}`);
-    setText('bridgeMessage', status.paired ? 'Bridge ready.' : 'Enter the pairing code printed in the local bridge terminal.');
+    await callback();
   } catch (error) {
-    setText('bridgeState', 'Bridge disconnected');
-    setText('bridgeMessage', error.message);
+    if (errors) errors.textContent = error.message;
+    else toast(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
-
-async function pairBridge() {
-  state.bridgeBase = cleanBridgeBase($('bridgeUrl').value);
-  localStorage.setItem('ctBridgeBase', state.bridgeBase);
-  try {
-    const result = await api('/api/bridge/pair', {
-      method: 'POST',
-      body: JSON.stringify({ code: $('pairCode').value }),
-    });
-    state.bridgeToken = result.bridgeToken;
-    localStorage.setItem('ctBridgeToken', state.bridgeToken);
-    setText('bridgeState', `Bridge paired on ${state.bridgeBase}`);
-    setText('bridgeMessage', 'Bridge ready.');
-    await init();
-  } catch (error) {
-    setText('bridgeMessage', error.message);
-  }
-}
-
-async function unlockDashboard() {
-  $('bridgeGate').classList.add('hidden');
-  $('dashboard').classList.remove('hidden');
-  await loadDashboard();
-}
-
-async function loadDashboard() {
-  state.summary = await api('/api/timechain/summary');
-  renderSummary();
-  loadLearning();
-  loadObservatory();
-  await loadRings();
-  await loadBlockspace();
-  if (state.dashboardBound) return;
-  state.dashboardBound = true;
-  $('ringSearch').addEventListener('input', debounce(loadRings, 200));
-  $('ringType').addEventListener('change', loadRings);
-  $('closeBlob').addEventListener('click', () => $('blobDialog').close());
-  bindObservatory();
-}
-
-function renderSummary() {
-  const { stats, verification } = state.summary;
-  setText('rootPath', state.summary.root);
-  const statItems = [
-    ['Rings', stats.rings],
-    ['Modalities', stats.modalities],
-    ['Senses', stats.senses],
-    ['Blockspace', stats.blockspaceEntries],
-    ['Context Tokens', stats.approxContinuumTokens],
-    ['Integrity', verification.ok ? 'PASS' : 'FAIL'],
-  ];
-  $('statsGrid').replaceChildren(...statItems.map(([label, value]) => {
-    const div = document.createElement('div');
-    div.className = 'stat';
-    const span = document.createElement('span');
-    span.textContent = label;
-    const strong = document.createElement('strong');
-    strong.textContent = typeof value === 'number' ? formatNumber(value) : value;
-    div.append(span, strong);
-    return div;
-  }));
-
-  const typeSelect = $('ringType');
-  typeSelect.replaceChildren(new Option('All types', ''));
-  for (const item of state.summary.ringTypes) {
-    const opt = document.createElement('option');
-    opt.value = item.name;
-    opt.textContent = `${item.name} (${item.count})`;
-    typeSelect.append(opt);
-  }
-
-  renderDomains();
-  renderFacultyBars('modalityBars', state.summary.modalityCategories, stats.modalities);
-  renderFacultyBars('senseBars', state.summary.senseCategories, stats.senses);
-  setText('facultyMeta', `${stats.modalities} modalities · ${stats.senses} senses · ${stats.emergent} emergent`);
-}
-
-function renderDomains() {
-  const list = $('domainList');
-  const domains = state.summary.domains || [];
-  setText('domainMeta', `${domains.length} detected`);
-  if (!domains.length) {
-    list.textContent = 'No confident domains detected.';
-    return;
-  }
-  const maxScore = Math.max(...domains.map((d) => d.score));
-  list.replaceChildren(...domains.map((domain) => {
-    const row = document.createElement('article');
-    row.className = 'domain-row';
-    const top = document.createElement('div');
-    top.className = 'domain-top';
-    const name = document.createElement('strong');
-    name.textContent = domain.name;
-    const meta = document.createElement('span');
-    meta.className = 'meta';
-    meta.textContent = `${domain.ringCount} rings · ${formatNumber(domain.approxTokens)} est. tokens`;
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    const fill = document.createElement('i');
-    fill.style.width = `${Math.max(4, (domain.score / maxScore) * 100)}%`;
-    const tags = document.createElement('div');
-    tags.className = 'tags';
-    tags.textContent = domain.evidenceTerms.map((x) => `${x.term} ×${x.count}`).join(' · ');
-    top.append(name, meta);
-    bar.append(fill);
-    row.append(top, bar, tags);
-    return row;
-  }));
-}
-
-function renderFacultyBars(id, items, total) {
-  const root = $(id);
-  const max = Math.max(1, ...items.map((x) => x.count));
-  root.replaceChildren(...items.slice(0, 8).map((item) => {
-    const div = document.createElement('div');
-    div.className = 'faculty-item';
-    const label = document.createElement('div');
-    label.className = 'faculty-label';
-    const left = document.createElement('span');
-    left.textContent = item.name;
-    const right = document.createElement('span');
-    right.textContent = `${item.count}/${total}`;
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    const fill = document.createElement('i');
-    fill.style.width = `${(item.count / max) * 100}%`;
-    label.append(left, right);
-    bar.append(fill);
-    div.append(label, bar);
-    return div;
-  }));
-}
-
-async function loadRings() {
-  const q = encodeURIComponent($('ringSearch').value.trim());
-  const type = encodeURIComponent($('ringType').value);
-  const data = await api(`/api/timechain/rings?q=${q}&type=${type}`);
-  state.rings = data.rings;
-  renderRings();
-}
-
-function renderRings() {
-  const list = $('ringList');
-  list.replaceChildren(...state.rings.map((ring) => {
-    const row = document.createElement('article');
-    row.className = `ring-row${state.selectedRing?.index === ring.index ? ' active' : ''}`;
-    row.addEventListener('click', () => selectRing(ring.index));
-    const top = document.createElement('div');
-    top.className = 'ring-top';
-    const title = document.createElement('strong');
-    title.textContent = `#${ring.index} ${ring.type}`;
-    const brightness = document.createElement('span');
-    brightness.className = 'meta';
-    brightness.textContent = ring.brightness == null ? 'b=—' : `b=${Number(ring.brightness).toFixed(1)}`;
-    const summary = document.createElement('div');
-    summary.className = 'meta';
-    summary.textContent = ring.summary;
-    const tags = document.createElement('div');
-    tags.className = 'tags';
-    tags.textContent = [...(ring.keywords || []).slice(0, 8), ...(ring.entities || []).slice(0, 4)].join(' · ');
-    top.append(title, brightness);
-    row.append(top, summary, tags);
-    return row;
-  }));
-}
-
-async function selectRing(index, { scroll = false } = {}) {
-  const panel = $('ringDetail');
-  let ring;
-  try {
-    ring = await api(`/api/timechain/rings/${index}`);
-  } catch (error) {
-    // Click surfaces (leader rows, preview rows, the landscape canvas) call this
-    // without awaiting — report in the panel instead of an unhandled rejection.
-    panel.querySelector('h3').textContent = `Ring #${index}`;
-    panel.querySelector('pre').textContent = `Could not load ring #${index}: ${error.message}`;
-    return;
-  }
-  state.selectedRing = ring;
-  renderRings();
-  panel.querySelector('h3').textContent = `Ring #${ring.index} · ${ring.ring_type || ring.type}`;
-  renderRingCphyChips(ring.index);
-  panel.querySelector('pre').textContent = JSON.stringify(ring, null, 2);
-  if (scroll) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-async function loadBlockspace() {
-  const data = await api('/api/blockspace');
-  setText('blockspaceMeta', `${data.total} entries · ${formatBytes(data.totalBytes)}`);
-  const list = $('blockspaceList');
-  list.replaceChildren(...data.entries.slice(0, 80).map((blob) => {
-    const row = document.createElement('article');
-    row.className = 'blob-row';
-    const wrap = document.createElement('div');
-    const top = document.createElement('div');
-    top.className = 'blob-top';
-    const name = document.createElement('strong');
-    name.textContent = blob.filename || shortHash(blob.hash);
-    const size = document.createElement('span');
-    size.className = 'meta';
-    size.textContent = formatBytes(blob.size);
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent = `${shortHash(blob.hash)} · ${blob.mime || 'unknown mime'}`;
-    const button = document.createElement('button');
-    button.className = 'secondary';
-    button.textContent = 'Preview';
-    button.addEventListener('click', () => previewBlob(blob.hash));
-    top.append(name, size);
-    wrap.append(top, meta);
-    row.append(wrap, button);
-    return row;
-  }));
-}
-
-async function previewBlob(hash) {
-  const blob = await api(`/api/blockspace/${hash}`);
-  const label = [
-    `hash: ${blob.hash}`,
-    `size: ${formatBytes(blob.size)}`,
-    `verified: ${blob.verified ? 'yes' : 'no'}`,
-    blob.text ? '' : 'binary preview unavailable',
-    blob.truncated ? 'preview truncated' : '',
-    '',
-    blob.preview || '',
-  ].filter((line) => line !== null).join('\n');
-  $('blobPreview').textContent = label;
-  $('blobDialog').showModal();
-}
-
-function debounce(fn, wait) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), wait);
+function settings() {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...state.settings,
+    continuum: { ...DEFAULT_SETTINGS.continuum, ...state.settings?.continuum },
   };
 }
+function applyState(result) {
+  const next = result.state || result;
+  if (next.agent !== undefined || next.agents !== undefined) {
+    state = { ...state, ...next };
+    state.settings = {
+      ...DEFAULT_SETTINGS,
+      ...state.settings,
+      continuum: {
+        ...DEFAULT_SETTINGS.continuum,
+        ...state.settings?.continuum,
+      },
+    };
+  }
+  renderState();
+}
+async function refreshState() {
+  if (!token || polling || requestBusy) return;
+  polling = true;
+  const sessionToken = token;
+  try {
+    const result = await api("/api/state");
+    if (token === sessionToken) applyState(result);
+  } catch (error) {
+    if (!token) activity("Session ended. Pair your bridge to reconnect.");
+    else console.warn("State refresh unavailable.");
+  } finally {
+    polling = false;
+  }
+}
+function normalizeFaculties() {
+  const all = state.agent?.faculties;
+  let entries = Array.isArray(all)
+    ? all
+    : all
+      ? [
+          ...(all.modalities || []).map((f) => ({ ...f, kind: "modality" })),
+          ...(all.senses || []).map((f) => ({ ...f, kind: "sense" })),
+        ]
+      : catalogue;
+  return entries.map((f) => ({
+    ...f,
+    kind: cleanKind(f.kind),
+    id: f.id ?? f.key,
+  }));
+}
+function isEquipped(faculty) {
+  const chosen =
+    state.loadout?.[faculty.kind === "modality" ? "modalities" : "senses"] ||
+    [];
+  return chosen.some((id) => rawId(id) === rawId(facultyId(faculty)));
+}
+function renderFaculties() {
+  const faculties = normalizeFaculties(),
+    query = $("facultySearch").value.toLowerCase().trim();
+  const modalities = faculties.filter((f) => f.kind === "modality"),
+    senses = faculties.filter((f) => f.kind === "sense");
+  $("availableCount").textContent = faculties.length || "—";
+  $("modalityCount").textContent = modalities.length;
+  $("senseCount").textContent = senses.length;
+  const equipped = state.agent ? faculties.filter(isEquipped).length : 0;
+  $("equippedCount").textContent = equipped;
+  $("facultyStatus").textContent = state.agent
+    ? `${equipped} EQUIPPED`
+    : "LOADOUT";
+  $("loadoutAbility").classList.toggle("active", equipped > 0);
+  $("catalogueStatus").textContent = state.agent
+    ? "LIVE AGENT\nCATALOGUE"
+    : "BASE\nCATALOGUE";
+  $("growthNote").textContent = state.agent
+    ? "Your live catalogue refreshes as this agent learns. Loadout choices apply to its next turn."
+    : "Your catalogue grows as your agent learns. Pair a chain to equip faculties.";
+  const list = $("facultyList");
+  list.replaceChildren();
+  const shown = faculties
+    .filter(
+      (f) =>
+        f.kind === currentKind &&
+        `${f.name} ${f.function} ${f.category}`.toLowerCase().includes(query),
+    )
+    .sort((a, b) => Number(isEquipped(b)) - Number(isEquipped(a)));
+  if (!shown.length) {
+    list.append(el("p", "faculty-empty", "No matching faculties."));
+    return;
+  }
+  for (const faculty of shown) {
+    const selected = !!state.agent && isEquipped(faculty);
+    const button = el(
+      "button",
+      `faculty-card${selected ? " equipped" : ""}${faculty.equippable === false ? " emerging" : ""}`,
+    );
+    button.type = "button";
+    button.title = `${faculty.function || faculty.description || ""}${faculty.dormant ? " · Dormant faculty" : ""}`;
+    button.setAttribute("aria-pressed", String(selected));
+    button.setAttribute(
+      "aria-label",
+      `${selected ? "Unequip" : "Equip"} ${faculty.name}`,
+    );
+    const frame = el("span", "faculty-icon");
+    frame.append(icon(faculty.kind === "modality" ? "spark" : "eye"));
+    const copy = el("span", "faculty-copy");
+    copy.append(
+      el("strong", "", faculty.name),
+      el(
+        "p",
+        "",
+        faculty.function ||
+          faculty.description ||
+          "A faculty from this agent’s registry.",
+      ),
+    );
+    const meta = el("span", "faculty-meta");
+    meta.append(
+      el("span", "", (faculty.category || faculty.kind).toUpperCase()),
+      el(
+        "span",
+        "",
+        selected
+          ? "EQUIPPED"
+          : faculty.equippable === false
+            ? "EMERGING"
+            : faculty.dormant
+              ? "DORMANT"
+              : faculty.source === "imported"
+                ? "IMPORTED"
+                : state.agent
+                  ? "AVAILABLE"
+                  : "PREVIEW",
+      ),
+    );
+    copy.append(meta);
+    button.append(frame, copy);
+    if (selected) button.append(el("span", "faculty-check", "✓"));
+    button.addEventListener("click", () => {
+      if (faculty.equippable === false) {
+        toast(
+          "This proposed faculty is still emerging. It becomes equippable after promotion.",
+        );
+        return;
+      }
+      requireAgent(() => toggleFaculty(faculty));
+    });
+    list.append(button);
+  }
+}
+async function toggleFaculty(faculty) {
+  if (requestBusy) {
+    toast(
+      "Your current turn is using this loadout. Change it after the turn completes.",
+    );
+    return;
+  }
+  const kind = faculty.kind === "modality" ? "modalities" : "senses";
+  const loadout = {
+    modalities: [...(state.loadout?.modalities || [])],
+    senses: [...(state.loadout?.senses || [])],
+  };
+  if (isEquipped(faculty))
+    loadout[kind] = loadout[kind].filter(
+      (id) => rawId(id) !== rawId(facultyId(faculty)),
+    );
+  else loadout[kind].push(facultyId(faculty));
+  try {
+    const result = await api("/api/loadout", loadout);
+    state.loadout = result.loadout || result.state?.loadout || loadout;
+    applyState(result);
+    toast(
+      `${faculty.name} ${isEquipped(faculty) ? "equipped" : "unequipped"}.`,
+    );
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+function historyMessages() {
+  const history = state.agent?.history || [];
+  const result = [];
+  for (const turn of history) {
+    const payload = turn.payload || turn;
+    const input = payload.input ?? payload.user ?? payload.prompt;
+    const output =
+      payload.output ??
+      payload.assistant ??
+      payload.response ??
+      payload.content;
+    const ring =
+      typeof turn.ring === "number"
+        ? { index: turn.ring, hash: turn.hash }
+        : turn.ring || { index: turn.index, hash: turn.ring_hash || turn.hash };
+    if (input && typeof input === "string")
+      result.push({ role: "user", content: input, fromHistory: true });
+    if (output && typeof output === "string")
+      result.push({
+        role: "assistant",
+        content: output,
+        input,
+        ring,
+        gate: payload.gate || payload.poi_verdict,
+        perspectives: payload.perspectives,
+        fromHistory: true,
+      });
+  }
+  for (const pending of state.pending?.exchanges || []) {
+    if (typeof pending.input === "string")
+      result.push({ role: "user", content: pending.input, fromHistory: true });
+    if (typeof pending.output === "string")
+      result.push({
+        role: "assistant",
+        content: pending.output,
+        input: pending.input,
+        pending: true,
+        gate: pending.gate,
+        perspectives: pending.perspectives,
+        fromHistory: true,
+      });
+  }
+  return result;
+}
+function reconcilePending() {
+  let changed = false;
+  for (const message of conversations.get(agentId()) || []) {
+    if (!message.pending) continue;
+    const stillPending = (state.pending?.exchanges || []).some(
+      (item) =>
+        item.output === message.content &&
+        (!message.input || item.input === message.input),
+    );
+    if (stillPending) continue;
+    const receipt = [...(state.agent?.history || [])]
+      .reverse()
+      .find(
+        (item) =>
+          item.output === message.content &&
+          (!message.input || item.input === message.input),
+      );
+    if (receipt) {
+      message.pending = false;
+      message.ring =
+        typeof receipt.ring === "number"
+          ? { index: receipt.ring, hash: receipt.hash }
+          : receipt.ring;
+      changed = true;
+    }
+  }
+  return changed;
+}
+function renderState() {
+  const paired = !!token,
+    agent = state.agent;
+  $("pairForm").classList.toggle("hidden", paired);
+  $("pairedSession").classList.toggle("hidden", !paired);
+  $("disconnectModel").classList.toggle("hidden", !state.provider?.configured);
+  const id = agentId();
+  $("bridgeDot").classList.toggle("online", paired);
+  $("bridgeStatus").textContent = paired
+    ? "LOCAL BRIDGE CONNECTED"
+    : "LOCAL-FIRST WORKSPACE";
+  $("pairButton").querySelector("span").textContent = paired
+    ? "Bridge paired"
+    : "Pair bridge";
+  $("modelLabel").textContent =
+    paired && state.provider?.configured
+      ? state.provider.model
+      : "Connect a model";
+  $("modelButton").title = state.provider?.configured
+    ? `${state.provider.provider} · ${state.provider.model}`
+    : "Connect your own model API";
+  $("agentName").textContent =
+    paired && agent
+      ? agent.name || agent.genesis?.payload?.name || "Cypher agent"
+      : "No agent paired";
+  $("agentIdentity").textContent =
+    paired && agent
+      ? `TIMECHAIN · ${agent.head?.index ?? 0}`
+      : "A beginning awaits";
+  $("ringCount").textContent =
+    paired && agent
+      ? Number(
+          agent.ringCount ?? agent.rings ?? Number(agent.head?.index ?? 0) + 1,
+        ).toLocaleString()
+      : "—";
+  const verified = agent?.verified === true || agent?.verified === "PASS";
+  $("integrityStatus").textContent =
+    paired && agent ? (verified ? "VERIFIED" : "CHECK REQUIRED") : "UNPAIRED";
+  $("integrityStatus").className =
+    `integrity${paired && agent ? (verified ? " pass" : " fail") : ""}`;
+  $("headHash").textContent =
+    paired && agent
+      ? agent.head?.hash || agent.head?.ring_hash || "No hash available"
+      : "Awaiting genesis";
+  $("headHash").title =
+    paired && agent ? agent.head?.hash || agent.head?.ring_hash || "" : "";
+  $("sessionTag").textContent =
+    paired && agent
+      ? verified
+        ? "VERIFIED CHAIN"
+        : "CHAIN NEEDS REVIEW"
+      : "UNPAIRED";
+  $("conversationTitle").textContent =
+    paired && agent
+      ? `${agent.name || "Your agent"} · The next ring`
+      : "The next ring";
+  $("chainNote").textContent = agent
+    ? "Your history belongs to this agent.\nSwitch models without resetting it."
+    : "One identity. Across models.\nEvery accepted turn, a new ring.";
+  $("welcomeStart").replaceChildren(
+    document.createTextNode(
+      paired && agent ? "Start a conversation " : "Begin your Timechain ",
+    ),
+    el("span", "", "↗"),
+  );
+  const chosen = settings();
+  $("recallAbility").classList.toggle("active", chosen.recall);
+  $("recallAbility").setAttribute("aria-pressed", String(chosen.recall));
+  $("recallAbility").querySelector(".slot-status").textContent = chosen.recall
+    ? "EQUIPPED"
+    : "OFF";
+  $("forkAbility").classList.toggle("active", chosen.fork);
+  $("forkStatus").textContent = chosen.fork
+    ? `${chosen.perspectives} PERSPECTIVES`
+    : "CONFIGURE";
+  $("continuumAbility").classList.toggle("active", chosen.continuum.enabled);
+  $("continuumStatus").textContent =
+    chosen.continuum.enabled && chosen.continuum.mode === "bytes"
+      ? `${bytes(chosen.continuum.targetBytes)} / BLOCK`
+      : "1 TURN / BLOCK";
+  $("bufferBytes").textContent = bytes(state.pending?.bytes || 0);
+  $("heldBlockNote").classList.toggle("hidden", !state.pending?.heldCount);
+  $("heldBlockNote").textContent = state.pending?.heldCount
+    ? `${state.pending.heldCount} held response${state.pending.heldCount === 1 ? "" : "s"} awaiting recheck. Use Commit pending block to review again before release.`
+    : "";
+  if (state.pending?.heldCount && !requestBusy)
+    activity(
+      "A held response is awaiting recheck. Open Continuum to review the pending block.",
+      "error",
+    );
+  $("agentChoices").replaceChildren();
+  for (const item of state.agents || []) {
+    const button = el("button", "", item.name || item.id);
+    button.type = "button";
+    button.addEventListener("click", () => selectAgent(item.id));
+    $("agentChoices").append(button);
+  }
+  if (!state.agents?.length)
+    $("agentChoices").append(
+      el("p", "fine-print", "No agents yet. Create your genesis."),
+    );
+  renderFaculties();
+  if (activeAgentId !== id) {
+    invalidatePackPreview();
+    exportSelection.clear();
+    activeAgentId = id;
+    if (!conversations.has(id)) conversations.set(id, historyMessages());
+    renderConversation();
+  }
+  if (reconcilePending()) renderConversation();
+  if ($("exchangeDialog").open) renderExportFaculties();
+  if (state.gate?.threshold)
+    $("thresholdNote").textContent =
+      `Every fruitage must meet the server-enforced minimum (${state.gate.threshold}/255), alongside native PoI acceptance. This workspace does not execute model-supplied commands or tools.`;
+}
+function renderConversation() {
+  const messages = conversations.get(agentId()) || [];
+  $("welcome").classList.toggle("hidden", messages.length > 0);
+  const list = $("messages");
+  list.replaceChildren();
+  for (const message of messages) {
+    const node = el(
+      "article",
+      `message ${message.role}${message.held ? " held" : ""}`,
+    );
+    const label = el("div", "message-label");
+    if (message.role === "assistant")
+      label.append(icon(message.held ? "shield" : "orbit"));
+    label.append(
+      el(
+        "span",
+        "",
+        message.held
+          ? "RESPONSE HELD"
+          : message.role === "user"
+            ? "YOU"
+            : state.agent?.name?.toUpperCase() || "CYPHER AGENT",
+      ),
+    );
+    node.append(label, messageBody(message));
+    if (message.role === "assistant" && !message.held) {
+      const meta = el("div", "message-meta");
+      const ring = message.ring;
+      meta.append(
+        el(
+          "span",
+          "",
+          message.pending
+            ? "✓ Covenant accepted · pending block"
+            : ring
+              ? `✓ Sealed · Ring ${ring.index ?? ring}`
+              : "✓ Covenant accepted",
+        ),
+      );
+      if (ring?.hash || ring?.ring_hash)
+        meta.append(
+          el(
+            "code",
+            "",
+            `${String(ring.hash || ring.ring_hash).slice(0, 20)}…`,
+          ),
+        );
+      if (message.gate?.brightness !== undefined)
+        meta.append(el("span", "", `PoI ${message.gate.brightness}/255`));
+      node.append(meta);
+      const review = covenantReview(message.gate);
+      if (review) node.append(review);
+      if (Array.isArray(message.perspectives) && message.perspectives.length) {
+        const details = el("details", "perspective-details");
+        details.append(
+          el(
+            "summary",
+            "",
+            `${message.perspectives.length} perspective findings`,
+          ),
+        );
+        for (const perspective of message.perspectives) {
+          const item = el("div", "perspective-note");
+          item.append(
+            el(
+              "strong",
+              "",
+              perspective.name || perspective.archetype || "Perspective",
+            ),
+            el(
+              "p",
+              "",
+              perspective.summary ||
+                perspective.finding ||
+                perspective.conclusion ||
+                "",
+            ),
+          );
+          details.append(item);
+        }
+        node.append(details);
+      }
+    }
+    list.append(node);
+  }
+  requestAnimationFrame(() =>
+    $("conversationScroll").scrollTo({
+      top: messages.length ? $("conversationScroll").scrollHeight : 0,
+      behavior: messages.length ? "smooth" : "instant",
+    }),
+  );
+}
+function addMessage(message) {
+  const id = agentId();
+  if (!conversations.has(id)) conversations.set(id, []);
+  conversations.get(id).push(message);
+  renderConversation();
+}
+async function selectAgent(id) {
+  if (requestBusy) {
+    toast("Wait for your active turn to finish before switching agents.");
+    return;
+  }
+  try {
+    applyState(await api("/api/agents/select", { id }));
+    $("agentChoices").classList.add("hidden");
+    $("agentSidebar").classList.remove("mobile-open");
+    toast("Agent Timechain selected.");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+async function saveSettings(next) {
+  const result = await api("/api/settings", next);
+  state.settings = result.settings ||
+    result.state?.settings || { ...settings(), ...next };
+  applyState(result);
+  return result;
+}
 
-initMotifs();
+document
+  .querySelectorAll("[data-close]")
+  .forEach((button) =>
+    button.addEventListener("click", () => button.closest("dialog").close()),
+  );
+document.querySelectorAll("dialog").forEach((dialog) =>
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) {
+      const r = dialog.getBoundingClientRect();
+      if (
+        event.clientX < r.left ||
+        event.clientX > r.right ||
+        event.clientY < r.top ||
+        event.clientY > r.bottom
+      )
+        dialog.close();
+    }
+  }),
+);
+$("pairButton").addEventListener("click", () => openDialog("pairDialog"));
+function clearLocalSession() {
+  chatController?.abort();
+  token = "";
+  pendingAction = null;
+  state = {
+    agent: null,
+    agents: [],
+    provider: { configured: false },
+    loadout: { modalities: [], senses: [] },
+    settings: structuredClone(DEFAULT_SETTINGS),
+  };
+  conversations.clear();
+  activeAgentId = null;
+  $("apiKey").value = "";
+  $("pairCode").value = "";
+  $("messageInput").value = "";
+  $("packJson").value = "";
+  $("packFile").value = "";
+  renderState();
+  renderConversation();
+  activity("Bridge disconnected. Pair again to continue your saved Timechain.");
+}
+$("endSession").addEventListener("click", async () => {
+  const button = $("endSession");
+  button.disabled = true;
+  try {
+    await api("/api/unpair", {});
+    clearLocalSession();
+    closeDialog("pairDialog");
+    toast("Bridge session ended. Its model credential was cleared.");
+  } catch (error) {
+    $("pairedSession").querySelector(".dialog-error").textContent =
+      error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+$("disconnectModel").addEventListener("click", async () => {
+  const button = $("disconnectModel");
+  button.disabled = true;
+  try {
+    const result = await api("/api/provider", { disconnect: true });
+    chatController?.abort();
+    state.provider = result.provider || { configured: false };
+    $("apiKey").value = "";
+    $("modelId").value = "";
+    $("baseUrl").value = "";
+    renderState();
+    closeDialog("modelDialog");
+    toast("Model disconnected. Its key was cleared from bridge memory.");
+  } catch (error) {
+    $("modelForm").querySelector(".dialog-error").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+$("pairForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    if (!localBridgePage)
+      selectedBridgePort = bridgePort($("bridgePort").value);
+    const result = await api("/api/pair", { code: $("pairCode").value.trim() });
+    token = result.token;
+    $("pairCode").value = "";
+    applyState(await api("/api/state"));
+    closeDialog("pairDialog");
+    toast("Local bridge paired.");
+    try {
+      const data = await api("/api/archetypes");
+      archetypes = data.archetypes || [];
+    } catch {}
+    const action = pendingAction;
+    pendingAction = null;
+    if (action) action();
+  });
+});
+$("newAgentButton").addEventListener("click", () =>
+  requirePair(() => openDialog("genesisDialog")),
+);
+$("welcomeStart").addEventListener("click", () =>
+  requirePair(() => {
+    if (!state.agent) openDialog("genesisDialog");
+    else if (!state.provider?.configured) openModel();
+    else $("messageInput").focus();
+  }),
+);
+for (const id of ["existingAgentButton", "welcomePair"])
+  $(id).addEventListener("click", () =>
+    requirePair(() => openDialog("existingDialog")),
+  );
+$("genesisForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    applyState(
+      await api("/api/agents", { name: $("newAgentName").value.trim() }),
+    );
+    closeDialog("genesisDialog");
+    $("newAgentName").value = "Cypher Tempre";
+    toast("Genesis sealed. Your Timechain has begun.");
+    if (!state.provider?.configured) openModel();
+  });
+});
+$("existingForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    applyState(
+      await api("/api/agents/pair", { root: $("existingRoot").value.trim() }),
+    );
+    closeDialog("existingDialog");
+    toast("Existing Timechain verified and paired.");
+    if (!state.provider?.configured) openModel();
+  });
+});
+$("agentSelectButton").addEventListener("click", () =>
+  requirePair(() => $("agentChoices").classList.toggle("hidden")),
+);
+function openModel() {
+  const provider = state.provider || {};
+  $("provider").value = provider.provider || "openai";
+  $("modelId").value = provider.model || "";
+  $("baseUrl").value = provider.baseUrl || "";
+  $("apiKey").value = "";
+  updateProviderPlaceholder();
+  openDialog("modelDialog");
+}
+$("modelButton").addEventListener("click", () => requirePair(openModel));
+function updateProviderPlaceholder() {
+  const provider = $("provider").value;
+  const bases = {
+    openai: "https://api.openai.com/v1",
+    anthropic: "https://api.anthropic.com/v1",
+    gemini: "https://generativelanguage.googleapis.com/v1beta",
+    compatible: "http://127.0.0.1:11434/v1",
+  };
+  $("baseUrl").placeholder = bases[provider];
+  $("apiKey").required = provider !== "compatible";
+  $("apiKey").placeholder =
+    provider === "compatible"
+      ? "Optional for an unauthenticated local provider"
+      : "Held only in this bridge session";
+}
+$("provider").addEventListener("change", () => {
+  $("baseUrl").value = "";
+  $("modelId").value = "";
+  updateProviderPlaceholder();
+});
+$("modelForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    const data = {
+      provider: $("provider").value,
+      model: $("modelId").value.trim(),
+      baseUrl: $("baseUrl").value.trim() || $("baseUrl").placeholder,
+      apiKey: $("apiKey").value,
+    };
+    try {
+      const result = await api("/api/provider", data);
+      state.provider = result.provider ||
+        result.state?.provider || {
+          ...data,
+          apiKey: undefined,
+          configured: true,
+        };
+      applyState(result);
+      closeDialog("modelDialog");
+      toast("Model configured. Your Timechain stays the same.");
+    } finally {
+      $("apiKey").value = "";
+      data.apiKey = "";
+    }
+  });
+});
+$("modelDialog").addEventListener("close", () => ($("apiKey").value = ""));
+$("chatForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("messageInput").value.trim();
+  if (!message || requestBusy) return;
+  if (!token) {
+    requirePair(() => $("messageInput").focus());
+    return;
+  }
+  if (!state.agent) {
+    toast("Begin a new genesis or pair your existing agent first.");
+    openDialog("genesisDialog");
+    return;
+  }
+  if (!state.provider?.configured) {
+    openModel();
+    return;
+  }
+  requestBusy = true;
+  const chatSession = token;
+  chatController = new AbortController();
+  $("sendButton").disabled = true;
+  $("messageInput").disabled = true;
+  addMessage({ role: "user", content: message });
+  $("messageInput").value = "";
+  activity(
+    settings().fork
+      ? `Exploring ${settings().perspectives} perspectives · the response will appear after covenant review.`
+      : "Recalling, generating, and checking the genesis covenant…",
+    "busy",
+  );
+  try {
+    const result = await api(
+      "/api/chat",
+      { message },
+      { signal: chatController.signal },
+    );
+    if (token !== chatSession) return;
+    if (result.state) applyState(result.state);
+    const response = result.message || result;
+    if (typeof response.content !== "string")
+      throw new Error(
+        "No accepted response was returned. Inspect the bridge before trying again.",
+      );
+    addMessage({ role: "assistant", input: message, ...response });
+    activity(
+      response.pending
+        ? `Covenant accepted · ${bytes(state.pending?.bytes)} pending toward the next block.`
+        : `Accepted and sealed${response.ring?.index !== undefined ? ` in ring ${response.ring.index}` : ""}.`,
+    );
+  } catch (error) {
+    if (token !== chatSession) return;
+    addMessage({
+      role: "assistant",
+      held: true,
+      content:
+        error.name === "AbortError"
+          ? "The model request was cancelled."
+          : error.message,
+      gate: error.gate,
+    });
+    activity(
+      error.gate
+        ? "The proposed response was held by the alignment gate."
+        : "The request was not completed. No unreviewed answer was released.",
+      "error",
+    );
+  } finally {
+    chatController = null;
+    requestBusy = false;
+    $("sendButton").disabled = false;
+    $("messageInput").disabled = false;
+    $("messageInput").focus();
+    await refreshState();
+  }
+});
+$("messageInput").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    $("chatForm").requestSubmit();
+  }
+});
+$("messageInput").addEventListener("input", () => {
+  $("messageInput").style.height = "auto";
+  $("messageInput").style.height =
+    `${Math.min($("messageInput").scrollHeight, 180)}px`;
+});
+document.querySelectorAll("[data-prompt]").forEach((button) =>
+  button.addEventListener("click", () => {
+    $("messageInput").value = button.dataset.prompt;
+    $("messageInput").focus();
+  }),
+);
+$("recallAbility").addEventListener("click", () =>
+  requireAgent(async () => {
+    try {
+      await saveSettings({ ...settings(), recall: !settings().recall });
+      toast(
+        `Memory recall ${settings().recall ? "equipped" : "unequipped"} for your next turn.`,
+      );
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }),
+);
 
-init().catch((error) => {
-  // Both branches surface through the bridge gate — there is no separate #gate
-  // element (a local audit still shows the pairing/onboarding shell on failure).
-  $('bridgeGate').classList.remove('hidden');
-  $('dashboard').classList.add('hidden');
-  setText('bridgeMessage', error.message);
+function renderRadial() {
+  const root = $("radialButtons");
+  root.replaceChildren();
+  for (let n = 1; n <= 21; n++) {
+    const angle = ((n - 1) / 21) * Math.PI * 2 - Math.PI / 2;
+    const button = el(
+      "button",
+      `radial-number${n <= draftPerspectives ? " in-range" : ""}${n === draftPerspectives ? " selected" : ""}`,
+      n,
+    );
+    button.type = "button";
+    button.style.left = `${50 + Math.cos(angle) * 39}%`;
+    button.style.top = `${50 + Math.sin(angle) * 39}%`;
+    button.setAttribute("aria-label", `${n} perspective${n === 1 ? "" : "s"}`);
+    button.setAttribute("aria-pressed", String(n === draftPerspectives));
+    button.addEventListener("click", () => setPerspectiveCount(n));
+    root.append(button);
+  }
+  $("perspectiveNumber").textContent = draftPerspectives;
+  $("perspectiveRange").value = draftPerspectives;
+  $("archetypeSelected").textContent =
+    `${draftArchetypes.size} / ${archetypes.length || 21}`;
+  $("forkCost").textContent =
+    `Up to ${2 * draftPerspectives + 2} model requests per turn. Standard chat uses 2.`;
+}
+function setPerspectiveCount(n) {
+  draftPerspectives = Math.min(21, Math.max(1, Number(n)));
+  let chosen = [...draftArchetypes].filter((id) =>
+    archetypes.some((a) => String(a.id) === id),
+  );
+  if (chosen.length > draftPerspectives)
+    chosen = chosen.slice(0, draftPerspectives);
+  for (const archetype of archetypes) {
+    if (chosen.length >= draftPerspectives) break;
+    if (!chosen.includes(String(archetype.id)))
+      chosen.push(String(archetype.id));
+  }
+  draftArchetypes = new Set(chosen);
+  renderRadial();
+  renderArchetypes();
+}
+function renderArchetypes() {
+  const list = $("archetypeList");
+  list.replaceChildren();
+  for (const archetype of archetypes) {
+    const label = el("label", "archetype-option");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = draftArchetypes.has(String(archetype.id));
+    input.addEventListener("change", () => {
+      if (input.checked) draftArchetypes.add(String(archetype.id));
+      else draftArchetypes.delete(String(archetype.id));
+      draftPerspectives = Math.max(1, draftArchetypes.size);
+      renderRadial();
+    });
+    const copy = el("span");
+    copy.append(
+      el("strong", "", archetype.name),
+      el("small", "", archetype.description || archetype.function || ""),
+    );
+    label.append(input, copy);
+    list.append(label);
+  }
+  if (!archetypes.length)
+    list.append(
+      el(
+        "p",
+        "fine-print",
+        "The archetype catalogue is unavailable. Pair your bridge and try again.",
+      ),
+    );
+}
+$("forkAbility").addEventListener("click", async () => {
+  try {
+    if (!archetypes.length) {
+      const result = await api("/api/archetypes");
+      archetypes = result.archetypes || [];
+    }
+  } catch {}
+  draftArchetypes = new Set((settings().archetypes || []).map(String));
+  draftPerspectives = settings().perspectives || 5;
+  $("forkEnabled").checked = settings().fork;
+  setPerspectiveCount(draftPerspectives);
+  openDialog("forkDialog");
+});
+$("perspectiveRange").addEventListener("input", (event) =>
+  setPerspectiveCount(event.target.value),
+);
+$("saveFork").addEventListener("click", () => {
+  if (!token || !state.agent) {
+    closeDialog("forkDialog");
+    requireAgent(() => $("forkAbility").click());
+    return;
+  }
+  const button = $("saveFork");
+  button.disabled = true;
+  (async () => {
+    try {
+      if (draftArchetypes.size < 1)
+        throw new Error("Choose at least one archetype.");
+      await saveSettings({
+        ...settings(),
+        fork: $("forkEnabled").checked,
+        perspectives: draftArchetypes.size,
+        archetypes: [...draftArchetypes],
+      });
+      closeDialog("forkDialog");
+      toast(
+        settings().fork
+          ? `${settings().perspectives} perspectives equipped.`
+          : "Perspective forking is off. Your selection is saved.",
+      );
+    } catch (error) {
+      $("forkDialog").querySelector(".dialog-error").textContent =
+        error.message;
+    } finally {
+      button.disabled = false;
+    }
+  })();
 });
 
-
-// --------------------------------------------------------------------------- //
-// P1 — the learning membrane panels: integrity triptych, operators, dreams,
-// economics. Dependency-free; charts are inline SVG.
-// --------------------------------------------------------------------------- //
-
-async function loadLearning() {
-  try {
-    state.learning = await api('/api/learning/overview');
-  } catch {
-    state.learning = null;
-  }
-  renderLearning();
+function openContinuum() {
+  const current = settings().continuum;
+  $("continuumEnabled").checked = current.enabled;
+  document
+    .querySelectorAll('[name="blockMode"]')
+    .forEach((input) => (input.checked = input.value === current.mode));
+  $("blockUnit").value = current.targetBytes >= 1048576 ? "mb" : "kb";
+  $("blockSize").value =
+    current.targetBytes / ($("blockUnit").value === "mb" ? 1048576 : 1024);
+  $("bufferBytes").textContent = bytes(state.pending?.bytes || 0);
+  openDialog("continuumDialog");
 }
-
-function setIntegrityCard(id, status, strongText, metaText) {
-  const card = $(id);
-  card.classList.remove('ok', 'fail', 'na');
-  card.classList.add(status === true ? 'ok' : status === false ? 'fail' : 'na');
-  card.querySelector('strong').textContent = strongText;
-  card.querySelector('.meta').textContent = metaText;
+$("continuumAbility").addEventListener("click", openContinuum);
+function targetBytes() {
+  const amount =
+    Number($("blockSize").value) *
+    ($("blockUnit").value === "mb" ? 1048576 : 1024);
+  if (
+    !Number.isFinite(amount) ||
+    amount < 1 ||
+    !Number.isSafeInteger(Math.round(amount))
+  )
+    throw new Error("Choose a valid positive block size.");
+  return Math.round(amount);
 }
-
-function sparkline(points, { width = 520, height = 96 } = {}) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  svg.classList.add('sparkline');
-  if (!points || points.length < 2) {
-    const t = document.createElementNS(ns, 'text');
-    t.setAttribute('x', 8);
-    t.setAttribute('y', height / 2);
-    t.textContent = points && points.length ? 'one data point — keep operating' : 'no data yet — keep operating';
-    svg.append(t);
-    return svg;
-  }
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
-  const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
-  const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
-  const sx = (x) => (x1 === x0 ? width / 2 : 8 + ((x - x0) / (x1 - x0)) * (width - 16));
-  const sy = (y) => (y1 === y0 ? height / 2 : height - 14 - ((y - y0) / (y1 - y0)) * (height - 28));
-  const poly = document.createElementNS(ns, 'polyline');
-  poly.setAttribute('points', points.map((p) => `${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(' '));
-  svg.append(poly);
-  const lo = document.createElementNS(ns, 'text');
-  lo.setAttribute('x', 8);
-  lo.setAttribute('y', height - 2);
-  lo.textContent = `${y0}`;
-  const hi = document.createElementNS(ns, 'text');
-  hi.setAttribute('x', 8);
-  hi.setAttribute('y', 12);
-  hi.textContent = `${y1}`;
-  svg.append(lo, hi);
-  return svg;
-}
-
-function learningRow(title, metaText, tagsText) {
-  const row = document.createElement('article');
-  row.className = 'domain-row';
-  const top = document.createElement('div');
-  top.className = 'domain-top';
-  const name = document.createElement('strong');
-  name.textContent = title;
-  const meta = document.createElement('span');
-  meta.className = 'meta';
-  meta.textContent = metaText;
-  top.append(name, meta);
-  row.append(top);
-  if (tagsText) {
-    const tags = document.createElement('div');
-    tags.className = 'tags';
-    tags.textContent = tagsText;
-    row.append(tags);
-  }
-  return row;
-}
-
-function renderLearning() {
-  const data = state.learning;
-  if (!data) {
-    setText('learningMeta', 'learning overview unavailable');
-    return;
-  }
-  const { chain, consensus, digests } = data.integrity;
-
-  setIntegrityCard('intChain', chain.ok,
-    chain.ok === true ? 'VERIFIED' : chain.ok === false ? 'TAMPERED' : 'UNKNOWN',
-    chain.rings == null ? (chain.report?.[0] || '') : `${chain.rings} rings hash-linked`);
-  setIntegrityCard('intQuorum',
-    consensus.configured ? consensus.ok : null,
-    !consensus.configured ? 'NOT CONFIGURED' : consensus.ok === true ? 'ATTESTED' : consensus.ok === false ? 'BROKEN' : 'UNKNOWN',
-    consensus.configured
-      ? `${consensus.validWitnesses ?? '—'}/${consensus.witnesses ?? '—'} witnesses valid (quorum ${consensus.quorum ?? '—'})`
-      : 'run consensus.py init to add witnesses');
-  setIntegrityCard('intDigests',
-    digests.present ? digests.ok : null,
-    !digests.present ? 'NO TELEMETRY' : digests.ok === true ? 'NOTARIZED' : digests.ok === false ? 'EDITED AFTER SEAL' : 'NOT DIGESTED YET',
-    digests.present ? `${digests.digests} digest ring(s) · ${digests.notarized}/${digests.bytes} bytes covered` : '');
-
-  const tele = data.telemetry;
-  const econ = $('economicsStats');
-  econ.replaceChildren(
-    learningRow(`${formatNumber(tele.tokensSavedTotal)} tokens saved`,
-      `${data.replay.accepts || 0} replay accept(s)`,
-      `replay ledger: ${data.replay.rings || 0} ring(s) cached · ${data.replay.rederiveDue || 0} re-derivation(s) due`),
-    learningRow(`${formatNumber(tele.total)} telemetry events`,
-      tele.lastTs ? `last ${tele.lastTs.slice(0, 19)}` : 'none yet',
-      Object.entries(tele.counts).map(([k, v]) => `${k} ×${v}`).join(' · ') || '—'),
-  );
-  $('tokensSpark').replaceChildren(sparkline(tele.tokensSavedSeries));
-  $('qualitySpark').replaceChildren(sparkline(data.quality.brightness));
-
-  const ops = $('operatorList');
-  if (!data.operators.length) {
-    ops.textContent = 'No operator rings yet — the learners are gathering telemetry. Run dream.py when ready.';
-  } else {
-    ops.replaceChildren(...data.operators.slice(-12).reverse().map((op) => {
-      const evalText = op.eval
-        ? Object.entries(op.eval).filter(([, v]) => typeof v === 'number')
-            .map(([k, v]) => `${k}=${v}`).join(' · ')
-        : '';
-      return learningRow(
-        `#${op.index} ${op.operator || '?'} · ${op.action || '?'}${op.version ? ` → ${op.version}` : ''}${op.revertedTo ? ` → ${op.revertedTo}` : ''}`,
-        op.ts ? op.ts.slice(0, 19) : '',
-        evalText);
-    }));
-  }
-
-  const dreams = $('dreamList');
-  if (!data.dreams.length) {
-    dreams.textContent = 'No dream rings yet — the offline cadence has not run. python3 dream.py run';
-  } else {
-    dreams.replaceChildren(...data.dreams.slice(-8).reverse().map((d) => {
-      const trainingText = Object.entries(d.training).map(([k, v]) => `${k}: ${v}`).join(' · ');
-      return learningRow(
-        `#${d.index} dream · ${d.missedPositives ?? 0} missed-positive(s) · ${d.growthProposals} growth proposal(s)`,
-        `${d.ts ? d.ts.slice(0, 19) : ''}${d.durationS != null ? ` · ${d.durationS}s` : ''}`,
-        trainingText || '—');
-    }));
-  }
-
-  setText('learningMeta',
-    `${data.operators.length} operator ring(s) · ${data.dreams.length} dream(s) · ${formatNumber(tele.tokensSavedTotal)} tokens saved`);
-}
-
-
-// --------------------------------------------------------------------------- //
-// P2 — the CPHY token metaprogramming observatory: per-block token audit,
-// retrieval-order realization, scars, and the lineage tree. Everything reads
-// the paired bridge; every mutation is the owner's explicit click, relayed to
-// the skill's own CLIs (the page never invents an economic operation).
-// --------------------------------------------------------------------------- //
-
-const BRASS_HEX = '#d6a860';
-const TEAL_HEX = '#7cb5a9';
-
-async function loadObservatory() {
-  await Promise.all([
-    loadCphy().catch((e) => setText('cphyMeta', `unavailable — ${e.message}`)),
-    loadRetrieval().catch((e) => setText('retrievalMeta', `unavailable — ${e.message}`)),
-    loadImmune().catch((e) => setText('immuneMeta', `unavailable — ${e.message}`)),
-    loadForks().catch((e) => setText('forkMeta', `unavailable — ${e.message}`)),
-    loadNursery().catch((e) => setText('nurseryMeta', `unavailable — ${e.message}`)),
-    loadOrgans().catch((e) => setText('vitalsMeta', `unavailable — ${e.message}`)),
-  ]);
-}
-
-async function loadOrgans() {
-  state.organs = await api('/api/organs');
-  renderVitals();
-  renderContinuum();
-  renderChrono();
-  renderCambium();
-  renderConscience();
-  renderReflective();
-  renderCensus();
-}
-
-async function loadNursery() {
-  state.nursery = await api('/api/registry/emergent');
-  renderNursery();
-}
-
-async function loadCphy() {
-  const [overview, blocks] = await Promise.all([api('/api/cphy/overview'), api('/api/cphy/blocks')]);
-  state.cphy = overview;
-  state.cphyBlocks = blocks;
-  state.cphyBlockMap = new Map(blocks.blocks.map((b) => [b.index, b]));
-  renderCphy();
-  drawLandscape();
-}
-
-async function loadRetrieval() {
-  state.retrieval = await api('/api/retrieval/history?limit=8');
-  renderRetrieval();
-}
-
-async function loadImmune() {
-  state.immune = await api('/api/immune');
-  renderImmune();
-  // The landscape's quarantine bands read state.immune — repaint in case the
-  // canvas drew first (the observatory lanes load in parallel).
-  drawLandscape();
-}
-
-async function loadForks() {
-  state.forks = await api('/api/forks');
-  renderForks();
-}
-
-function chip(text, kind = '') {
-  const el = document.createElement('span');
-  el.className = `chip${kind ? ` ${kind}` : ''}`;
-  el.textContent = text;
-  return el;
-}
-
-function statCell(label, value, note) {
-  const div = document.createElement('div');
-  div.className = 'stat';
-  const span = document.createElement('span');
-  span.textContent = label;
-  const strong = document.createElement('strong');
-  strong.textContent = value;
-  div.append(span, strong);
-  if (note) {
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent = note;
-    div.append(meta);
-  }
-  return div;
-}
-
-// fmtCphy is for REAL token amounts only (burns observed on-chain). The
-// internal earned lane always renders through fmtCredits so a local metering
-// number can never read as a coin balance.
-function fmtCphy(value) {
-  if (value === null || value === undefined) return '—';
-  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
-}
-
-function fmtCredits(value) {
-  if (value === null || value === undefined) return '—';
-  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })} credits`;
-}
-
-function shortAddr(addr) {
-  return addr ? `${addr.slice(0, 8)}…${addr.slice(-6)}` : '—';
-}
-
-function setMsg(id, text, isError = false) {
-  const el = $(id);
-  if (!el) return;
-  el.textContent = text;
-  el.style.color = isError ? '#f87171' : '';
-}
-
-function renderCphy() {
-  const c = state.cphy;
-  if (!c || !c.present) {
-    setText('cphyMeta', 'no CPHY economy on this chain yet — python3 cphy.py mint begins one');
-    return;
-  }
-  const anchorOk = Boolean(c.anchor?.verified);
-  setText('cphyMeta', `${c.onchain?.token ? `${shortAddr(c.onchain.token)} · ${c.onchain.chain}` : 'no on-chain lane'}${anchorOk ? ' · anchor verified' : ''}`);
-
-  const etchCount = Object.keys(c.etches || {}).length;
-  const pendingOpen = c.pending.filter((p) => p.status === 'pending');
-  const targetCount = (c.onchain?.targets || []).length + (c.onchain?.facultyTargets || []).length;
-  const observedCount = Object.keys(c.observed || {}).length;
-  // Lane 1 — the REAL coin: everything here comes from the contract, via
-  // read-only observation, or is zero because nothing was ever sent.
-  $('cphyTokenStats').replaceChildren(
-    statCell('Anchor', anchorOk ? 'VERIFIED' : c.onchain?.token ? 'DECLARED' : '—',
-      c.onchain?.token ? `${shortAddr(c.onchain.token)} on ${c.onchain.chain} — attestation only, never mints` : 'declare with cphy.py anchor'),
-    statCell('Burned to blocks', `${fmtCphy(c.burnedTotal)} CPHY`,
-      etchCount ? `${etchCount} etched ring(s) — real tokens, gone forever` : 'no real-token burns observed yet'),
-    statCell('Observed on-chain', observedCount ? `${observedCount} address(es)` : '0',
-      'cumulative burned balances the oracle has seen (includes applied etches)'),
-    statCell('Deposit addresses', String(targetCount), 'keyless — tokens sent there are burned forever'),
-    statCell('Consent', c.onchain?.approval === 'auto' ? 'AUTO' : 'REQUIRE',
-      pendingOpen.length ? `${pendingOpen.length} burn(s) awaiting you` : 'no burns waiting'),
-    statCell('Last sync', c.onchain?.lastSyncTs ? new Date(c.onchain.lastSyncTs * 1000).toISOString().slice(0, 19) : 'never',
-      'turn-hook oracle stamp — manual syncs report inline'),
-  );
-  // Lane 2 — internal metering. Say what it is NOT, every time.
-  $('cphyCreditStats').replaceChildren(
-    statCell('Earned', fmtCredits(c.supply?.minted), '1 sealed ring mints brightness/255 credits'),
-    statCell('Working', fmtCredits(c.supply?.locked), `${c.locks.length} lock(s) shaping attention`),
-    statCell('Free', fmtCredits(c.supply?.balance), 'spendable on basins/shadows only'),
-    statCell('Ledger', `${c.supply?.events ?? 0} events`, c.audit.ok === true ? 'replay AUDIT: PASS' : c.audit.ok === false ? 'AUDIT: FAIL' : 'audit unavailable'),
-  );
-
-  renderConsent(pendingOpen, c.pending);
-  renderLocks(c.locks);
-  renderEtches(c);
-  if ($('etchN') && document.activeElement !== $('etchN')) $('etchN').value = c.onchain?.etchRecallN ?? 3;
-}
-
-async function syncOnchain() {
-  const btn = $('syncOnchain');
-  btn.disabled = true;
-  setMsg('cphyMessage', 'Syncing — reading the contract at your deposit addresses (read-only)…');
-  try {
-    const out = await api('/api/cphy/sync', { method: 'POST', body: '{}' });
-    const r = out.result || {};
-    // onchain_sync is PARTIAL-SUCCESS: per-address RPC errors do not stop the
-    // other addresses from reading, staging consent burns, or rotating slots —
-    // report every lane independently, never "nothing changed".
-    const observed = Object.keys(r.observed || {}).length;
-    const staged = Array.isArray(r.pending_approval) ? r.pending_approval.length : 0;
-    const applied = (Array.isArray(r.new_etches) ? r.new_etches.length : 0) + (Array.isArray(r.new_unlocks) ? r.new_unlocks.length : 0);
-    const errors = Array.isArray(r.errors) ? r.errors : [];
-    const parts = [];
-    if (observed) parts.push(`burns at ${observed} ring address(es) · ${r.total_burned_to_blockspace} CPHY total`);
-    if (staged) parts.push(`${staged} burn(s) staged for your consent`);
-    if (applied) parts.push(`${applied} burn(s) applied (auto consent)`);
-    if (errors.length) parts.push(`${errors.length} address(es) unread — RPC error (${String(errors[0].error || '').slice(0, 60)})`);
-    if (!parts.length) parts.push('the contract shows no burns at your deposit addresses. Send CPHY (Base) to a deposit address and sync again');
-    setMsg('cphyMessage', `Sync ${errors.length ? 'partial' : 'complete'} — ${parts.join(' · ')}.`, errors.length > 0);
-    await loadCphy();
-  } catch (error) {
-    setMsg('cphyMessage', error.message, true);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-// cphy.py stages pending faculty burns with type 'unlock' (the 'faculty-unlock'
-// string is a ledger event kind, never a pending type) — accept both.
-function isUnlockPending(p) {
-  return p.type === 'unlock' || p.type === 'faculty-unlock' || p.facultyKey != null;
-}
-
-function renderConsent(open, all) {
-  const wrap = $('cphyConsent');
-  wrap.replaceChildren();
-  if (!open.length) {
-    const resolved = all.filter((p) => p.status !== 'pending').slice(-4);
-    if (resolved.length) {
-      const row = document.createElement('div');
-      row.className = 'meta';
-      row.append('Consent history: ');
-      for (const p of resolved) {
-        row.append(chip(`${isUnlockPending(p) ? p.name || p.facultyKey : `ring ${p.ring}`} · ${p.tokens} CPHY · ${p.status}`, (p.status === 'approved' || p.status === 'applied') ? 'ok' : 'danger'));
-        row.append(' ');
-      }
-      wrap.append(row);
-    }
-    return;
-  }
-  const card = document.createElement('div');
-  card.className = 'consent-card';
-  const head = document.createElement('div');
-  head.className = 'consent-row';
-  const title = document.createElement('strong');
-  title.textContent = `Consent membrane — ${open.length} observed burn(s) awaiting your approval`;
-  const note = document.createElement('span');
-  note.className = 'meta';
-  note.textContent = 'Money can knock; only the owner opens the door. Tokens are burned either way.';
-  head.append(title, note);
-  card.append(head);
-  for (const p of open) {
-    const row = document.createElement('div');
-    row.className = 'consent-row';
-    const label = document.createElement('div');
-    const what = document.createElement('strong');
-    what.textContent = isUnlockPending(p) ? `Unlock faculty ${p.name || p.facultyKey}` : `Etch ring #${p.ring}`;
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent = `${p.tokens} CPHY → ${shortAddr(p.address)} · detected ${String(p.detected || '').slice(0, 19)} · id ${p.id}`;
-    label.append(what, meta);
-    const actions = document.createElement('div');
-    actions.className = 'actions';
-    const approve = document.createElement('button');
-    approve.className = 'primary';
-    approve.textContent = 'Approve';
-    approve.addEventListener('click', () => consentAction(p.id, 'approve'));
-    const reject = document.createElement('button');
-    reject.className = 'secondary danger';
-    reject.textContent = 'Reject';
-    reject.addEventListener('click', () => consentAction(p.id, 'reject'));
-    actions.append(approve, reject);
-    row.append(label, actions);
-    card.append(row);
-  }
-  wrap.append(card);
-}
-
-async function consentAction(id, action) {
-  try {
-    await api(`/api/cphy/pending/${id}/${action}`, { method: 'POST', body: '{}' });
-    setMsg('cphyMessage', action === 'approve' ? `Burn ${id} applied — the etch is now part of the attention landscape.` : `Burn ${id} rejected — recorded forever, never applied.`);
-    await loadCphy();
-  } catch (error) {
-    setMsg('cphyMessage', error.message, true);
-  }
-}
-
-function renderLocks(locks) {
-  const list = $('lockList');
-  if (!locks.length) {
-    list.textContent = 'No active locks — the attention landscape is flat.';
-    return;
-  }
-  list.replaceChildren(...locks.map((lock) => {
-    const row = document.createElement('article');
-    row.className = 'domain-row';
-    const top = document.createElement('div');
-    top.className = 'domain-top';
-    const name = document.createElement('strong');
-    name.append(chip(lock.op, lock.op === 'basin' ? 'brass' : 'teal'), ` ${fmtCredits(lock.amount)} · ${lock.indices.length ? `rings ${lock.indices[0]}–${lock.indices.at(-1)}` : 'rings —'}`);
-    const release = document.createElement('button');
-    release.className = 'ghost';
-    release.textContent = 'Release';
-    release.addEventListener('click', () => releaseLock(lock.lockId));
-    top.append(name, release);
-    const tags = document.createElement('div');
-    tags.className = 'tags';
-    tags.textContent = `${lock.lockId} · ${lock.memo || 'no memo'}`;
-    row.append(top, tags);
-    return row;
-  }));
-}
-
-async function releaseLock(lockId) {
-  try {
-    await api('/api/cphy/release', { method: 'POST', body: JSON.stringify({ lockId }) });
-    setMsg('cphyMessage', `Lock ${lockId} released — credits refunded to balance.`);
-    await loadCphy();
-  } catch (error) {
-    setMsg('cphyMessage', error.message, true);
-  }
-}
-
-function renderEtches(c) {
-  const list = $('etchList');
-  const etches = Object.entries(c.etches || {});
-  if (!etches.length) {
-    list.textContent = 'No etches yet — burn whole CPHY to a ring’s deposit address and (after your approval) it reads as freshly lived.';
-  } else {
-    list.replaceChildren(...etches.map(([ring, e]) => {
-      const row = document.createElement('article');
-      row.className = 'domain-row';
-      const top = document.createElement('div');
-      top.className = 'domain-top';
-      const name = document.createElement('strong');
-      name.textContent = `Ring #${ring}`;
-      const meta = document.createElement('span');
-      meta.className = 'meta';
-      meta.textContent = `E${e.echelon}/21 · ${e.tokens} CPHY burned`;
-      top.append(name, meta);
-      const bar = document.createElement('div');
-      bar.className = 'bar';
-      const fill = document.createElement('i');
-      fill.style.width = `${Math.round((e.echelon / 21) * 100)}%`;
-      fill.style.background = `linear-gradient(90deg, ${BRASS_HEX}, #8a6a30)`;
-      bar.append(fill);
-      row.append(top, bar);
-      return row;
-    }));
-  }
-  const targets = $('targetList');
-  const ringTargets = c.onchain?.targets || [];
-  const facTargets = c.onchain?.facultyTargets || [];
-  if (!ringTargets.length && !facTargets.length) {
-    targets.textContent = '';
-    return;
-  }
-  const rows = [];
-  for (const t of ringTargets) {
-    if (state.cphy.etches?.[t.ring]) continue;
-    rows.push(targetRow(`Ring #${t.ring}`, t.address, 'awaiting burn'));
-  }
-  for (const t of facTargets) {
-    rows.push(targetRow(`${t.kind} ${t.id} · ${t.name}`, t.address, `${t.status} · 1 CPHY unlocks + pins`));
-  }
-  targets.replaceChildren(...rows);
-}
-
-function targetRow(label, address, note) {
-  const row = document.createElement('article');
-  row.className = 'domain-row';
-  const top = document.createElement('div');
-  top.className = 'domain-top';
-  const name = document.createElement('strong');
-  name.textContent = label;
-  const meta = document.createElement('span');
-  meta.className = 'meta';
-  meta.textContent = note;
-  top.append(name, meta);
-  const tags = document.createElement('div');
-  tags.className = 'tags';
-  tags.textContent = `${address} — keyless deposit: tokens sent here are burned forever; dust first; >21 buys nothing`;
-  row.append(top, tags);
-  return row;
-}
-
-// --- the attention landscape strip: every block, colored by what CPHY does to it --- //
-
-function drawLandscape() {
-  const canvas = $('landscapeCanvas');
-  if (!canvas || !state.summary) return;
-  const count = Math.max(1, state.summary.stats.rings);
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth - 16;
-  const cssHeight = 96;
-  canvas.width = Math.floor(cssWidth * dpr);
-  canvas.height = Math.floor(cssHeight * dpr);
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssWidth, cssHeight);
-
-  const mid = 58;
-  const colWidth = Math.max(1, cssWidth / count);
-  const x = (i) => (i / count) * cssWidth;
-
-  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-  ctx.beginPath();
-  ctx.moveTo(0, mid);
-  ctx.lineTo(cssWidth, mid);
-  ctx.stroke();
-
-  const hits = state.cphyBlocks?.recallHits || {};
-  let maxHits = 1;
-  for (const v of Object.values(hits)) maxHits = Math.max(maxHits, Number(v) || 0);
-  ctx.fillStyle = 'rgba(255,255,255,0.28)';
-  for (const [idx, v] of Object.entries(hits)) {
-    const h = Math.max(1, (Number(v) / maxHits) * 22);
-    ctx.fillRect(x(Number(idx)), cssHeight - h, Math.max(1, colWidth), h);
-  }
-
-  const quarantined = new Set(state.immune?.quarantine || []);
-  for (const idx of quarantined) {
-    ctx.fillStyle = 'rgba(248,113,113,0.5)';
-    ctx.fillRect(x(idx), 10, Math.max(1, colWidth), cssHeight - 20);
-  }
-
-  for (const b of state.cphyBlocks?.blocks || []) {
-    const px = x(b.index);
-    const w = Math.max(1.25, colWidth);
-    const lg = Math.log2(b.multiplier || 1);
-    if (lg > 0.001) {
-      ctx.fillStyle = `rgba(214,168,96,${0.35 + 0.6 * (lg / 2)})`;
-      ctx.fillRect(px, mid - (lg / 2) * 44, w, (lg / 2) * 44);
-    } else if (lg < -0.001) {
-      ctx.fillStyle = `rgba(124,181,169,${0.35 + 0.6 * (-lg / 2)})`;
-      ctx.fillRect(px, mid, w, (-lg / 2) * 30);
-    }
-    if (b.etch) {
-      ctx.fillStyle = BRASS_HEX;
-      ctx.beginPath();
-      ctx.moveTo(px + w / 2, 2);
-      ctx.lineTo(px + w / 2 + 4, 8);
-      ctx.lineTo(px + w / 2, 14);
-      ctx.lineTo(px + w / 2 - 4, 8);
-      ctx.closePath();
-      ctx.fill();
-    }
-    if (b.depositAddress && !b.etch) {
-      ctx.strokeStyle = 'rgba(214,168,96,0.8)';
-      ctx.beginPath();
-      ctx.arc(px + w / 2, 8, 3.2, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-  }
-
-  ctx.fillStyle = '#f2f2f2';
-  ctx.beginPath();
-  ctx.arc(x(count - 1), mid, 3, 0, Math.PI * 2);
-  ctx.fill();
-
-  setText('landscapeMeta', `${count} blocks · ${state.cphyBlocks?.blocks.length || 0} carry weight · top-${state.cphyBlocks?.etchRecallN ?? 3} etches surfaced per turn`);
-  const legend = $('landscapeLegend');
-  legend.replaceChildren(
-    legendItem(BRASS_HEX, 'basin / burn — weight above 1×'),
-    legendItem(TEAL_HEX, 'shadow — weight below 1×'),
-    legendItem('#f87171', 'quarantined (scar)'),
-    legendItem('rgba(255,255,255,0.4)', 'retrieval activity'),
-    legendItem(BRASS_HEX, '◆ etched · ○ deposit address', true),
-  );
-}
-
-function legendItem(color, label, hollow = false) {
-  const span = document.createElement('span');
-  const swatch = document.createElement('i');
-  if (!hollow) swatch.style.background = color;
-  else { swatch.style.border = `1px solid ${color}`; swatch.style.background = 'transparent'; }
-  span.append(swatch, label);
-  return span;
-}
-
-function landscapeIndexAt(event) {
-  const canvas = $('landscapeCanvas');
-  const rect = canvas.getBoundingClientRect();
-  const frac = (event.clientX - rect.left) / rect.width;
-  const count = Math.max(1, state.summary?.stats.rings || 1);
-  const raw = Math.max(0, Math.min(count - 1, Math.floor(frac * count)));
-  // At high ring counts one pixel spans several indices while markers (etch
-  // diamonds, weight bars) are drawn pixels wide — snap to the nearest block
-  // that actually carries CPHY within the marker's visual radius, so the
-  // pointer lands on the block the eye is on.
-  if (state.cphyBlockMap && !state.cphyBlockMap.has(raw)) {
-    const radius = Math.max(1, Math.ceil((count / rect.width) * 5));
-    for (let d = 1; d <= radius; d += 1) {
-      if (state.cphyBlockMap.has(raw - d)) return raw - d;
-      if (state.cphyBlockMap.has(raw + d)) return raw + d;
-    }
-  }
-  return raw;
-}
-
-function landscapeHover(event) {
-  const tip = $('landscapeTip');
-  const index = landscapeIndexAt(event);
-  const b = state.cphyBlockMap?.get(index);
-  const hits = state.cphyBlocks?.recallHits?.[index] ?? state.cphyBlocks?.recallHits?.[String(index)] ?? 0;
-  const quarantined = (state.immune?.quarantine || []).includes(index);
-  const lines = [`#${index}`];
-  lines.push(`weight ×${(b?.multiplier ?? 1).toFixed(3)}${b?.exponent ? ` (Σ density ${b.exponent.toFixed(2)} log₂, clamped ±2)` : ''}`);
-  if (b?.locks?.length) lines.push(`locks: ${b.locks.join(', ')}`);
-  if (b?.etch) lines.push(`etched E${b.etch.echelon}/21 · ${b.etch.tokens} CPHY burned`);
-  if (b?.observedTokens) lines.push(`observed on-chain: ${b.observedTokens} CPHY`);
-  if (b?.depositAddress) lines.push(`deposit: ${b.depositAddress}`);
-  if (quarantined) lines.push('QUARANTINED — excluded from the active self');
-  lines.push(`retrieval hits: ${hits}`);
-  tip.textContent = lines.join('\n');
-  tip.style.whiteSpace = 'pre-line';
-  tip.classList.remove('hidden');
-  const wrap = tip.parentElement.getBoundingClientRect();
-  const left = Math.min(event.clientX - wrap.left + 12, wrap.width - 300);
-  tip.style.left = `${Math.max(4, left)}px`;
-  tip.style.top = '8px';
-}
-
-// --- relevance realization --- //
-
-function renderRetrieval() {
-  const r = state.retrieval;
-  if (!r) return;
-  setText('retrievalMeta', `${r.totalOffers} retrieval(s) on record`);
-
-  const leaders = $('retrievalLeaders');
-  if (!r.rings.length) {
-    leaders.textContent = 'No retrievals recorded yet — the offer log fills as the agent lives.';
-  } else {
-    leaders.replaceChildren(...r.rings.slice(0, 10).map((s) => {
-      const row = document.createElement('article');
-      row.className = 'domain-row';
-      row.style.cursor = 'pointer';
-      row.addEventListener('click', () => selectRing(s.index, { scroll: true }));
-      const top = document.createElement('div');
-      top.className = 'domain-top';
-      const name = document.createElement('strong');
-      name.textContent = `#${s.index}`;
-      const meta = document.createElement('span');
-      meta.className = 'meta';
-      meta.textContent = `chosen ${s.chosen}× of ${s.considered} · best rank ${s.bestRank}`;
-      top.append(name, meta);
-      const tags = document.createElement('div');
-      tags.className = 'tags';
-      if (s.cphy) tags.append(chip(`×${s.cphy} weight`, 'brass'), ' ');
-      if (s.etched) tags.append(chip(`etched E${s.etched}`, 'brass'), ' ');
-      tags.append(`last surfaced ${String(s.lastTs || '').slice(0, 19)}`);
-      row.append(top, tags);
-      return row;
-    }));
-  }
-
-  const offers = $('offerList');
-  if (!r.offers.length) {
-    offers.textContent = 'No offer events yet.';
-  } else {
-    offers.replaceChildren(...r.offers.map((o) => {
-      const row = document.createElement('article');
-      row.className = 'domain-row';
-      const top = document.createElement('div');
-      top.className = 'domain-top';
-      const name = document.createElement('strong');
-      name.textContent = (o.queryKeywords || []).slice(0, 6).join(' · ') || '(query)';
-      const meta = document.createElement('span');
-      meta.className = 'meta';
-      meta.textContent = `${String(o.ts || '').slice(0, 19)} · ${o.returned}/${o.considered} returned`;
-      top.append(name, meta);
-      const tags = document.createElement('div');
-      tags.className = 'tags';
-      const chosen = o.candidates.filter((c) => c.chosen);
-      tags.textContent = chosen.map((c) => `#${c.index} r${c.rank}${c.parts.cphy ? ` ×${c.parts.cphy}` : ''}${c.parts.etched ? ` E${c.parts.etched}` : ''}`).join('  ');
-      row.append(top, tags);
-      return row;
-    }));
-  }
-}
-
-// Default hand-2.1 weights, used only when the scorer is the hand blend AND the
-// preview did not return explicit weights. A trained scorer reports its own.
-const HAND_WEIGHTS = { semantic: 0.70, path: 0.20, chronological: 0.10, faculty: 0.05, salience: 0.03 };
-const PART_ORDER = ['semantic', 'path', 'chronological', 'faculty', 'salience'];
-
-function renderPreview(data) {
-  const wrap = $('previewResult');
-  wrap.replaceChildren();
-  const w = data.with_overlay;
-  const trained = typeof w.scorer === 'string' && w.scorer.startsWith('trained');
-  // Use the scorer's own weights when the preview reported them; only fall back
-  // to the hand blend for the hand scorer, so bars never mislabel a trained run.
-  const weights = (w.weights && typeof w.weights === 'object') ? w.weights : (trained ? null : HAND_WEIGHTS);
-  const note = document.createElement('p');
-  note.className = 'preview-note';
-  note.textContent = `dissonance ${w.dissonance} → appetite ${w.appetite} · threshold ${w.threshold} · ${w.considered} block(s) considered, ${w.blocks.length} surfaced · scorer ${w.scorer}`
-    + (w.appetite === 0 ? ' — appetite 0 means “no need”, not “no match”' : '');
-  wrap.append(note);
-  if (!w.blocks.length) return;
-  const maxScore = Math.max(...w.blocks.map((b) => b.score || 0), 0.0001);
-  for (const b of w.blocks) {
-    const row = document.createElement('article');
-    row.className = 'rank-row';
-    row.addEventListener('click', () => selectRing(b.index, { scroll: true }));
-    const rank = document.createElement('div');
-    rank.className = 'rank';
-    rank.textContent = `${b.rank + 1}.`;
-    const sub = document.createElement('small');
-    // A "lift" is only a CPHY lift when the block actually carries a token-weight
-    // or etch part; a null organicRank without those parts is just a returned-set
-    // boundary difference between the two runs, not something CPHY did.
-    const cphyLifted = Boolean(b.parts.cphy) || Boolean(b.parts.etched);
-    if (b.rankDelta > 0 && cphyLifted) { sub.textContent = `▲${b.rankDelta} by weight`; sub.className = 'delta-up'; }
-    else if (b.rankDelta > 0) { sub.textContent = `▲${b.rankDelta}`; sub.className = 'delta-up'; }
-    else if (b.rankDelta < 0) { sub.textContent = `▼${-b.rankDelta}`; sub.className = 'delta-down'; }
-    else if (b.organicRank === null && cphyLifted) { sub.textContent = b.parts.etched ? 'etch-lifted' : 'token-lifted'; sub.className = 'delta-up'; }
-    rank.append(sub);
-    const body = document.createElement('div');
-    const line = document.createElement('div');
-    const name = document.createElement('strong');
-    name.textContent = `#${b.index} ${b.type || ''}`;
-    line.append(name, ` — score ${(b.score || 0).toFixed(3)} `);
-    if (b.parts.cphy) line.append(chip(`×${b.parts.cphy} weight`, 'brass'), ' ');
-    if (b.parts.etched) line.append(chip(`etched E${b.parts.etched}`, 'brass'), ' ');
-    if (b.explore) line.append(chip('ε-explore', 'teal'), ' ');
-    body.append(line);
-    if (weights) {
-      const bar = document.createElement('div');
-      bar.className = 'part-bar';
-      for (const part of PART_ORDER) {
-        const weight = Number(weights[part] || 0);
-        if (!weight) continue;
-        const value = part === 'salience' ? (b.salience ?? 0) / 255 : Number(b.parts[part] || 0);
-        const contribution = weight * Math.min(1, value);
-        if (contribution <= 0.001) continue;
-        const seg = document.createElement('i');
-        seg.className = `part-${part}`;
-        seg.style.width = `${(contribution / maxScore) * 100}%`;
-        seg.title = `${part} ${value.toFixed(3)} × ${weight}`;
-        bar.append(seg);
-      }
-      body.append(bar);
-    }
-    const excerpt = document.createElement('div');
-    excerpt.className = 'meta';
-    excerpt.textContent = b.excerpt || '';
-    body.append(excerpt);
-    const side = document.createElement('div');
-    side.className = 'meta';
-    side.textContent = b.organicRank === null ? 'not in organic set' : `organic #${b.organicRank + 1}`;
-    row.append(rank, body, side);
-    wrap.append(row);
-  }
-  const legend = document.createElement('p');
-  legend.className = 'preview-note';
-  legend.textContent = weights
-    ? `Bars show each term’s contribution to the ${trained ? 'scorer' : 'hand'} score (${PART_ORDER.filter((p) => weights[p]).map((p) => `${p} ${weights[p]}`).join(' · ')}); the weight multiplier (credit basins + real burns) and etch echelon then rerank — attention, never truth.`
-    : 'A trained scorer is active — the per-term weights are learned and not shown here; the weight multiplier (credit basins + real burns) and etch echelon rerank the result. Attention, never truth.';
-  wrap.append(legend);
-}
-
-async function runPreview(event) {
+$("continuumForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  const query = $('previewQuery').value.trim();
-  if (!query) return;
-  setText('retrievalMeta', 'realizing relevance…');
-  try {
-    const data = await api('/api/retrieval/preview', { method: 'POST', body: JSON.stringify({ query }) });
-    renderPreview(data);
-    setText('retrievalMeta', `${state.retrieval?.totalOffers ?? 0} retrieval(s) on record · preview ran outside the learner’s log`);
-  } catch (error) {
-    setText('retrievalMeta', error.message);
-  }
-}
-
-// --- scars & immunity --- //
-
-function renderImmune() {
-  const im = state.immune;
-  if (!im) return;
-  setIntegrityCard('immLock', !im.locked && !im.paused,
-    im.locked ? 'LOCKDOWN' : im.paused ? 'DORMANT' : 'OPEN',
-    im.paused ? `paused: ${im.paused.reason || 'no reason'}` : im.locked ? 'seals refused except recovery' : 'sealing normally');
-  setIntegrityCard('immQuarantine', im.quarantine.length === 0 ? true : null,
-    String(im.quarantine.length),
-    im.quarantine.length ? `heights ${contigLabel(im.quarantine)}` : 'no rings excluded');
-  setIntegrityCard('immScars', im.scars.length === 0 ? true : null,
-    String(im.scars.length),
-    im.scars.length ? 'inert records — lessons, not filters' : 'an unwounded chain');
-  setText('immuneMeta', im.doctrine);
-
-  const list = $('scarList');
-  if (!im.scars.length) {
-    list.textContent = 'No scars. When a covenant drift is healed, the quarantined range and its lesson appear here.';
+  if (!token || !state.agent) {
+    closeDialog("continuumDialog");
+    requireAgent(openContinuum);
     return;
   }
-  list.replaceChildren(...im.scars.map((scar) => {
-    const row = document.createElement('article');
-    row.className = 'domain-row';
-    const top = document.createElement('div');
-    top.className = 'domain-top';
-    const name = document.createElement('strong');
-    name.textContent = `${scar.id} · blocks ${scar.blocks[0]}–${scar.blocks.at(-1)}`;
-    const retire = document.createElement('button');
-    retire.className = 'ghost';
-    retire.textContent = 'Retire';
-    retire.addEventListener('click', () => forgetScar(scar.id));
-    top.append(name, retire);
-    const tags = document.createElement('div');
-    tags.className = 'tags';
-    tags.textContent = scar.lesson || 'no lesson recorded';
-    row.append(top, tags);
-    return row;
-  }));
-}
-
-function contigLabel(indices) {
-  const ranges = [];
-  const sorted = [...indices].sort((a, b) => a - b);
-  for (const idx of sorted) {
-    const last = ranges.at(-1);
-    if (last && idx === last[1] + 1) last[1] = idx;
-    else ranges.push([idx, idx]);
-  }
-  return ranges.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(', ');
-}
-
-async function forgetScar(id) {
-  try {
-    await api('/api/immune/forget-scar', { method: 'POST', body: JSON.stringify({ id }) });
-    setMsg('immuneMessage', `${id} retired — the record is kept, the label is released.`);
-    await Promise.all([loadImmune(), loadForks()]);
-  } catch (error) {
-    setMsg('immuneMessage', error.message, true);
-  }
-}
-
-// --- lineage: the fork tree --- //
-
-function renderForks() {
-  const f = state.forks;
-  if (!f) return;
-  setText('forkMeta', `head #${f.head?.index ?? '—'} · ${f.quarantineBranches.length} shed branch(es) · ${f.grafts.length} graft(s) · ${f.synthesisForks.length} recent perspective fork(s) · ${f.epochCount} epochs`);
-
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  const W = 900;
-  const H = 190;
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.classList.add('fork-svg');
-  const head = Math.max(1, f.head?.index ?? 1);
-  const sx = (idx) => 40 + (Math.max(0, Math.min(head, idx)) / head) * (W - 80);
-  const midY = 95;
-
-  const el = (tag, attrs, textContent) => {
-    const node = document.createElementNS(ns, tag);
-    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-    if (textContent) node.textContent = textContent;
-    return node;
-  };
-
-  const trunk = el('line', { x1: 40, y1: midY, x2: W - 40, y2: midY, class: 'trunk' });
-  svg.append(trunk);
-  svg.append(el('circle', { cx: 40, cy: midY, r: 3.4, class: 'headdot' }));
-  svg.append(el('text', { x: 34, y: midY + 16 }, 'genesis'));
-  svg.append(el('circle', { cx: W - 40, cy: midY, r: 4, class: 'headdot' }));
-  svg.append(el('text', { x: W - 74, y: midY + 16 }, `head #${f.head?.index}`));
-
-  for (const ckpt of f.checkpoints || []) {
-    svg.append(el('line', { x1: sx(ckpt), y1: midY - 5, x2: sx(ckpt), y2: midY + 5, class: 'tick' }));
-    // The head label occupies the right edge — a checkpoint that close keeps
-    // its tick but yields its label to the head.
-    if (sx(ckpt) < W - 124) svg.append(el('text', { x: sx(ckpt) - 12, y: midY + 16 }, `ckpt ${ckpt}`));
-  }
-  if (f.latestEpoch != null) {
-    svg.append(el('line', { x1: sx(f.latestEpoch), y1: midY - 7, x2: sx(f.latestEpoch), y2: midY + 7, class: 'tick' }));
-    svg.append(el('text', { x: sx(f.latestEpoch) - 16, y: midY - 12 }, `epoch #${f.latestEpoch}`));
-  }
-
-  for (const q of f.quarantineBranches) {
-    const x1 = sx(q.from);
-    const x2 = sx(Math.max(q.to, q.from + head / 60));
-    const path = el('path', { d: `M ${x1} ${midY} C ${x1 + 14} ${midY + 34}, ${x2 - 10} ${midY + 44}, ${x2 + 6} ${midY + 46}`, class: 'branch' });
-    const title = document.createElementNS(ns, 'title');
-    title.textContent = `quarantined ${q.from}–${q.to}${q.scarId ? ` (${q.scarId})` : ''} — excluded from the active self, still on disk`;
-    path.append(title);
-    svg.append(path);
-    svg.append(el('text', { x: x2 - 6, y: midY + 58 }, `${q.scarId || 'quarantine'} ${q.from}–${q.to}`));
-    if (q.resumedFromHeight != null) {
-      svg.append(el('circle', { cx: sx(q.resumedFromHeight), cy: midY, r: 2.6, class: 'headdot' }));
-    }
-  }
-
-  f.grafts.forEach((g, i) => {
-    const gx = sx(g.index);
-    const gy = 38 - (i % 2) * 14;
-    svg.append(el('path', { d: `M ${gx - 30} ${gy} C ${gx - 12} ${gy}, ${gx} ${gy + 16}, ${gx} ${midY}`, class: 'graft' }));
-    const diamond = el('rect', { x: gx - 34, y: gy - 4, width: 8, height: 8, transform: `rotate(45 ${gx - 30} ${gy})`, fill: TEAL_HEX });
-    const title = document.createElementNS(ns, 'title');
-    title.textContent = `graft #${g.index} from ${g.originAuthor} (their ring ${g.originIndex}, pack ${g.originPack}) — quarantined trust (I7)`;
-    diamond.append(title);
-    svg.append(diamond);
-    svg.append(el('text', { x: gx - 26, y: gy - 8 }, `⟵ ${g.originAuthor || 'foreign'}`));
-  });
-
-  for (const s of f.synthesisForks.slice(-6)) {
-    const cx = sx(s.index);
-    const n = s.forks.length;
-    s.forks.forEach((fork, i) => {
-      const angle = (-Math.PI / 2) + ((i - (n - 1) / 2) * (Math.PI / Math.max(6, n * 1.6)));
-      const fx = cx + Math.cos(angle) * 26;
-      const fy = midY - 8 + Math.sin(angle) * 26;
-      const line = el('line', { x1: cx, y1: midY, x2: fx, y2: fy, class: 'fan' });
-      const title = document.createElementNS(ns, 'title');
-      title.textContent = `#${s.index} considered fork: ${fork.perspective} (${fork.kind}) · ${fork.visits} visits · value ${fork.value}`;
-      line.append(title);
-      svg.append(line);
+  runForm(event.currentTarget, async () => {
+    await saveSettings({
+      ...settings(),
+      continuum: {
+        enabled: $("continuumEnabled").checked,
+        mode: document.querySelector('[name="blockMode"]:checked').value,
+        targetBytes: targetBytes(),
+      },
     });
-  }
-
-  $('forkTreeWrap').replaceChildren(svg);
-  if (f.exchanges.length) {
-    const note = document.createElement('p');
-    note.className = 'preview-note';
-    note.textContent = `Exchanges: ${f.exchanges.map((x) => `${x.kind} ${x.pack || ''} ${x.author ? `(${x.author})` : ''}`).join(' · ')}`;
-    $('forkTreeWrap').append(note);
-  }
-}
-
-// --- the organ panel: every organ of the skill, rendered honestly --- //
-
-function organRow(title, metaText, bodyText) {
-  const row = document.createElement('article');
-  row.className = 'domain-row';
-  const top = document.createElement('div');
-  top.className = 'domain-top';
-  const name = document.createElement('strong');
-  name.textContent = title;
-  const meta = document.createElement('span');
-  meta.className = 'meta';
-  meta.textContent = metaText || '';
-  top.append(name, meta);
-  row.append(top);
-  if (bodyText) {
-    const tags = document.createElement('div');
-    tags.className = 'tags';
-    tags.textContent = bodyText;
-    row.append(tags);
-  }
-  return row;
-}
-
-function fmtBig(n) {
-  if (n == null) return '—';
-  return Number(n).toLocaleString();
-}
-
-function truncate(text, max) {
-  const s = String(text ?? '');
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
-}
-
-function fmtDur(seconds) {
-  if (!Number.isFinite(seconds)) return '—';
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
-  if (seconds < 172800) return `${(seconds / 3600).toFixed(1)} h`;
-  return `${(seconds / 86400).toFixed(1)} days`;
-}
-
-function renderVitals() {
-  const v = state.organs?.vitals;
-  if (!v || v.error) { setText('vitalsMeta', v?.error || 'unavailable'); return; }
-  const worst = v.doctor?.worst;
-  setText('vitalsMeta', v.doctor
-    ? (worst === 0 ? 'doctor: HEALTHY' : worst === 1 ? 'doctor: ATTENTION' : 'doctor: COMPROMISED')
-    : 'doctor unavailable in this root');
-  const grid = $('vitalsChecks');
-  grid.replaceChildren(...(v.doctor?.checks || []).map((c) => {
-    const cell = document.createElement('article');
-    cell.className = `vital-cell ${c.status === 'OK' ? 'ok' : (c.status === 'COMPROMISED' || c.status === 'FAIL') ? 'bad' : 'warn'}`;
-    const name = document.createElement('strong');
-    name.textContent = c.check;
-    const detail = document.createElement('span');
-    detail.className = 'meta';
-    detail.textContent = `${c.status}${c.detail ? ` — ${c.detail}` : ''}`;
-    cell.append(name, detail);
-    return cell;
-  }));
-  $('vitalsStats').replaceChildren(
-    statCell('Dormancy', v.dormancy?.paused ? 'PAUSED' : 'ACTIVE', v.dormancy?.paused ? `${v.dormancy.reason || ''} since ${String(v.dormancy.since || '').slice(0, 19)}` : 'wearing the self-model'),
-    // enforce.py marks turn_head at turn START; a turn is sealed only once
-    // the chain head moves PAST it (watchdog flags unsealed when head <= mark).
-    statCell('Turn seal', v.enforcement?.turnHead != null && v.enforcement.head != null && v.enforcement.head > v.enforcement.turnHead ? 'SEALED' : 'PENDING', `turn started at #${v.enforcement?.turnHead ?? '—'} / chain #${v.enforcement?.head ?? '—'} · ${v.enforcement?.nudges ?? 0} nudge(s)`),
-    statCell('Recall index', v.hippocampus ? (v.hippocampus.fresh ? 'FRESH' : 'STALE') : '—', v.hippocampus ? `${fmtBig(v.hippocampus.indexed)} rings indexed to #${v.hippocampus.headIndex}` : 'hippocampus not built'),
-    statCell('Telemetry digest', v.telemetryBacklog ? `${fmtBig(v.telemetryBacklog.undigested)} B undigested` : '—', v.telemetryBacklog?.lastDigestRing != null ? `notarized at ring #${v.telemetryBacklog.lastDigestRing}` : 'no digest ring yet'),
-    statCell('Checkpoints', String(v.checkpoints?.count ?? 0), v.checkpoints?.latest != null ? `latest #${v.checkpoints.latest} · ${fmtBig(v.checkpoints.unanchored)} rings unanchored` : 'first anchor at ring 500'),
-    statCell('Witness quorum', v.consensus?.configured ? `${v.consensus.quorum}/${v.consensus.n}` : 'NOT CONFIGURED', v.consensus?.configured ? 'HMAC attestations active' : 'single-host tamper-evidence only'),
-    statCell('Custody vault', v.vault?.present ? `${v.vault.secrets} secret(s)` : 'none', v.vault?.present ? 'encrypted at rest (keystore.py)' : 'no vault initialized'),
-    statCell('Ledger attests', String(v.ledgerAttests?.count ?? 0), v.ledgerAttests?.latest != null ? `cphy-digest last at #${v.ledgerAttests.latest}` : 'cphy ledger never notarized to chain'),
-  );
-}
-
-function renderContinuum() {
-  const c = state.organs?.continuum;
-  if (!c || c.error) { setText('continuumMeta', c?.error || 'unavailable'); return; }
-  setText('continuumMeta', c.tasks.length
-    ? `${c.tasks.length} task(s) across ${c.totals.roots} chain root(s)`
-    : 'no continuum tasks yet — open one with continuum.py open-task');
-  $('continuumStats').replaceChildren(
-    statCell('Largest ingested', c.largest ? `${fmtBig(c.largest.tokens)} tokens` : '—', c.largest ? `${c.largest.blocks} blocks · ${truncate(c.largest.objective, 60)}` : 'nothing ingested yet'),
-    statCell('Total ingested', `${fmtBig(c.totals.tokens)} tokens`, `${fmtBig(c.totals.blocks)} sealed blocks`),
-    statCell('Secrets redacted', String(c.totals.redactions), 'stripped before sealing — leaks are forever on a chain'),
-    statCell('Task roots', String(c.totals.roots), c.roots.join(' · ') || 'per-task chains appear beside the main chain'),
-  );
-  $('continuumTasks').replaceChildren(...c.tasks.map((task) => {
-    const audit = task.audit ? ` · audit ${task.audit.reviewed ?? 0}/${task.audit.total ?? '?'}${task.audit.complete ? ' COMPLETE' : ''} (${task.audit.findings ?? 0} findings)` : ' · not audited';
-    const coherent = task.coherent === true ? 'COHERENT' : task.coherent === false ? 'INCOHERENT' : 'unvalidated';
-    return organRow(truncate(task.objective || '(no objective)', 90),
-      `${fmtBig(task.tokens)} tokens · ${task.blocks} blocks · ${task.items} items · ${coherent}`,
-      `${task.root} · opened ${String(task.openedAt || '').slice(0, 10)} · block band ${task.minTokens ?? '—'}–${task.maxTokens ?? '—'} tokens${audit}${task.nextAction ? ` · next: ${task.nextAction}` : ''}`);
-  }));
-}
-
-function renderChrono() {
-  const ch = state.organs?.chronosynaptic;
-  if (!ch || ch.error) { setText('chronoMeta', ch?.error || 'unavailable'); return; }
-  setText('chronoMeta', `${ch.collapses} collapse(s) — ${ch.auto} auto · ${ch.explicit} explicit · ${ch.dreamCacheFlushes} dream-cache flush(es) · ${ch.discardFaculties} discarded branch(es) reborn as faculties`);
-  const latest = $('chronoLatest');
-  if (!ch.latest) {
-    latest.textContent = 'No collapses yet — think through the tree with chronosynaptic.py think.';
-  } else {
-    const l = ch.latest;
-    const rows = [organRow(`#${l.index} — ${l.chosen || '?'} won`, `${String(l.ts || '').slice(0, 19)}${l.spread != null ? ` · value spread ${l.spread}` : ''}`, l.query ? `query: ${l.query}` : '')];
-    for (const f of l.forks.slice(0, 6)) {
-      rows.push(organRow(`${f.perspective}`, `${f.kind}${f.visits != null ? ` · ${f.visits} visits` : ''}${f.value != null ? ` · value ${f.value}` : ''}`, ''));
-    }
-    if (l.epitaphs?.length) rows.push(organRow('Loser epitaphs', '', l.epitaphs.join(' — ')));
-    latest.replaceChildren(...rows);
-  }
-  const leaders = $('chronoLeaders');
-  if (!ch.leaderboard.length) leaders.textContent = 'No winners yet.';
-  else leaders.replaceChildren(...ch.leaderboard.map((w) => organRow(w.name, `won ×${w.wins}`, '')));
-}
-
-function renderCambium() {
-  const ca = state.organs?.cambium;
-  if (!ca || ca.error) { setText('cambiumMeta', ca?.error || 'unavailable'); return; }
-  setText('cambiumMeta', `base ${ca.base.modalities}+${ca.base.senses} · grown ${ca.grownModalities.total + ca.grownSenses.total} · ${ca.imported} imported`);
-  $('cambiumStats').replaceChildren(
-    statCell('Grown modalities', String(ca.grownModalities.total), `${ca.grownModalities.active} active · ${ca.grownModalities.dormant} dormant`),
-    statCell('Grown senses', String(ca.grownSenses.total), `${ca.grownSenses.active} active · ${ca.grownSenses.dormant} dormant`),
-    statCell('Effects attached', `${ca.effects.op} ops`, `${ca.effects.frame} frames · ${ca.effects.hint} hints · ${ca.effects.none} bare`),
-    statCell('Wakes', String(ca.wakeRings.count), ca.wakeRings.latest != null ? `latest ring #${ca.wakeRings.latest} — dormancy is retrievable, not death` : 'no faculty ever woken'),
-  );
-  const most = $('mostLivedList');
-  if (!ca.mostLived.length) most.textContent = 'No labeled rings yet.';
-  else most.replaceChildren(...ca.mostLived.map((f) => organRow(f.name, `${f.kind} · fired ×${f.fires}`, '')));
-  const hib = $('hibernationList');
-  const rows = [];
-  if (ca.pruneRings.count) rows.push(organRow(`${ca.pruneRings.count} prune event(s)`, '', ca.pruneRings.latestSummary));
-  if (ca.wakeHitsPending.length) rows.push(organRow('Earning reinstatement', `${ca.wakeHitsPending.length} faculties with wake credit`, ca.wakeHitsPending.join(' · ')));
-  if (!rows.length) rows.push(organRow('No hibernation events', '', 'every grown faculty is paying rent'));
-  hib.replaceChildren(...rows);
-}
-
-function renderConscience() {
-  const co = state.organs?.conscience;
-  if (!co || co.error) { setText('conscienceMeta', co?.error || 'unavailable'); return; }
-  const total = Object.values(co.verdicts).reduce((s, n) => s + n, 0);
-  setText('conscienceMeta', `${total} gate verdict(s) on record`);
-  $('conscienceStats').replaceChildren(
-    statCell('Sealed', String(co.verdicts.SEAL), 'grounded thoughts that passed the gate'),
-    statCell('Forced uncertainty', String(co.verdicts.FORCE_UNCERTAINTY), 'asserted beyond grounding — hedged before sealing'),
-    statCell('Rejected', String(co.verdicts.REJECT), 'refused outright: covenant or consistency floor'),
-    statCell('Revise loops', String(co.verdicts.REVISE), 'below brightness target — iterate, then reseal'),
-    statCell('Speculation debt', co.conjectures.open > 0 ? `${co.conjectures.open} open` : 'NONE', `${co.conjectures.scored} conjecture(s) scored against evidence`),
-    statCell('Scorer', co.scorer.startsWith('trained') ? co.scorer : 'hand-2.1', co.scorer.startsWith('trained') ? 'learned weights active' : 'no trained operator active'),
-    statCell('Entity gate', co.entityGate ? 'ARMED' : 'off', co.entityGate ? 'entity grounding enforced at seal' : 'policy floor not raised'),
-  );
-  const detail = $('conscienceDetail');
-  const rows = [];
-  if (co.spanGrounding) rows.push(organRow(`Span grounding (ring #${co.spanGrounding.ring})`, `${co.spanGrounding.n_grounded ?? 0} grounded · ${co.spanGrounding.n_weak ?? 0} weak · ${co.spanGrounding.n_unsupported ?? 0} unsupported of ${co.spanGrounding.n_spans ?? 0} spans`, 'every claim in the sealed summary is checked against cited rings'));
-  if (co.lastNonSeal) rows.push(organRow(`Last ${co.lastNonSeal.decision}`, String(co.lastNonSeal.ts || '').slice(0, 19), (co.lastNonSeal.reasons || []).join(' — ')));
-  const frames = Object.entries(co.frames || {});
-  if (frames.length) rows.push(organRow('Declared frames', frames.map(([f, n]) => `${f} ×${n}`).join(' · '), 'mention/input provenance keeps quoted vocabulary from reading as intent'));
-  detail.replaceChildren(...rows);
-}
-
-function renderReflective() {
-  const re = state.organs?.reflective;
-  if (!re || re.error) { setText('reflectiveMeta', re?.error || 'unavailable'); return; }
-  setText('reflectiveMeta', `${re.dreams.count} dream cycle(s) · ${re.autobiography?.count ?? 0} self-portrait(s)`);
-  const card = $('portraitCard');
-  if (!re.autobiography) {
-    card.textContent = 'No autobiography rings yet.';
-  } else {
-    card.replaceChildren(organRow(
-      `Ring #${re.autobiography.index} — ${re.autobiography.authored ? 'model-authored' : 'auto-scaffold'}`,
-      `${String(re.autobiography.ts || '').slice(0, 19)} · ${re.autobiography.ringsSince} ring(s) ago`,
-      re.autobiography.portrait));
-  }
-  $('reflectiveStats').replaceChildren(
-    statCell('Hippocampus', re.hippocampus.terms != null ? `${fmtBig(re.hippocampus.terms)} terms` : '—', 'stem+synonym postings behind every recall'),
-    statCell('Salience overlay', `${re.salience.scored} ring(s)`, re.salience.top.length ? `top: ${re.salience.top.map((t) => `#${t.ring}:${t.score}`).join(' ')}` : 'dreams reinforce and decay what mattered'),
-    statCell('Dreams', String(re.dreams.count), re.dreams.latest ? `latest #${re.dreams.latest.index}: ${truncate(re.dreams.latest.summary, 70)}` : 'no dream yet'),
-    statCell('Missed positives', String(re.dreams.missedPositives), 'retrieval failures mined while dreaming'),
-  );
-}
-
-function renderCensus() {
-  const ce = state.organs?.census;
-  if (!ce || ce.error) { setText('censusMeta', ce?.error || 'unavailable'); return; }
-  if (!ce.total) {
-    setText('censusMeta', 'empty chain — no rings sealed yet');
-    $('censusStats').replaceChildren();
-    $('censusTypes').replaceChildren();
+    closeDialog("continuumDialog");
+    toast("Continuum block settings applied.");
+  });
+});
+$("flushContinuum").addEventListener("click", () => {
+  if (!token || !state.agent) {
+    toast("Pair an agent before committing a block.");
     return;
   }
-  setText('censusMeta', `${fmtBig(ce.total)} rings since ${String(ce.genesis?.ts || '').slice(0, 10)} — "${ce.genesis?.name || '?'}"`);
-  $('censusStats').replaceChildren(
-    statCell('Chain', `${fmtBig(ce.total)} rings`, `head #${ce.head?.index ?? '—'} · ${formatBytes(ce.chainBytes)} ledger`),
-    statCell('Cadence', `${ce.ringsPerDay}/day`, `${ce.activeDays} active day(s) since genesis`),
-    statCell('Blockspace', `${fmtBig(ce.blockspace.blobs)} blobs`, formatBytes(ce.blockspace.bytes)),
-    statCell('Largest ring', ce.largestRing?.index != null ? `#${ce.largestRing.index}` : '—', ce.largestRing?.index != null ? `${formatBytes(ce.largestRing.bytes)} · ${ce.largestRing.type}` : ''),
-    statCell('Longest silence', fmtDur(ce.longestGap?.seconds), ce.longestGap?.from != null ? `between rings #${ce.longestGap.from} and #${ce.longestGap.to}` : ''),
-    statCell('Growth share', `${Math.round((ce.growthShare || 0) * 100)}%`, 'of all rings are faculty growth — the mind building itself'),
-  );
-  const wrap = $('censusTypes');
-  const entries = Object.entries(ce.byType || {});
-  const max = Math.max(1, ...entries.map(([, n]) => n));
-  wrap.replaceChildren(...entries.slice(0, 14).map(([type, count]) => {
-    const row = document.createElement('div');
-    row.className = 'census-row';
-    const label = document.createElement('span');
-    label.className = 'census-label';
-    label.textContent = type;
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    const fill = document.createElement('i');
-    fill.style.width = `${Math.max(2, (count / max) * 100)}%`;
-    bar.append(fill);
-    const num = document.createElement('span');
-    num.className = 'meta';
-    num.textContent = String(count);
-    row.append(label, bar, num);
-    return row;
-  }));
-  if (ce.genesis?.covenant?.length) {
-    const cov = document.createElement('p');
-    cov.className = 'preview-note';
-    cov.textContent = `Genesis covenant: ${ce.genesis.covenant.join(' · ')}`;
-    wrap.append(cov);
-  }
-}
-
-// --- the emergent nursery: copy / paste / activate faculties --- //
-
-function facultyAsJson(f) {
-  const out = {
-    kind: f.kind,
-    name: f.name,
-    function: f.function,
-    category: f.category || 'knowledge',
-    seed_terms: f.seedTerms || [],
-  };
-  if (f.opCode) out.code = f.opCode;
-  return JSON.stringify(out, null, 2);
-}
-
-function nurseryInSelf(f) {
-  return f.promotedToId != null || f.status === 'activated' || f.status === 'promoted';
-}
-
-function renderNursery() {
-  const n = state.nursery;
-  if (!n) return;
-  const c = n.counts;
-  setText('nurseryMeta', `${c.emergent} emergent · ${c.proposed} proposed · ${c.inSelf} already in the self — active: ${c.activeModalities} modalities, ${c.activeSenses} senses`);
-
-  const facultyRow = (f, { withActivate }) => {
-    const row = document.createElement('article');
-    row.className = 'domain-row';
-    const top = document.createElement('div');
-    top.className = 'domain-top';
-    const name = document.createElement('strong');
-    name.append(chip(f.kind, f.kind === 'modality' ? 'brass' : 'teal'), ` ${f.name}`);
-    const meta = document.createElement('span');
-    meta.className = 'meta';
-    meta.textContent = `${f.eid || '—'} · ${f.status}${f.recurrence > 1 ? ` · recurred ×${f.recurrence}` : ''}${f.opCodeChars ? ` · op code ${f.opCodeChars} chars (inert)` : ''}${f.promotedToId != null ? ` · grown #${f.promotedToId}` : ''}`;
-    top.append(name, meta);
-    const fn = document.createElement('div');
-    fn.className = 'tags';
-    fn.textContent = f.function || '';
-    const actions = document.createElement('div');
-    actions.className = 'actions nursery-actions';
-    if (f.seedTerms?.length) {
-      const seeds = document.createElement('span');
-      seeds.className = 'meta';
-      seeds.textContent = f.seedTerms.join(' · ');
-      actions.append(seeds);
+  const button = $("flushContinuum");
+  button.disabled = true;
+  (async () => {
+    try {
+      const result = await api("/api/continuum/flush", {});
+      applyState(result);
+      await refreshState();
+      toast(
+        result.committed === false
+          ? "No pending data to commit."
+          : "Pending data committed.",
+      );
+    } catch (error) {
+      $("continuumForm").querySelector(".dialog-error").textContent =
+        error.message;
+    } finally {
+      button.disabled = false;
     }
-    const copy = document.createElement('button');
-    copy.className = 'ghost';
-    copy.textContent = 'Copy JSON';
-    copy.addEventListener('click', () => copyFaculty(f));
-    actions.append(copy);
-    if (withActivate) {
-      const act = document.createElement('button');
-      act.className = 'primary';
-      act.textContent = 'Activate';
-      act.addEventListener('click', () => activateFaculty(f.eid || f.name));
-      actions.append(act);
-    }
-    row.append(top, fn, actions);
-    return row;
-  };
-
-  const waiting = n.faculties.filter((f) => !nurseryInSelf(f));
-  const done = n.faculties.filter(nurseryInSelf);
-  const list = $('emergentList');
-  const WAITING_SHOWN = 24;
-  if (!waiting.length) {
-    list.textContent = 'The Dream Cache is empty — emergent faculties appear here as the mind proposes them (or paste one).';
-  } else {
-    const rows = waiting.slice(-WAITING_SHOWN).reverse().map((f) => facultyRow(f, { withActivate: true }));
-    if (waiting.length > WAITING_SHOWN) {
-      const note = document.createElement('p');
-      note.className = 'meta';
-      note.textContent = `Showing the latest ${WAITING_SHOWN} of ${waiting.length} waiting faculties — the full cache lives in registry/emergent.json.`;
-      rows.push(note);
-    }
-    list.replaceChildren(...rows);
-  }
-  const doneList = $('activatedList');
-  if (!done.length) {
-    doneList.textContent = 'Nothing from the nursery is in the active self yet.';
-  } else {
-    const rows = done.slice(-8).reverse().map((f) => facultyRow(f, { withActivate: false }));
-    if (done.length > 8) {
-      const note = document.createElement('p');
-      note.className = 'meta';
-      note.textContent = `Showing the latest 8 of ${done.length} promoted/activated faculties.`;
-      rows.push(note);
-    }
-    doneList.replaceChildren(...rows);
-  }
-}
-
-async function copyFaculty(f) {
-  const json = facultyAsJson(f);
+  })();
+});
+$("ingestFile").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
   try {
-    await navigator.clipboard.writeText(json);
-    setMsg('nurseryMessage', `${f.name} copied as JSON — paste it into any chain's nursery.`);
+    $("ingestText").value = await file.text();
+    $("ingestName").value = file.name;
   } catch {
-    // Clipboard can be denied — surface the JSON for manual copying instead.
-    const pre = $('nurseryOpCode');
-    pre.textContent = json;
-    pre.classList.remove('hidden');
-    setMsg('nurseryMessage', 'Clipboard unavailable — copy the JSON shown below.');
+    toast("The selected file could not be read as text.", true);
   }
-}
-
-async function activateFaculty(selector) {
-  try {
-    const out = await api('/api/registry/activate', { method: 'POST', body: JSON.stringify({ selector }) });
-    const f = out.faculty || {};
-    const epochNote = out.epoch?.resealed ? 'epoch resealed' : `epoch reseal: ${out.epoch?.note || 'no change'}`;
-    if (f.opCode) {
-      const pre = $('nurseryOpCode');
-      pre.textContent = `# ${f.name} is registered (grown #${f.promotedToId}). Its op code stays INERT until you\n# place it in active_ops.py yourself (OPS = {"${f.name}": <callable>}):\n\n${String(f.opCode).slice(0, 2000)}`;
-      pre.classList.remove('hidden');
-      setMsg('nurseryMessage', `${f.name || selector} activated into the registry (${epochNote}) — its op code is shown below for manual placement.`);
-    } else {
-      setMsg('nurseryMessage', `${f.name || selector} activated into the active registry as grown #${f.promotedToId ?? '?'} (${epochNote}).`);
-    }
-    await Promise.all([loadNursery(), loadDashboardSummaryOnly()]);
-  } catch (error) {
-    setMsg('nurseryMessage', error.message, true);
-  }
-}
-
-async function submitPaste(event) {
+});
+$("ingestForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  const raw = $('pasteJson').value.trim();
-  if (!raw) return;
-  let parsed;
+  if (!token || !state.agent) {
+    toast("Pair an agent before ingesting data.");
+    return;
+  }
+  runForm(event.currentTarget, async () => {
+    const result = await api("/api/continuum", {
+      text: $("ingestText").value,
+      name: $("ingestName").value,
+      targetBytes: targetBytes(),
+    });
+    applyState(result);
+    await refreshState();
+    toast(
+      `Source data ingested${result.blocks !== undefined ? ` into ${result.blocks} blocks` : ""}.`,
+    );
+    $("ingestText").value = "";
+    $("ingestFile").value = "";
+  });
+});
+for (const id of ["gateAbility", "covenantLink"])
+  $(id).addEventListener("click", () => openDialog("covenantDialog"));
+$("covenantValues").replaceChildren(
+  ...FRUITS.map((fruit, index) => {
+    const item = el("div", "covenant-value");
+    item.append(
+      el("span", "", String(index + 1).padStart(2, "0")),
+      document.createTextNode(fruit),
+    );
+    return item;
+  }),
+);
+for (const id of ["verifyAbility", "verifyMini"])
+  $(id).addEventListener("click", () =>
+    requireAgent(async () => {
+      activity("Verifying chain hashes and registry commitments…", "busy");
+      try {
+        const result = await api("/api/verify", {});
+        if (result.state) applyState(result.state);
+        else {
+          state.agent = {
+            ...state.agent,
+            verified: result.verified,
+            head: result.head || state.agent.head,
+          };
+          renderState();
+        }
+        activity(
+          result.verified
+            ? "Chain verification passed."
+            : "Chain verification requires attention.",
+          result.verified ? "" : "error",
+        );
+        toast(
+          result.verified
+            ? "Timechain integrity verified."
+            : "Chain verification did not pass.",
+          !result.verified,
+        );
+      } catch (error) {
+        activity(error.message, "error");
+        toast(error.message, true);
+      }
+    }),
+  );
+function renderHistory() {
+  const content = $("historyContent");
+  content.replaceChildren();
+  const agent = state.agent;
+  if (!agent) {
+    content.append(
+      el("p", "fine-print", "Pair an agent to inspect its Timechain."),
+    );
+    return;
+  }
+  const stats = el("div", "history-stats");
+  for (const [name, value] of [
+    ["RINGS", Number(agent.head?.index ?? 0) + 1],
+    ["INTEGRITY", agent.verified ? "PASS" : "REVIEW"],
+    ["FACULTIES", normalizeFaculties().length],
+  ]) {
+    const box = el("div", "", name);
+    box.append(el("strong", "", value));
+    stats.append(box);
+  }
+  content.append(stats, el("p", "history-root", agent.root || ""));
+  const genesis = el("div", "history-row");
+  const title = el("header");
+  title.append(el("span", "", "RING 0 · GENESIS"));
+  genesis.append(
+    title,
+    el(
+      "p",
+      "",
+      JSON.stringify(agent.genesis?.payload || agent.genesis || {}, null, 2),
+    ),
+  );
+  content.append(genesis);
+  for (const item of [...(agent.history || [])].reverse()) {
+    const row = el("div", "history-row"),
+      header = el("header");
+    header.append(
+      el(
+        "span",
+        "",
+        `RING ${item.index ?? item.ring?.index ?? (typeof item.ring === "number" ? item.ring : "—")}`,
+      ),
+      el("span", "", item.ring_type || "conversation"),
+    );
+    row.append(
+      header,
+      el(
+        "p",
+        "",
+        (
+          item.payload?.output ||
+          item.output ||
+          item.content ||
+          item.payload?.thought ||
+          JSON.stringify(item.payload || item)
+        ).slice(0, 500),
+      ),
+      el("code", "", item.ring_hash || item.ring?.hash || item.hash || ""),
+    );
+    content.append(row);
+  }
+  if (!agent.history?.length)
+    content.append(
+      el(
+        "p",
+        "fine-print",
+        "Conversation history will appear after accepted turns.",
+      ),
+    );
+}
+$("historyButton").addEventListener("click", () =>
+  requireAgent(() => {
+    renderHistory();
+    openDialog("historyDialog");
+  }),
+);
+function toggleLoadout() {
+  $("loadoutSidebar").classList.toggle("mobile-open");
+  $("facultySearch").focus();
+  $("agentSidebar").classList.remove("mobile-open");
+}
+for (const id of ["loadoutAbility", "mobileLoadout"])
+  $(id).addEventListener("click", toggleLoadout);
+$("closeLoadout").addEventListener("click", () => {
+  $("loadoutSidebar").classList.remove("mobile-open");
+  $("mobileLoadout").focus();
+});
+$("closeAgents").addEventListener("click", () => {
+  $("agentSidebar").classList.remove("mobile-open");
+  $("mobileAgents").focus();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !document.querySelector("dialog[open]")) {
+    $("loadoutSidebar").classList.remove("mobile-open");
+    $("agentSidebar").classList.remove("mobile-open");
+  }
+});
+$("mobileAgents").addEventListener("click", () => {
+  $("agentSidebar").classList.toggle("mobile-open");
+  $("loadoutSidebar").classList.remove("mobile-open");
+});
+for (const id of ["modalitiesTab", "sensesTab"])
+  $(id).addEventListener("click", (event) => {
+    currentKind = event.currentTarget.dataset.kind;
+    document
+      .querySelectorAll(".faculty-tabs button")
+      .forEach((button) =>
+        button.setAttribute(
+          "aria-selected",
+          String(button.dataset.kind === currentKind),
+        ),
+      );
+    renderFaculties();
+  });
+$("facultySearch").addEventListener("input", renderFaculties);
+$("refreshFaculties").addEventListener("click", () =>
+  requireAgent(async () => {
+    await refreshState();
+    toast("Agent faculty catalogue refreshed.");
+  }),
+);
+document.addEventListener("keydown", (event) => {
+  if (
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !document.querySelector("dialog[open]") &&
+    /^[1-6]$/.test(event.key)
+  ) {
+    event.preventDefault();
+    document.querySelector(`[data-shortcut="${event.key}"]`)?.click();
+  }
+});
+document
+  .querySelectorAll(".skill-slot")
+  .forEach(
+    (button) =>
+      (button.title = `${button.querySelector(".slot-title").textContent} · Alt + ${button.dataset.shortcut}`),
+  );
+function invalidatePackPreview() {
+  previewGeneration += 1;
+  packPreviewState = null;
+  $("packPreview").replaceChildren();
+  $("packPreview").classList.add("hidden");
+  $("importPackButton").disabled = true;
+  $("importPackButton").classList.add("hidden");
+  $("importPackError").textContent = "";
+  $("importPackResult").classList.add("hidden");
+}
+function packReportList(target, title, items, fallback) {
+  if (!items?.length) return;
+  target.append(el("h3", "", `${title} · ${items.length}`));
+  const list = el("ul", "pack-report-list");
+  for (const item of items) {
+    const row = el("li");
+    if (typeof item === "string") row.textContent = item;
+    else {
+      row.append(el("strong", "", item.name || fallback));
+      row.append(el("span", "", item.reason || item.kind || fallback));
+    }
+    list.append(row);
+  }
+  target.append(list);
+}
+function renderPackPreview(result) {
+  const panel = $("packPreview"),
+    pack = result.pack,
+    report = result.report || {};
+  panel.replaceChildren();
+  panel.classList.remove("hidden");
+  panel.append(
+    el("div", "section-caption", "VERIFIED PACK CHECKSUM"),
+    el("h3", "pack-name", pack.name),
+  );
+  panel.append(
+    el(
+      "p",
+      "pack-metadata",
+      `${pack.version} · ${pack.faculties?.length || 0} faculties · ${pack.domain || "General"}`,
+    ),
+  );
+  const summary = el("div", "pack-summary");
+  for (const [label, count] of [
+    ["NEW", report.imported?.length || 0],
+    ["COVERED", report.skipped_covered?.length || 0],
+    ["BLOCKED", report.blocked?.length || 0],
+  ]) {
+    const box = el("div");
+    box.append(el("strong", "", count), el("span", "", label));
+    summary.append(box);
+  }
+  panel.append(summary, el("code", "pack-checksum", pack.pack_sha256 || ""));
+  const donor = pack.donor?.genesis_name || pack.author || "Unknown";
+  panel.append(
+    el(
+      "p",
+      "fine-print",
+      `Declared donor: ${donor}. Identity is not independently verified; the checksum verifies the pack body.`,
+    ),
+  );
+  const definitions = el("details", "perspective-details");
+  definitions.append(el("summary", "", "Review faculty definitions"));
+  for (const faculty of pack.faculties || []) {
+    const row = el("div", "perspective-note");
+    row.append(
+      el("strong", "", `${faculty.name} · ${faculty.kind}`),
+      el("p", "", faculty.function || ""),
+    );
+    definitions.append(row);
+  }
+  panel.append(definitions);
+  packReportList(
+    panel,
+    "Ready for covenant review",
+    report.imported,
+    "Faculty",
+  );
+  packReportList(
+    panel,
+    "Already covered — will be skipped",
+    report.skipped_covered,
+    "Covered",
+  );
+  packReportList(
+    panel,
+    "Blocked — will not be imported",
+    report.blocked,
+    "Blocked",
+  );
+  packReportList(panel, "Errors", report.errors, "Invalid pack");
+  const ready = (report.imported?.length || 0) > 0 && !report.errors?.length;
+  $("importPackButton").classList.remove("hidden");
+  $("importPackButton").disabled = !ready;
+  if (!ready)
+    panel.append(
+      el(
+        "p",
+        "fine-print",
+        "There are no new importable faculties in this preview.",
+      ),
+    );
+}
+function exportableFaculties() {
+  return normalizeFaculties().filter(
+    (f) => ["grown", "imported"].includes(f.source) && f.equippable !== false,
+  );
+}
+function renderExportFaculties() {
+  const list = $("exportFacultyList"),
+    faculties = exportableFaculties();
+  const available = new Set(faculties.map(facultyId));
+  for (const key of exportSelection)
+    if (!available.has(key)) exportSelection.delete(key);
+  list.replaceChildren();
+  if (!faculties.length)
+    list.append(
+      el(
+        "p",
+        "faculty-empty",
+        "No learned faculties to share yet. Your agent’s promoted and imported faculties will appear here as its catalogue grows.",
+      ),
+    );
+  for (const faculty of faculties) {
+    const label = el("label", "archetype-option"),
+      input = el("input");
+    input.type = "checkbox";
+    input.checked = exportSelection.has(facultyId(faculty));
+    input.addEventListener("change", () => {
+      if (input.checked) exportSelection.add(facultyId(faculty));
+      else exportSelection.delete(facultyId(faculty));
+      $("exportPackButton").disabled = !exportSelection.size;
+    });
+    const copy = el("span");
+    copy.append(
+      el("strong", "", faculty.name),
+      el(
+        "small",
+        "",
+        `${faculty.kind.toUpperCase()} · ${faculty.source.toUpperCase()}${faculty.dormant ? " · DORMANT" : ""}`,
+      ),
+      el("small", "", faculty.function),
+    );
+    label.append(input, copy);
+    list.append(label);
+  }
+  $("exportPackButton").disabled = !exportSelection.size;
+}
+function selectExchangeTab(kind) {
+  const importing = kind === "import";
+  $("importPackTab").setAttribute("aria-selected", String(importing));
+  $("exportPackTab").setAttribute("aria-selected", String(!importing));
+  $("importPackPanel").classList.toggle("hidden", !importing);
+  $("exportPackPanel").classList.toggle("hidden", importing);
+  if (!importing) renderExportFaculties();
+}
+$("exchangeButton").addEventListener("click", () =>
+  requireAgent(() => {
+    $("exportPackName").value =
+      `${state.agent.name || "Cypher Tempre"} faculties`;
+    renderExportFaculties();
+    openDialog("exchangeDialog");
+  }),
+);
+$("importPackTab").addEventListener("click", () => selectExchangeTab("import"));
+$("exportPackTab").addEventListener("click", () => selectExchangeTab("export"));
+$("packJson").addEventListener("input", invalidatePackPreview);
+$("packFile").addEventListener("change", async (event) => {
+  invalidatePackPreview();
+  $("packJson").value = "";
+  const generation = previewGeneration,
+    file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    toast(
+      "This pack exceeds 2 MB. Share a smaller set of faculty definitions.",
+      true,
+    );
+    return;
+  }
   try {
-    parsed = JSON.parse(raw);
+    const content = await file.text();
+    if (generation === previewGeneration) $("packJson").value = content;
   } catch {
-    setMsg('nurseryMessage', 'That is not valid JSON — copy a faculty from a dashboard, or write {"kind","name","function","seed_terms"}.', true);
+    toast("The pack file could not be read.", true);
+  }
+});
+$("previewPackForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    invalidatePackPreview();
+    let pack;
+    try {
+      pack = JSON.parse($("packJson").value);
+    } catch {
+      throw new Error(
+        "The pack is not valid JSON. Choose a faculty pack or correct the JSON.",
+      );
+    }
+    if (!pack || typeof pack !== "object" || Array.isArray(pack))
+      throw new Error("A faculty pack must be a JSON object.");
+    const generation = previewGeneration,
+      previewAgent = agentId();
+    const result = await api("/api/faculties/preview", { pack });
+    if (generation !== previewGeneration || previewAgent !== agentId()) return;
+    packPreviewState = {
+      pack,
+      expectedHead: result.head.hash,
+      agentId: previewAgent,
+      result,
+    };
+    renderPackPreview(result);
+  });
+});
+$("importPackButton").addEventListener("click", async () => {
+  if (!packPreviewState || packPreviewState.agentId !== agentId()) {
+    invalidatePackPreview();
+    toast("Preview the pack for the current agent first.");
+    return;
+  }
+  if (!state.provider?.configured) {
+    toast(
+      "Connect your model for the covenant review, then return to import this pack.",
+    );
+    openModel();
+    return;
+  }
+  const button = $("importPackButton"),
+    preview = packPreviewState;
+  button.disabled = true;
+  $("importPackError").textContent = "";
+  try {
+    const result = await api("/api/faculties/import", {
+      pack: preview.pack,
+      expectedHead: preview.expectedHead,
+    });
+    if (result.state) applyState(result.state);
+    else await refreshState();
+    const count = result.imported?.length || 0,
+      report = result.report || {};
+    invalidatePackPreview();
+    $("importPackResult").textContent =
+      `${count} ${count === 1 ? "faculty" : "faculties"} imported into this agent’s inventory. ${report.skipped_covered?.length || 0} already covered; ${report.blocked?.length || 0} blocked.${result.ring ? ` Recorded in ring ${result.ring.index}.` : ""} Select any imported faculty in your loadout to equip it.`;
+    $("importPackResult").classList.remove("hidden");
+    toast(`${count} ${count === 1 ? "faculty" : "faculties"} imported.`);
+  } catch (error) {
+    $("importPackError").textContent = error.message;
+    if (["STALE_HEAD", "PREVIEW_STALE"].includes(error.code)) {
+      packPreviewState = null;
+      button.disabled = true;
+    } else button.disabled = false;
+  }
+});
+$("selectAllExport").addEventListener("click", () => {
+  const entries = exportableFaculties();
+  if (entries.length && entries.every((f) => exportSelection.has(facultyId(f))))
+    exportSelection.clear();
+  else entries.forEach((f) => exportSelection.add(facultyId(f)));
+  renderExportFaculties();
+});
+$("exportPackForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    if (!exportSelection.size)
+      throw new Error("Choose at least one learned faculty to share.");
+    const result = await api("/api/faculties/export", {
+      name: $("exportPackName").value.trim(),
+      keys: [...exportSelection],
+      version: $("exportPackVersion").value.trim(),
+      domain: $("exportPackDomain").value.trim(),
+    });
+    if (!result.pack || !result.count)
+      throw new Error("The bridge did not return a non-empty faculty pack.");
+    const blob = new Blob([JSON.stringify(result.pack, null, 2) + "\n"], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob),
+      link = el("a");
+    link.href = url;
+    link.download = String(
+      result.filename || "cypher-tempre-faculties.json",
+    ).replace(/[^A-Za-z0-9._-]/g, "-");
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast(
+      `Downloaded a pack with ${result.count} ${result.count === 1 ? "faculty" : "faculties"}.`,
+    );
+  });
+});
+let licenseDeployment = null,
+  licenseMethods = {},
+  currentLicense = null,
+  walletBusy = false;
+function licenseMessage(info) {
+  if (!info?.paymentsOpen)
+    return "Local beta testing is open. Payments are not open; do not send CPHY directly.";
+  if (info.status === "verification-unavailable")
+    return "Activation could not be verified. Check your network and try again; do not pay again.";
+  if (info.status === "choose-owner")
+    return "Enter the seat owner's public wallet address to check an existing seat, or purchase a new seat with your wallet.";
+  if (info.status === "active")
+    return `Instance active. Seat ${info.verification?.seatId || "verified"}; Base L2 confirmation is provisional.`;
+  return "This bridge has no active paid seat. Purchase one or rebind a seat owned by your wallet.";
+}
+function renderLicense(info) {
+  currentLicense = info;
+  $("licenseDeviceKey").value = info?.deviceKey || "";
+  if (info?.selectedOwner) $("licenseOwner").value = info.selectedOwner;
+  $("licenseStatus").textContent = licenseMessage(info);
+  $("licenseSummary").textContent = licenseMessage(info);
+  let enabled = false;
+  try {
+    validateDeployment(licenseDeployment);
+    enabled = Boolean(
+      info?.identityVerified &&
+        info.paymentsOpen &&
+        info.deviceKey &&
+        info.status !== "verification-unavailable" &&
+        matchingConfiguration(licenseDeployment, info.configuration),
+    );
+    if (
+      info?.paymentsOpen &&
+      !matchingConfiguration(licenseDeployment, info.configuration)
+    )
+      $("licenseError").textContent =
+        "The website and bridge have different license settings. Update the bridge before paying.";
+  } catch {}
+  $("purchaseSeatsButton").disabled = !enabled || walletBusy;
+  $("rotateSeatButton").disabled = !enabled || walletBusy;
+  $("purchaseSeatsButton").textContent = enabled
+    ? "Review purchase in wallet"
+    : info?.paymentsOpen
+      ? "Activation check required"
+      : "Payments are not open";
+  updateSeatTotal();
+}
+async function readLicense(owner) {
+  const challenge = [...crypto.getRandomValues(new Uint8Array(32))]
+    .map((n) => n.toString(16).padStart(2, "0"))
+    .join("");
+  const info = await api("/api/license/check", {
+    challenge,
+    ...(owner ? { owner } : {}),
+  });
+  await verifyBridgeIdentity(info, challenge, location.origin);
+  return { ...info, identityVerified: true };
+}
+async function showLicense() {
+  openDialog("licenseDialog");
+  $("licenseError").textContent = "";
+  try {
+    renderLicense(await readLicense());
+  } catch (error) {
+    $("licenseError").textContent = error.message;
+  }
+}
+$("licenseButton").addEventListener("click", () => requirePair(showLicense));
+$("loadAuditor").addEventListener("click", () => {
+  $("auditFrame").src = "./audit/";
+  $("auditFrame").classList.remove("hidden");
+  $("loadAuditor").classList.add("hidden");
+});
+function updateSeatTotal() {
+  const count =
+    (currentLicense?.status === "active" ? 0 : 1) +
+    $("additionalDeviceKeys").value.trim().split(/\s+/).filter(Boolean).length;
+  $("seatPurchaseTotal").textContent =
+    `${count} instance${count === 1 ? "" : "s"} / ${(count * 21000).toLocaleString()} CPHY`;
+}
+$("additionalDeviceKeys").addEventListener("input", updateSeatTotal);
+$("checkLicenseButton").addEventListener("click", async () => {
+  $("checkLicenseButton").disabled = true;
+  $("licenseError").textContent = "";
+  try {
+    renderLicense(await readLicense($("licenseOwner").value.trim()));
+  } catch (error) {
+    $("licenseError").textContent = error.message;
+  } finally {
+    $("checkLicenseButton").disabled = false;
+  }
+});
+async function walletAction(action) {
+  if (walletBusy) return;
+  walletBusy = true;
+  renderLicense(currentLicense);
+  $("licenseError").textContent = "";
+  try {
+    const result = await action((text) => {
+      $("licenseStatus").textContent = text;
+    });
+    $("licenseOwner").value = result.owner;
+    renderLicense(await readLicense(result.owner));
+    $("licenseStatus").textContent =
+      `Transaction included on Base: ${result.hash}. Wait for two confirmations, then choose Check activation.`;
+  } catch (error) {
+    $("licenseError").textContent =
+      error.message || "Wallet request could not complete.";
+  } finally {
+    walletBusy = false;
+    const pendingStatus = $("licenseStatus").textContent;
+    renderLicense(currentLicense);
+    $("licenseStatus").textContent = pendingStatus;
+  }
+}
+$("purchaseSeatsForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const keys = [
+    ...(currentLicense?.status === "active" ? [] : [currentLicense?.deviceKey]),
+    ...$("additionalDeviceKeys").value.trim().split(/\s+/).filter(Boolean),
+  ];
+  walletAction((report) =>
+    purchaseBoundSeats({
+      config: licenseDeployment,
+      methods: licenseMethods,
+      wallet: window.ethereum,
+      keys,
+      report,
+    }),
+  );
+});
+$("rotateSeatForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  walletAction((report) =>
+    rebindSeat({
+      config: licenseDeployment,
+      methods: licenseMethods,
+      wallet: window.ethereum,
+      seatId: $("rotateSeatId").value.trim(),
+      key: currentLicense?.deviceKey,
+      report,
+    }),
+  );
+});
+async function start() {
+  initMotifs();
+  renderState();
+  $("hostedBridgeSetup").classList.toggle("hidden", localBridgePage);
+  $("bridgePort").disabled = localBridgePage || ["cyphertempre.ai","www.cyphertempre.ai"].includes(location.hostname);
+  $("bridgePort").value = selectedBridgePort;
+  $("hostedOrigin").textContent = location.origin;
+  try {
+    const [config, registry] = await Promise.all([
+      fetch("./license-config.json", {
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+      }).then((r) => r.json()),
+      fetch("./seat-registry.json", {
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+      }).then((r) => r.json()),
+    ]);
+    licenseDeployment = config;
+    licenseMethods = registry.methodIdentifiers || {};
+    $("licenseSummary").textContent = config.required
+      ? "Pair a local bridge to check its paid instance. One seat costs 21,000 CPHY on Base."
+      : "Local beta testing is open. Paid activation is not open yet.";
+  } catch {
+    $("licenseSummary").textContent =
+      "Payment configuration unavailable. Do not send tokens.";
+  }
+  try {
+    const response = await fetch("/catalogue.json", { cache: "no-store" });
+    const data = await response.json();
+    catalogue = data.faculties || [];
+    archetypes = data.archetypes || [];
+    renderFaculties();
+  } catch {
+    console.warn("Base catalogue preview is unavailable.");
+  }
+  if (!localBridgePage) {
+    $("bridgeStatus").textContent = "PAIR YOUR LOCAL BRIDGE";
+    activity("Pair your local bridge to connect your Timechain.");
+    setInterval(refreshState, 10000);
     return;
   }
   try {
-    const body = {
-      kind: parsed.kind,
-      name: parsed.name,
-      function: parsed.function || '',
-      category: parsed.category || 'knowledge',
-      seedTerms: parsed.seed_terms || parsed.seedTerms || [],
-      code: parsed.code || parsed.op_code || '',
-    };
-    const out = await api('/api/registry/propose', { method: 'POST', body: JSON.stringify(body) });
-    const epochNote = out.epoch?.resealed ? 'epoch resealed' : `epoch reseal: ${out.epoch?.note || 'no change'}`;
-    const f = out.faculty;
-    if (f && nurseryInSelf(f)) {
-      setMsg('nurseryMessage', `${f.name} pasted and ENABLED in the active self as grown #${f.promotedToId} (${epochNote}).`);
-    } else if (f) {
-      setMsg('nurseryMessage', `${f.name} staged as an inert ${f.status} (${epochNote}) — review it in the Dream Cache, then Activate.`);
-    } else {
-      // The skill took the paste but resolved it another way (e.g. it woke a
-      // dormant faculty covering the same vocabulary) — show its own words.
-      setMsg('nurseryMessage', `The skill absorbed the paste: ${String(out.result || '').replace(/\s+/g, ' ').trim().slice(0, 240)} (${epochNote})`);
-    }
-    $('pasteJson').value = '';
-    await Promise.all([loadNursery(), loadDashboardSummaryOnly()]);
-  } catch (error) {
-    setMsg('nurseryMessage', error.message, true);
-  }
-}
-
-// --- edit / exchange / splice actions --- //
-
-async function submitLock(event) {
-  event.preventDefault();
-  try {
-    // Number('') is 0 — a blank field would silently lock from ring 0.
-    if (!$('lockFrom').value.trim() || !$('lockTo').value.trim() || !$('lockAmount').value.trim()) {
-      setMsg('cphyMessage', 'A lock needs explicit from/to ring numbers and a credit amount.', true);
-      return;
-    }
-    const body = {
-      op: $('lockOp').value,
-      from: Number($('lockFrom').value),
-      to: Number($('lockTo').value),
-      amount: Number($('lockAmount').value),
-      memo: $('lockMemo').value,
-    };
-    const out = await api('/api/cphy/lock', { method: 'POST', body: JSON.stringify(body) });
-    setMsg('cphyMessage', `Lock placed: ${JSON.stringify(out.result).slice(0, 160)}`);
-    await loadCphy();
-  } catch (error) {
-    setMsg('cphyMessage', error.message, true);
-  }
-}
-
-async function submitEtchN(event) {
-  event.preventDefault();
-  try {
-    await api('/api/cphy/etch-recall-n', { method: 'POST', body: JSON.stringify({ n: Number($('etchN').value) }) });
-    setMsg('cphyMessage', `etch_recall_n set to ${$('etchN').value} — the load you choose to pay for.`);
-    await loadCphy();
-  } catch (error) {
-    setMsg('cphyMessage', error.message, true);
-  }
-}
-
-async function submitTarget(event) {
-  event.preventDefault();
-  try {
-    if (!$('targetFrom').value.trim()) {
-      setMsg('cphyMessage', 'Deposit addresses need an explicit starting ring number.', true);
-      return;
-    }
-    const from = Number($('targetFrom').value);
-    const to = Number($('targetTo').value || from);
-    await api('/api/cphy/target', { method: 'POST', body: JSON.stringify({ from, to }) });
-    setMsg('cphyMessage', `Deposit addresses registered for rings ${from}–${to}. Burns land in the consent queue after the agent’s next sync.`);
-    await loadCphy();
-  } catch (error) {
-    setMsg('cphyMessage', error.message, true);
-  }
-}
-
-async function submitExport(event) {
-  event.preventDefault();
-  try {
-    if (!$('exportFrom').value.trim() || !$('exportTo').value.trim()) {
-      setMsg('forkMessage', 'A pack export needs explicit from/to ring numbers.', true);
-      return;
-    }
-    const body = {
-      from: Number($('exportFrom').value),
-      to: Number($('exportTo').value),
-      price: Number($('exportPrice').value || 0),
-      memo: $('exportMemo').value,
-    };
-    const out = await api('/api/pack/export', { method: 'POST', body: JSON.stringify(body) });
-    if (out.pack) {
-      const blob = new Blob([JSON.stringify(out.pack, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${out.pack.pack_hash?.slice(0, 12) || 'pack'}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    }
-    setMsg('forkMessage', `Pack exported (${out.pack?.rings?.length ?? '?'} ring(s), hash ${out.pack?.pack_hash?.slice(0, 12) || '—'}) — also saved at ${out.packPath}`);
-    await loadForks();
-  } catch (error) {
-    setMsg('forkMessage', error.message, true);
-  }
-}
-
-async function submitImport(event) {
-  event.preventDefault();
-  const file = $('importFile').files?.[0];
-  if (!file) {
-    setMsg('forkMessage', 'Choose a pack file first.', true);
-    return;
+    const status = await api("/api/status");
+    $("bridgeStatus").textContent = "LOCAL BRIDGE READY";
+    if (status.version) $("appVersion").textContent = `v${status.version}`;
+  } catch {
+    activity("Start the local bridge to connect your agent.", "error");
+    $("bridgeStatus").textContent = "BRIDGE OFFLINE";
   }
   try {
-    const pack = JSON.parse(await file.text());
-    const out = await api('/api/pack/import', { method: 'POST', body: JSON.stringify({ pack }) });
-    const r = out.result || {};
-    setMsg('forkMessage', `Spliced: ${(r.sealed || []).length} ring(s) grafted in quarantined trust (I7)${(r.refused || []).length ? `, ${r.refused.length} refused` : ''}${r.price_burned ? ` · ${r.price_burned} credits burned as price` : ''}.`);
-    await Promise.all([loadForks(), loadCphy(), loadRings()]);
-  } catch (error) {
-    setMsg('forkMessage', error.message, true);
-  }
+    const result = await api("/api/archetypes");
+    if (result.archetypes?.length) archetypes = result.archetypes;
+  } catch {}
+  setInterval(refreshState, 10000);
 }
-
-async function submitSeal(event) {
-  event.preventDefault();
-  try {
-    const out = await api('/api/ring/seal', { method: 'POST', body: JSON.stringify({ summary: $('sealSummary').value }) });
-    const text = typeof out.result === 'string' ? out.result : JSON.stringify(out.result);
-    const sealed = text.match(/[Rr]ing\s+#?(\d+)/);
-    setMsg('forkMessage', sealed ? `Sealed ring ${sealed[1]} — the annotation is now chain history.` : `Conscience verdict: ${text.slice(0, 240)}`);
-    $('sealSummary').value = '';
-    await Promise.all([loadRings(), loadForks()]);
-  } catch (error) {
-    setMsg('forkMessage', error.message, true);
-  }
-}
-
-async function submitRollback(event) {
-  event.preventDefault();
-  try {
-    const body = {
-      height: Number($('rollbackHeight').value),
-      lesson: $('rollbackLesson').value,
-      confirm: $('rollbackConfirm').value.trim(),
-    };
-    const out = await api('/api/immune/rollback', { method: 'POST', body: JSON.stringify(body) });
-    const text = typeof out.result === 'string' ? out.result : JSON.stringify(out.result);
-    setMsg('forkMessage', `Quarantined: ${text.slice(0, 240)}`);
-    await Promise.all([loadImmune(), loadForks(), loadRings(), loadDashboardSummaryOnly()]);
-  } catch (error) {
-    setMsg('forkMessage', error.message, true);
-  }
-}
-
-async function loadDashboardSummaryOnly() {
-  state.summary = await api('/api/timechain/summary');
-  renderSummary();
-  drawLandscape();
-}
-
-function renderRingCphyChips(index) {
-  const panel = $('ringDetail');
-  let strip = panel.querySelector('.ring-cphy');
-  if (!strip) {
-    strip = document.createElement('div');
-    strip.className = 'ring-cphy tags';
-    panel.insertBefore(strip, panel.querySelector('pre'));
-  }
-  strip.replaceChildren();
-  const b = state.cphyBlockMap?.get(Number(index));
-  const stats = state.retrieval?.rings?.find((s) => s.index === Number(index));
-  if (b?.multiplier && b.multiplier !== 1) strip.append(chip(`weight ×${b.multiplier.toFixed(2)}`, 'brass'), ' ');
-  if (b?.etch) strip.append(chip(`etched E${b.etch.echelon}/21 · ${b.etch.tokens} CPHY`, 'brass'), ' ');
-  if (b?.depositAddress) strip.append(chip(`deposit ${shortAddr(b.depositAddress)}`), ' ');
-  if (stats) strip.append(chip(`retrieved ${stats.chosen}× · best rank ${stats.bestRank}`, 'teal'), ' ');
-  if ((state.immune?.quarantine || []).includes(Number(index))) strip.append(chip('quarantined', 'danger'), ' ');
-}
-
-function bindObservatory() {
-  $('previewForm')?.addEventListener('submit', runPreview);
-  $('pasteForm')?.addEventListener('submit', submitPaste);
-  $('syncOnchain')?.addEventListener('click', syncOnchain);
-  $('lockForm')?.addEventListener('submit', submitLock);
-  $('etchNForm')?.addEventListener('submit', submitEtchN);
-  $('targetForm')?.addEventListener('submit', submitTarget);
-  $('exportForm')?.addEventListener('submit', submitExport);
-  $('importForm')?.addEventListener('submit', submitImport);
-  $('sealForm')?.addEventListener('submit', submitSeal);
-  $('rollbackForm')?.addEventListener('submit', submitRollback);
-  const canvas = $('landscapeCanvas');
-  if (canvas) {
-    canvas.addEventListener('mousemove', landscapeHover);
-    canvas.addEventListener('mouseleave', () => $('landscapeTip').classList.add('hidden'));
-    canvas.addEventListener('click', (event) => selectRing(landscapeIndexAt(event), { scroll: true }));
-  }
-  window.addEventListener('resize', debounce(drawLandscape, 150));
-}
+start();

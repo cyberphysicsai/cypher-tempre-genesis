@@ -2059,6 +2059,12 @@ function sendJson(res, status, body) {
 }
 
 async function serveStatic(req, res, url) {
+  // Keep this original read-only bridge's local entry point in the auditor.
+  if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/audit/') {
+    res.writeHead(302, { Location: '/audit/index.html', 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
   const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
   const target = path.resolve(publicDir, rel);
   if (target !== publicDir && !target.startsWith(`${publicDir}${path.sep}`)) {
@@ -2072,6 +2078,8 @@ async function serveStatic(req, res, url) {
     '.css': 'text/css; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
     '.svg': 'image/svg+xml',
+    '.ttf': 'font/ttf',
+    '.woff2': 'font/woff2',
   };
   res.writeHead(200, {
     ...securityHeaders(),

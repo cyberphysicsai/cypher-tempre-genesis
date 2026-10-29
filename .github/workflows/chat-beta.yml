@@ -1,0 +1,25 @@
+name: Chat beta
+on:
+  push:
+    branches: [main, feat/agentic-metaprogramming-beta]
+    paths: ['apps/cypher-tempre-chat/**', 'dashboard/public/**', 'dashboard/test/audit-site.test.mjs', '.github/workflows/chat-beta.yml']
+  pull_request:
+    paths: ['apps/cypher-tempre-chat/**', 'dashboard/public/**', 'dashboard/test/audit-site.test.mjs', '.github/workflows/chat-beta.yml']
+permissions:
+  contents: read
+jobs:
+  chat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run check && npm test && npm run test:engine
+        working-directory: apps/cypher-tempre-chat
+      - run: node --test dashboard/test/audit-site.test.mjs
+      - run: npm ci --ignore-scripts && npm run compile && npm test
+        working-directory: apps/cypher-tempre-chat/contracts

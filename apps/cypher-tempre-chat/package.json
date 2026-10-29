@@ -1,0 +1,20 @@
+{
+  "name": "cypher-tempre-chat",
+  "version": "0.3.0",
+  "description": "A local-first, bring-your-own-model cockpit for Cypher Tempre Timechains.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20",
+    "python": ">=3.10"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "beta": "node server.mjs --public-origin https://cyphertempre.ai --public-origin https://www.cyphertempre.ai",
+    "dev": "node server.mjs",
+    "check": "node --check server.mjs && node --check public/app.js && node --check public/motifs.js",
+    "test": "node --test test/*.test.mjs",
+    "test:engine": "python -m unittest discover -s test -p test_engine_bridge.py"
+  }
+}
