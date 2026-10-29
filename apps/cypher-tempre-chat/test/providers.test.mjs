@@ -225,6 +225,149 @@ test("OpenCode Go receives an honest client name and private random provider-ses
   }
 });
 
+test("only official Go Responses Muse Contributor reviews receive the bounded 8192-token allowance", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    const text = JSON.stringify(goodReview());
+    return new Response(
+      JSON.stringify({
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text }],
+          },
+        ],
+        choices: [{ finish_reason: "stop", message: { content: text } }],
+        stop_reason: "end_turn",
+        content: [{ type: "text", text }],
+        candidates: [{ finishReason: "STOP", content: { parts: [{ text }] } }],
+      }),
+    );
+  });
+  const eligible = {
+    provider: "openai",
+    model: "muse-spark-1.3-contributor",
+    apiKey: "synthetic-review-budget-key",
+    baseUrl: "https://opencode.ai/inference/go/openai/v1",
+  };
+  const cases = [
+    [eligible, "max_output_tokens", 8192],
+    [
+      {
+        ...eligible,
+        baseUrl: "https://opencode.ai:443/inference/go/openai/v1/",
+      },
+      "max_output_tokens",
+      8192,
+    ],
+    [{ ...eligible, model: "another-model" }, "max_output_tokens", 2048],
+    [
+      { ...eligible, baseUrl: "https://api.openai.com/v1" },
+      "max_output_tokens",
+      2048,
+    ],
+    [
+      {
+        ...eligible,
+        baseUrl: "https://opencode.ai.evil.example/inference/go/openai/v1",
+      },
+      "max_output_tokens",
+      2048,
+    ],
+    [
+      {
+        ...eligible,
+        baseUrl: "https://opencode.ai:444/inference/go/openai/v1",
+      },
+      "max_output_tokens",
+      2048,
+    ],
+    [
+      { ...eligible, baseUrl: "https://opencode.ai/inference/go/other/v1" },
+      "max_output_tokens",
+      2048,
+    ],
+    [
+      { ...eligible, baseUrl: "https://opencode.ai/inference/go/openai/v10" },
+      "max_output_tokens",
+      2048,
+    ],
+    [{ ...eligible, provider: "compatible" }, "max_tokens", 2048],
+    [
+      { provider: "anthropic", model: "fixture", apiKey: eligible.apiKey },
+      "max_tokens",
+      2048,
+    ],
+    [
+      { provider: "gemini", model: "fixture", apiKey: eligible.apiKey },
+      "maxOutputTokens",
+      2048,
+    ],
+  ];
+  for (const [config, field, expected] of cases) {
+    await review(config, {
+      input: "Synthetic request",
+      candidate: "Safe answer",
+      covenant: [...FRUITS],
+    });
+    const body = requests.at(-1).body;
+    assert.equal(
+      (body.generationConfig || body)[field],
+      expected,
+      `${config.provider} ${config.baseUrl} ${config.model}`,
+    );
+  }
+  await generate(eligible, {
+    messages: [{ role: "user", content: "Ordinary generation" }],
+  });
+  assert.equal(requests.at(-1).body.max_output_tokens, 4096);
+  await generate(eligible, {
+    messages: [{ role: "user", content: "Bounded generation" }],
+    maxTokens: 512,
+  });
+  assert.equal(requests.at(-1).body.max_output_tokens, 512);
+});
+
+test("Muse review exhaustion remains held at its larger allowance", async (t) => {
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    assert.equal(JSON.parse(options.body).max_output_tokens, 8192);
+    return new Response(
+      JSON.stringify({
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [
+              { type: "output_text", text: JSON.stringify(goodReview()) },
+            ],
+          },
+        ],
+      }),
+    );
+  });
+  await assert.rejects(
+    review(
+      {
+        provider: "openai",
+        model: "muse-spark-1.3-contributor",
+        apiKey: "synthetic-budget-key",
+        baseUrl: "https://opencode.ai/inference/go/openai/v1",
+      },
+      {
+        input: "Synthetic request",
+        candidate: "Safe answer",
+        covenant: [...FRUITS],
+      },
+    ),
+    { code: "PROVIDER_INCOMPLETE" },
+  );
+});
+
 test("review evidence references are explicit unique canonical indices, never every retrieved item by default", () => {
   const evidence = [1, 2].map((index) => ({
     index,
