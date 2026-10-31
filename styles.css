@@ -2960,6 +2960,17 @@ optgroup,
 .operator-digest, .operator-command { display: block; padding: 10px; background: #090909; border: 1px solid #444; font-size: 9px; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
 .operator-compatibility > strong { font-size: 10px; line-height: 1.8; }
 .search-node[data-selected="true"] { border-left: 2px solid #ddd; padding-left: 10px; }
+.install-notice { margin: 16px 28px 0; padding: 20px 24px; border: 1px solid #777; background: #161616; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.install-notice h2 { margin: 9px 0; font-size: 16px; }
+.install-notice p { max-width: 850px; color: #bbb; font-size: 10px; line-height: 1.9; }
+.install-notice > button { flex-shrink: 0; }
+.install-steps { margin: 22px 0; padding-left: 25px; font-size: 11px; line-height: 2; }
+.install-steps li { padding-left: 6px; margin-bottom: 12px; }
+#installDialog > a { text-decoration: none; text-align: center; display: block; padding: 16px; box-sizing: border-box; }
+.install-notice.hidden { display: none; }
+@media (max-width: 800px) {
+  .install-notice { margin: 12px 16px 0; padding: 16px; align-items: stretch; flex-direction: column; gap: 10px; }
+}
 .search-epitaph-title { display: block; margin-top: 15px; font-size: 10px; }
 @media (max-height: 820px) and (min-width: 701px) {
   .conversation-header { padding-top: 12px; padding-bottom: 10px; }
