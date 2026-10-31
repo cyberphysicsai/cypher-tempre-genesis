@@ -1,4 +1,5 @@
 // Geometry adapted from Cypher Tempre genesis dashboard, MIT licensed.
+import { motifPalette } from './themes.js';
 export function initMotifs() {
   const canvas = document.getElementById("motifCanvas");
   if (!canvas) return;
@@ -11,9 +12,11 @@ export function initMotifs() {
 
   // Original auditor geometry in neutral monochrome. Low-opacity ambient
   // linework keeps the interactive workspace in the foreground.
-  const WHITE = "238, 238, 238";
-  const SILVER = "214, 214, 214";
-  const GRAY = "170, 170, 170";
+  let { main: WHITE, secondary: SILVER, soft: GRAY } = motifPalette(document.documentElement.dataset.theme);
+  window.addEventListener('chainchat-theme-change', event => {
+    ({ main: WHITE, secondary: SILVER, soft: GRAY } = motifPalette(event.detail?.theme));
+    if (reducedMotion) render(0);
+  });
   const stroke = (rgb, alpha, w = 1) => {
     ctx.strokeStyle = `rgba(${rgb}, ${alpha})`;
     ctx.lineWidth = w;

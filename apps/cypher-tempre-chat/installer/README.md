@@ -1,4 +1,14 @@
-# Windows installer
+# ChainChat installers
+
+Windows x64 setup is described below. macOS 13.5+ (Apple Silicon/Intel) and glibc
+Linux (ARM64/x64) packages use the reviewed portable-runtime setup described in
+[POSIX.md](POSIX.md). They include Python and Node automatically; system package
+managers or sudo are not required. macOS ZIP contains an executable `.command`;
+Linux tar.gz contains an executable `.sh`, with an optional direct `.run` file.
+Normal OS confirmation/executable-file policies still apply. macOS signing and
+notarization are not claimed.
+
+## Windows x64
 
 The Windows x64 setup executable installs ChainChat for the current user. It
 embeds the reviewed application ZIP and downloads exact, hash-pinned Node.js and
@@ -41,7 +51,7 @@ beside the executable.
 Build on Windows after producing the sanitized Git-based application ZIP:
 
 ```powershell
-python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.7.1.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe
+python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.8.0.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.8.0-windows-x64.exe
 ```
 
 The .NET Framework compiler consumes the C# source, Windows manifest and font
@@ -60,7 +70,7 @@ Use a dedicated empty test directory, suppress launch/shortcuts, and capture the
 result without touching the current user's actual installation:
 
 ```powershell
-.\CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
+.\CypherTempre-ChainChat-Setup-0.8.0-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
 ```
 
 `--cache-dir` may name a directory containing the exact official Node/CPython ZIP

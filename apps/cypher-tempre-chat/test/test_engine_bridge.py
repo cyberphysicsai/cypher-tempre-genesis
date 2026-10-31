@@ -36,6 +36,31 @@ class EngineBridgeTests(unittest.TestCase):
     def head(self):
         return self.call("verify")["head"]["hash"]
 
+    def test_tool_outcomes_are_bounded_verified_and_committed_as_external_observations(self):
+        output = json.dumps({"content": "The telescope serial is ZXQ48271."})
+        observation = {"name": "read", "callId": "observed-read", "toolSha256": "a" * 64,
+                       "confirmed": True, "success": True,
+                       "result": {"text": output, "truncated": False,
+                                  "sha256": hashlib.sha256(output.encode("utf-8")).hexdigest()}}
+        self.assertEqual(bridge.tool_observations([observation]), [observation])
+        bad = copy.deepcopy(observation)
+        bad["result"]["sha256"] = "0" * 64
+        self.assert_code("INVALID_REQUEST", lambda: bridge.tool_observations([bad]))
+        bad = copy.deepcopy(observation)
+        bad["confirmed"] = "yes"
+        self.assert_code("INVALID_REQUEST", lambda: bridge.tool_observations([bad]))
+        self.assert_code("INVALID_REQUEST", lambda: bridge.tool_observations([observation] * 33))
+        truncated = copy.deepcopy(observation)
+        truncated["result"]["text"] = "An excerpt"
+        truncated["result"]["truncated"] = True
+        self.assertEqual(bridge.tool_observations([truncated]), [truncated])
+        result = self.commit(input="Please read the telescope label.",
+                             output="The telescope serial is ZXQ48271.", toolObservations=[observation])
+        self.assertTrue(result["sealed"])
+        ring = json.loads((self.root / "chain" / "rings.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(ring["payload"]["exchanges"][0]["toolObservations"], [observation])
+        self.assertEqual(ring["payload"]["exchanges"][0].get("usedRings", []), [])
+
     def exchange(self, **kwargs):
         return {"input": "Help me reason patiently about this question.",
                 "output": "We can consider the question patiently and clearly, and acknowledge uncertainty where information is missing.",

@@ -1,3 +1,4 @@
+@import url("../theme-palettes.css");
 /* Orbitron is shared with the chat; its SIL OFL license is in ../fonts/orbitron/. */
 @font-face {
   font-family: "Orbitron";
@@ -8,17 +9,17 @@
 }
 :root {
   color-scheme: dark;
-  --bg: #050505;
-  --panel: rgba(12, 12, 12, 0.82);
-  --panel-2: rgba(28, 28, 28, 0.9);
-  --panel-3: rgba(8, 8, 8, 0.88);
-  --line: #343434;
-  --line-strong: #707070;
-  --text: #f4f4f4;
-  --muted: #a8a8a8;
-  --faint: #6f6f6f;
-  --accent: #f2f2f2;
-  --ink: #050505;
+  --bg: var(--theme-hex-050505);
+  --panel: var(--theme-rgba-12-12-12-0_82);
+  --panel-2: var(--theme-rgba-28-28-28-0_9);
+  --panel-3: var(--theme-rgba-8-8-8-0_88);
+  --line: var(--theme-hex-343434);
+  --line-strong: var(--theme-hex-707070);
+  --text: var(--theme-hex-f4f4f4);
+  --muted: var(--theme-hex-a8a8a8);
+  --faint: var(--theme-hex-6f6f6f);
+  --accent: var(--theme-hex-f2f2f2);
+  --ink: var(--theme-hex-050505);
   --radius: 8px;
 }
 
@@ -30,9 +31,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+  background: linear-gradient(90deg, var(--theme-rgba-255-255-255-0_06) 1px, transparent 1px),
+    linear-gradient(0deg, var(--theme-rgba-255-255-255-0_045) 1px, transparent 1px),
     var(--bg);
   background-size: 72px 72px, 72px 72px, auto;
   color: var(--text);
@@ -46,9 +46,8 @@ body::before {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    linear-gradient(115deg, transparent 0 56%, rgba(255, 255, 255, 0.12) 56.15%, transparent 56.5%),
-    linear-gradient(28deg, transparent 0 69%, rgba(255, 255, 255, 0.08) 69.15%, transparent 69.5%);
+  background: linear-gradient(115deg, transparent 0 56%, var(--theme-rgba-255-255-255-0_12) 56.15%, transparent 56.5%),
+    linear-gradient(28deg, transparent 0 69%, var(--theme-rgba-255-255-255-0_08) 69.15%, transparent 69.5%);
   mix-blend-mode: screen;
 }
 
@@ -196,7 +195,7 @@ h3 {
 dialog {
   border: 1px solid var(--line);
   background: var(--panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 1px 0 var(--theme-rgba-255-255-255-0_055);
   backdrop-filter: blur(10px);
   border-radius: var(--radius);
 }
@@ -329,10 +328,9 @@ select {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--theme-rgba-255-255-255-0_14);
   border-radius: var(--radius);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 38%),
+  background: linear-gradient(135deg, var(--theme-rgba-255-255-255-0_055), transparent 38%),
     var(--panel-3);
 }
 
@@ -361,15 +359,15 @@ select {
 .bar {
   height: 8px;
   border-radius: 999px;
-  background: #050505;
+  background: var(--theme-hex-050505);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--theme-rgba-255-255-255-0_08);
 }
 
 .bar > i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #f5f5f5, #8a8a8a);
+  background: linear-gradient(90deg, var(--theme-hex-f5f5f5), var(--theme-hex-8a8a8a));
 }
 
 .faculty-bars {
@@ -410,8 +408,7 @@ select {
 
 .ring-row.active {
   border-color: var(--accent);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.11), transparent 44%),
+  background: linear-gradient(135deg, var(--theme-rgba-255-255-255-0_11), transparent 44%),
     var(--panel-3);
 }
 
@@ -424,7 +421,7 @@ pre {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #dedede;
+  color: var(--theme-fg-hex-dedede);
   line-height: 1.45;
 }
 
@@ -445,7 +442,7 @@ dialog {
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--theme-rgba-0-0-0-0_7);
 }
 
 .dialog-head {
@@ -511,24 +508,24 @@ dialog::backdrop {
 
 /* P1 — learning membrane panels */
 .triptych { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
-.integrity-card { border: 1px solid var(--line, #2a2f3a); border-radius: 10px; padding: 12px 14px; }
+.integrity-card { border: 1px solid var(--line, var(--theme-hex-2a2f3a)); border-radius: 10px; padding: 12px 14px; }
 .integrity-card h3 { margin: 0 0 6px; font-size: 12px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.06em; }
 .integrity-card strong { display: block; font-size: 18px; margin-bottom: 4px; }
-.integrity-card.ok strong { color: #4ade80; }
-.integrity-card.fail strong { color: #f87171; }
-.integrity-card.na strong { color: #9ca3af; }
+.integrity-card.ok strong { color: var(--theme-fg-hex-4ade80); }
+.integrity-card.fail strong { color: var(--theme-fg-hex-f87171); }
+.integrity-card.na strong { color: var(--theme-fg-hex-9ca3af); }
 .learning-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
 .learning-grid h3 { margin: 0 0 8px; font-size: 14px; }
-.spark-wrap { border: 1px solid var(--line, #2a2f3a); border-radius: 10px; padding: 6px; }
+.spark-wrap { border: 1px solid var(--line, var(--theme-hex-2a2f3a)); border-radius: 10px; padding: 6px; }
 .sparkline { width: 100%; height: auto; display: block; }
-.sparkline polyline { fill: none; stroke: #60a5fa; stroke-width: 2; }
-.sparkline text { fill: #9ca3af; font-size: 10px; }
+.sparkline polyline { fill: none; stroke: var(--theme-fg-hex-60a5fa); stroke-width: 2; }
+.sparkline text { fill: var(--theme-fg-hex-9ca3af); font-size: 10px; }
 .economics { margin-bottom: 10px; }
 @media (max-width: 860px) { .triptych, .learning-grid { grid-template-columns: 1fr; } }
 
 
 /* Pairing directions — mid-century numbered steps */
-:root { --brass: #d6a860; --teal: #7cb5a9; }
+:root { --brass: var(--theme-hex-d6a860); --teal: var(--theme-hex-7cb5a9); }
 .pair-steps { list-style: none; counter-reset: pair; margin: 18px 0 0; padding: 0; display: grid; gap: 14px; }
 .pair-steps li { counter-increment: pair; position: relative; padding-left: 40px; }
 .pair-steps li::before {
@@ -579,8 +576,7 @@ dialog::backdrop {
 .consent-card {
   border: 1px solid color-mix(in srgb, var(--brass) 55%, transparent);
   border-radius: var(--radius);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--brass) 12%, transparent), transparent 42%),
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brass) 12%, transparent), transparent 42%),
     var(--panel-3);
   padding: 12px;
   margin-bottom: 14px;
@@ -627,7 +623,7 @@ dialog::backdrop {
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: rgba(8, 8, 8, 0.96);
+  background: var(--theme-rgba-8-8-8-0_96);
   color: var(--text);
   font-size: 0.78rem;
   line-height: 1.45;
@@ -672,13 +668,13 @@ dialog::backdrop {
 }
 
 .chip.danger {
-  border-color: color-mix(in srgb, #f87171 60%, transparent);
-  color: #f87171;
+  border-color: color-mix(in srgb, var(--theme-hex-f87171) 60%, transparent);
+  color: var(--theme-fg-hex-f87171);
 }
 
 .chip.ok {
-  border-color: color-mix(in srgb, #4ade80 55%, transparent);
-  color: #4ade80;
+  border-color: color-mix(in srgb, var(--theme-hex-4ade80) 55%, transparent);
+  color: var(--theme-fg-hex-4ade80);
 }
 
 .inline-form {
@@ -715,8 +711,8 @@ dialog::backdrop {
 }
 
 button.danger {
-  border-color: color-mix(in srgb, #f87171 55%, transparent);
-  color: #f87171;
+  border-color: color-mix(in srgb, var(--theme-hex-f87171) 55%, transparent);
+  color: var(--theme-fg-hex-f87171);
 }
 
 .vitals-grid {
@@ -734,15 +730,15 @@ button.danger {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel-2);
-  border-left: 3px solid #7cb5a9;
+  border-left: 3px solid var(--theme-hex-7cb5a9);
 }
 
 .vital-cell.warn {
-  border-left-color: #d6a860;
+  border-left-color: var(--theme-hex-d6a860);
 }
 
 .vital-cell.bad {
-  border-left-color: #f87171;
+  border-left-color: var(--theme-hex-f87171);
 }
 
 .census-bars {
@@ -853,7 +849,7 @@ pre.op-code {
   gap: 10px;
   align-items: center;
   padding: 9px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--theme-rgba-255-255-255-0_14);
   border-radius: var(--radius);
   background: var(--panel-3);
   cursor: pointer;
@@ -888,8 +884,8 @@ pre.op-code {
   height: 8px;
   border-radius: 999px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #050505;
+  border: 1px solid var(--theme-rgba-255-255-255-0_08);
+  background: var(--theme-hex-050505);
   margin-top: 6px;
 }
 
@@ -898,11 +894,11 @@ pre.op-code {
   height: 100%;
 }
 
-.part-semantic { background: #d8d8d8; }
-.part-path { background: #8a8a8a; }
-.part-chronological { background: #5f5f5f; }
+.part-semantic { background: var(--theme-hex-d8d8d8); }
+.part-path { background: var(--theme-hex-8a8a8a); }
+.part-chronological { background: var(--theme-hex-5f5f5f); }
 .part-faculty { background: var(--teal); }
-.part-salience { background: #4a4a4a; }
+.part-salience { background: var(--theme-hex-4a4a4a); }
 .part-cphy { background: var(--brass); }
 
 .preview-note {
@@ -938,11 +934,11 @@ pre.op-code {
 }
 
 .fork-svg .tick {
-  stroke: #4a4a4a;
+  stroke: var(--theme-fg-hex-4a4a4a);
 }
 
 .fork-svg .branch {
-  stroke: #f87171;
+  stroke: var(--theme-fg-hex-f87171);
   stroke-width: 1.5;
   fill: none;
 }

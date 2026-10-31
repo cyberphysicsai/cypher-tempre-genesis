@@ -51,20 +51,37 @@ async function doctor() {
   }
   return { version: packageInfo.version, openclaw: upstream.version, node: process.versions.node, nativeFiles: Object.keys(files).length, dependencies };
 }
-async function owner() {
-  let saved;
-  try { saved = JSON.parse(await fs.readFile(ownerPath, 'utf8')); } catch (error) { if (error.code === 'ENOENT') return null; throw new Error('The local runtime ownership record needs inspection.'); }
-  if (!Number.isSafeInteger(saved.port) || saved.port < 1 || saved.port > 65535 || !/^[a-f0-9]{64}$/.test(saved.token) || !Number.isSafeInteger(saved.pid))
+export function verifiedLaunchUrl(candidate, expectedUi) {
+  if (typeof expectedUi !== 'string' || !/^http:\/\/127\.0\.0\.1:[0-9]{1,5}\/$/.test(expectedUi))
+    throw new Error('The local runtime UI address is invalid.');
+  let expected, actual;
+  try { expected = new URL(expectedUi); actual = new URL(candidate); }
+  catch { throw new Error('The local runtime launch address is invalid.'); }
+  if (!expected.port || expected.href !== expectedUi || actual.origin !== expected.origin || actual.pathname !== '/'
+      || actual.username || actual.password || actual.search || !/^#launch=[a-f0-9]{64}$/.test(actual.hash))
+    throw new Error('The local runtime returned an unexpected launch address.');
+  return actual.href;
+}
+export async function readRuntimeOwner(filename = ownerPath) {
+  let saved, raw;
+  try { raw = await fs.readFile(filename, 'utf8'); saved = JSON.parse(raw); } catch (error) { if (error.code === 'ENOENT') return null; throw new Error('The local runtime ownership record needs inspection.'); }
+  if (!saved || typeof saved !== 'object' || !Number.isSafeInteger(saved.port) || saved.port < 1 || saved.port > 65535 || !/^[a-f0-9]{64}$/.test(saved.token) || !Number.isSafeInteger(saved.pid) || saved.pid <= 0)
     throw new Error('The local runtime ownership record is invalid.');
+  // Never disclose the old control token to a port reused after its owner exited.
+  // A live but unauthenticated PID is retained for explicit local inspection.
+  let alive = true;
+  try { process.kill(saved.pid, 0); } catch (error) { if (error.code === 'ESRCH') alive = false; }
+  if (!alive) {
+    if (await fs.readFile(filename, 'utf8').catch(() => null) === raw) await fs.unlink(filename).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    return null;
+  }
   try {
     const response = await fetch(`http://127.0.0.1:${saved.port}/status`, { headers: { authorization: `Bearer ${saved.token}` }, signal: AbortSignal.timeout(3000), redirect: 'error' });
     const status = await response.json();
     if (!response.ok || status.pid !== saved.pid || status.version !== saved.version) throw new Error('Runtime identity mismatch.');
     return saved;
   } catch {
-    let alive = true; try { process.kill(saved.pid, 0); } catch (error) { if (error.code === 'ESRCH') alive = false; }
-    if (alive) throw new Error('A previous runtime cannot be authenticated. Stop it from its own window before starting another.');
-    await fs.unlink(ownerPath); return null;
+    throw new Error('A previous runtime cannot be authenticated. Stop it from its own window before starting another.');
   }
 }
 async function stop(existing) {
@@ -121,13 +138,13 @@ export async function launch(args = process.argv.slice(2)) {
   if (args.some(arg => !['--check', '--stop'].includes(arg))) throw new Error('Usage: launcher.mjs [--check | --stop]');
   if (args.includes('--check')) { const status = await doctor(); process.stdout.write(JSON.stringify(status) + '\n'); return status; }
   await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
-  const existing = await owner();
+  const existing = await readRuntimeOwner();
   if (args.includes('--stop')) { if (existing) await stop(existing); return; }
   if (existing) {
     if (existing.version === packageInfo.version) {
       const response = await fetch(`http://127.0.0.1:${existing.port}/launch`, { method: 'POST', headers: { authorization: `Bearer ${existing.token}` }, redirect: 'error', signal: AbortSignal.timeout(5000) });
       if (!response.ok) throw new Error('The local runtime refused a fresh launch.');
-      const result = await response.json(); openPage(result.url); return;
+      const result = await response.json(); openPage(verifiedLaunchUrl(result.url, existing.ui)); return;
     }
     await stop(existing);
   }
@@ -162,7 +179,7 @@ export async function launch(args = process.argv.slice(2)) {
       res.writeHead(404); res.end('{}');
     });
     await new Promise((resolve, reject) => { control.once('error', reject); control.listen(0, '127.0.0.1', resolve); });
-    await fs.writeFile(ownerPath, JSON.stringify({ pid: process.pid, port: control.address().port, token, version: packageInfo.version, appRoot: root }) + '\n', { flag: 'wx', mode: 0o600 });
+    await fs.writeFile(ownerPath, JSON.stringify({ pid: process.pid, port: control.address().port, token, version: packageInfo.version, appRoot: root, ui }) + '\n', { flag: 'wx', mode: 0o600 });
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void shutdown(); });
     process.stdout.write(`Cypher Tempre ChainChat ${packageInfo.version} · OpenClaw ${lock.openclaw.version}\n${ui}\nPairing code: ${app.pairingCode}\n`);
     // The nonce is single-use, expires after 60s, and the page clears its fragment

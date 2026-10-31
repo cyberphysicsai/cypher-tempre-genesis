@@ -24,6 +24,7 @@ function fixture(options = {}) {
     if (options.throw === op) throw new Error("Do not leak credentials, source text or transport details.");
     const value = result({ allowed: denied !== op, purpose, binding: passedBinding,
       ...(op === "prepare" ? { context: options.context || "Verified native skill and paired chain context.", toolsAllow: options.tools || [] } : {}),
+      ...(op === "tool" ? { tool: fields.tool } : {}),
       ...(["finalize", "outgoing"].includes(op) ? { candidateSha256: fields.candidateSha256,
         receipt: receipt({ candidateSha256: fields.candidateSha256 }) } : {}) });
     return options.transform ? options.transform(op, value) : value;
@@ -58,6 +59,47 @@ test("unknown identities, cross-run context and denied admission fail closed", a
   assert.equal((await forged.hooks.before_agent_run({}, binding)).outcome, "block");
 });
 
+test('goal-compatible native reply admission stops denied or failed broker runs', async () => {
+  const accepted = fixture();
+  assert.deepEqual(await accepted.hooks.before_agent_reply({ cleanedBody: 'Hello' }, binding), { handled: false });
+  assert.equal(accepted.calls[0].fields.input, 'Hello');
+  for (const options of [{ denied: 'admit' }, { throw: 'admit' }]) {
+    const denied = fixture(options);
+    const decision = await denied.hooks.before_agent_reply({ cleanedBody: 'Hello' }, binding);
+    assert.equal(decision.handled, true); assert.equal(decision.reply, undefined);
+  }
+});
+
+test('deterministic native control output needs its separate exact utility attestation', async () => {
+  const control = fixture({ purpose: 'utility', transform: (op, value) => op === 'control_outgoing' ? {
+    ...value, candidateSha256: digest, receipt: { candidateSha256: digest } } : value });
+  assert.equal((await outgoing(control)).cancel, false);
+  assert.equal(control.calls[0].op, 'control_outgoing');
+  assert.equal((await outgoing(control, 'Changed command output')).cancel, true);
+  const denied = fixture({ denied: 'control_outgoing', purpose: 'utility' });
+  assert.equal((await outgoing(denied)).cancel, true);
+});
+
+test('legacy delivery can recover only an exact unique prior control receipt, never a candidate run', async () => {
+  const control = fixture({ purpose: 'utility', transform: (op, value) => op === 'control_outgoing' ? {
+    ...value, candidateSha256: digest, receipt: { candidateSha256: digest } } : value });
+  const missingRun = { sessionKey: binding.sessionKey };
+  assert.equal((await control.hooks.message_sending({ content: candidate }, missingRun)).cancel, true);
+  assert.equal((await outgoing(control)).cancel, false);
+  assert.equal((await control.hooks.message_sending({ content: candidate }, missingRun)).cancel, false);
+  assert.equal(control.calls.at(-1).binding.runId, binding.runId);
+  assert.equal((await control.hooks.message_sending({ content: candidate + ' changed' }, missingRun)).cancel, true);
+  assert.equal((await control.hooks.message_sending({ content: candidate }, { sessionKey: 'other' })).cancel, true);
+  const repeatedBinding = { ...binding, runId: 'next-control-run' };
+  assert.equal((await control.hooks.reply_payload_sending({ payload: { text: candidate }, kind: 'final' }, repeatedBinding)).cancel, false);
+  assert.equal((await control.hooks.message_sending({ content: candidate }, missingRun)).cancel, false);
+  assert.equal(control.calls.at(-1).binding.runId, repeatedBinding.runId, 'An identical new command must supersede the ended control binding.');
+  const ordinary = fixture(); await prepare(ordinary); await finalize(ordinary);
+  assert.equal((await ordinary.hooks.message_sending({ content: candidate }, missingRun)).cancel, true);
+  control.setDenied('control_outgoing');
+  assert.equal((await control.hooks.message_sending({ content: candidate }, missingRun)).cancel, true);
+});
+
 test("preparation failure cannot grant tools or later admission, and no error reflects broker details", async () => {
   const f = fixture({ throw: "prepare" });
   const prepared = await prepare(f);
@@ -71,13 +113,25 @@ test("tool authorization is for an explicitly equipped name and exact parameter 
   const f = fixture({ tools: ["read"] }); await prepare(f);
   const params = { path: "approved/local/file.txt" };
   const event = { toolName: "read", toolCallId: "call-1", params };
-  assert.deepEqual(await f.hooks.before_tool_call(event, binding), { block: false });
+  assert.deepEqual(await f.hooks.before_tool_call(event, binding), { block: false, params });
   assert.deepEqual(f.calls.at(-1).fields.tool, { name: "read", params, callId: "call-1" });
   const before = f.calls.length;
   assert.equal((await f.hooks.before_tool_call({ ...event, toolName: "exec" }, binding)).block, true);
   assert.equal(f.calls.length, before, "An unequipped tool never reaches approval.");
   assert.equal((await f.hooks.before_tool_call({ ...event, toolCallId: undefined }, binding)).block, true);
   f.setDenied("tool"); assert.equal((await f.hooks.before_tool_call(event, binding)).block, true);
+});
+
+test('tool execution uses the canonical reviewed envelope and rejects unbound approval replies', async () => {
+  const event = { toolName: 'read', toolCallId: 'call-1', params: { path: './file.txt' } };
+  const canonical = fixture({ tools: ['read'], transform: (op, value) => op === 'tool' ? {
+    ...value, tool: { name: 'read', callId: 'call-1', params: { path: '/approved/file.txt' } } } : value });
+  await prepare(canonical);
+  assert.deepEqual(await canonical.hooks.before_tool_call(event, binding), { block: false, params: { path: '/approved/file.txt' } });
+  for (const tool of [undefined, { name: 'exec', callId: 'call-1', params: {} }, { name: 'read', callId: 'wrong', params: {} }]) {
+    const denied = fixture({ tools: ['read'], transform: (op, value) => op === 'tool' ? { ...value, tool } : value });
+    await prepare(denied); assert.equal((await denied.hooks.before_tool_call(event, binding)).block, true);
+  }
 });
 
 test("utility review and planning must be host-registered and cannot acquire tools or a candidate identity", async () => {
@@ -118,9 +172,10 @@ test("plugin registers all required blocking and delivery hooks against the publ
   register({ pluginConfig: { brokerUrl: "http://127.0.0.1:18791/private", brokerToken: token },
     on: (name, handler, options) => registered.push({ name, handler, options }) });
   assert.equal(PLUGIN_ID, "cypher-tempre-poi");
-  for (const required of ["before_agent_run", "before_prompt_build", "before_tool_call", "before_agent_finalize",
+  for (const required of ["before_agent_reply", "before_prompt_build", "before_tool_call", "before_agent_finalize",
     "reply_payload_sending", "message_sending", "agent_end", "gateway_stop"])
     assert.ok(registered.some(entry => entry.name === required));
+  assert.equal(registered.some(entry => entry.name === 'before_agent_run'), false, 'Native durable goals reject restart-unsafe before_agent_run hooks.');
   assert.ok(registered.every(entry => entry.options.timeoutMs > 120000));
 });
 

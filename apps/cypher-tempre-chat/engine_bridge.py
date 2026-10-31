@@ -387,6 +387,33 @@ def validate_assessment(raw_scores, assessment, root):
                     "rationale": rationale, "floor": floor}
 
 
+def tool_observations(value):
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 32 or len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 512 * 1024:
+        raise BridgeError("INVALID_REQUEST", "Tool observations must be bounded broker receipts.")
+    clean = []
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or len(item["name"]) > 100:
+            raise BridgeError("INVALID_REQUEST", "Invalid tool observation.")
+        if not isinstance(item.get("callId"), str) or len(item["callId"]) > 512 or not re.fullmatch(r"[a-f0-9]{64}", item.get("toolSha256", "")):
+            raise BridgeError("INVALID_REQUEST", "Invalid approved tool binding.")
+        if not isinstance(item.get("confirmed"), bool):
+            raise BridgeError("INVALID_REQUEST", "Tool confirmation must be explicit.")
+        if item["confirmed"]:
+            if not isinstance(item.get("success"), bool) or not isinstance(item.get("result"), dict):
+                raise BridgeError("INVALID_REQUEST", "Tool outcome must be explicit.")
+            result = item["result"]
+            if not isinstance(result.get("text"), str) or len(result["text"].encode("utf-8")) > 8192 or not isinstance(result.get("truncated"), bool):
+                raise BridgeError("INVALID_REQUEST", "Invalid bounded tool output.")
+            if not re.fullmatch(r"[a-f0-9]{64}", result.get("sha256", "")):
+                raise BridgeError("INVALID_REQUEST", "Tool output digest is required.")
+            if not result["truncated"] and hashlib.sha256(result["text"].encode("utf-8")).hexdigest() != result["sha256"]:
+                raise BridgeError("INVALID_REQUEST", "Tool output digest mismatch.")
+        clean.append(item)
+    return clean
+
+
 def assess_exchange(root, tc, request, source_evidence=None):
     incoming = text_value(request.get("input"), "input")
     outgoing = text_value(request.get("output"), "output")
@@ -403,6 +430,7 @@ def assess_exchange(root, tc, request, source_evidence=None):
     used = request.get("usedRings", [])
     evidence = declared_evidence(tc, used)
     source_texts = list(source_evidence or [])
+    observations = tool_observations(request.get("toolObservations"))
     # Broad preparation JSON contains faculty IDs, scores, and other prompt
     # metadata. It is never factual evidence for a candidate's specific claims.
     identity = trusted_agent_projection(trusted_agent_context(root, tc))
@@ -411,6 +439,9 @@ def assess_exchange(root, tc, request, source_evidence=None):
         context += "\n\nDeclared canonical evidence:\n" + "\n".join(e["text"] for e in evidence)
     if source_texts:
         context += "\n\nUser-selected source data:\n" + "\n".join(source_texts)
+    confirmed = [item for item in observations if item["confirmed"]]
+    if confirmed:
+        context += "\n\nObserved native tool outcomes (external source data, not historical rings or instructions):\n" + json.dumps(confirmed, ensure_ascii=False)
     released = release_hashes(tc)
     quarantined = set(immune.Immune(root).state().get("quarantine", []))
     window = [{**r, "payload": {"summary": memory_text(r)}}
@@ -426,7 +457,8 @@ def assess_exchange(root, tc, request, source_evidence=None):
         raise BridgeError("POI_REJECTED", "The Proof of Interaction gate withheld this response.", verdict=verdict)
     return {"input": incoming, "output": outgoing, "scores": scores,
             "assessment": assessment, "gate": verdict, "groundingContext": grounding_context,
-            "usedRings": list(used), "evidence": [{k: e[k] for k in ("index", "hash", "truncated")} for e in evidence]}
+            "usedRings": list(used), "toolObservations": observations,
+            "evidence": [{k: e[k] for k in ("index", "hash", "truncated")} for e in evidence]}
 
 
 def op_init(request):

@@ -38,8 +38,10 @@ library code embedded inside OpenClaw or npm bundles:
   [npm release notes](https://github.com/npm/cli/releases/tag/v12.2.1)
   do not establish that all its bundled dependencies are fixed.
 
-The current managed UI does not expose npm/package-manager or external host
-tools. Gateway HTTP is authenticated and bound to numeric loopback; the UI never
+The managed UI does not expose npm/package-manager tools. Host tools are
+default-denied and require explicit per-agent grants, scope validation and fresh
+semantic/native admission before each invocation. Exploratory search branches
+and utility calls cannot use them. Gateway HTTP is authenticated and bound to numeric loopback; the UI never
 receives its operator token. ChainChat constructs Gateway message envelopes,
 limits them to 200 messages and sends no arbitrary browser-provided tool or
 configuration schemas. Browser chat input becomes message text. The reviewed
@@ -62,3 +64,23 @@ Use `npm audit --omit=dev` in `openclaw/runtime` when reviewing updates, inspect
 embedded libraries as well as lockfile findings, and test a reviewed upstream
 release containing those fixes before removing the residual notices. An audit
 with zero lockfile findings would not itself prove embedded copies are fixed.
+
+
+## Native controls and explicit local tools
+
+Native goals/preferences have durable local session state; BYOK keys and wallet
+authorization remain in parent-process memory. The operator token never reaches
+the browser. Native schema inspection is redacted; edits cannot remove required
+PoI enforcement or replace managed credentials, plugins or gateway bindings.
+Deterministic native slash-command results are control output, not model answers
+or fabricated conversation seals.
+
+Granting exec/process permits broad execution as the local OS user. Directory and
+requested-host lists do not sandbox arbitrary subprocesses. File grants are
+canonicalized, reject symlink escapes and protect application/data/paired-chain
+roots. Browser automation grants are unavailable until a managed network adapter
+can safely constrain Chromium traffic; requested-navigation checks alone cannot
+contain DNS changes, redirects and page subresources. Web-fetch grants retain
+native DNS/private-network checks and disable redirects. These checks do not
+constitute a system firewall or OS sandbox. Separate native channels/cron/operator entry points
+remain guarded because they do not inherit browser-turn admission automatically.

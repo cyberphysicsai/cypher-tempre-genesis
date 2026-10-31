@@ -5,7 +5,8 @@ import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersi
 test("pairing requires the current ChainChat runtime", () => {
   for (const old of [undefined, null, "", "0.3.0", "0.4.0", "0.4.1", "0.4.3", "0.4.999", "0.5.0", "0.5.1", "0.5.999", "0.6.0", "0.6.1", "0.6.999", "0.7.0", "0.7.0-beta", "garbage", "0.07.0", "0.4.9007199254740993"])
     assert.equal(supportedBridgeVersion(old), false);
-  for (const current of ["0.7.1", "0.8.0", "1.0.0"])
+  assert.equal(supportedBridgeVersion("0.7.1"), false);
+  for (const current of ["0.8.0", "1.0.0"])
     assert.equal(supportedBridgeVersion(current), true);
 });
 

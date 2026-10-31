@@ -54,3 +54,62 @@ jobs:
           python installer/acceptance_windows.py --installer $installer --work-root (Join-Path $env:RUNNER_TEMP 'chainchat-acceptance')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         working-directory: apps/cypher-tempre-chat
+  portable-installers:
+    name: Installer ${{ matrix.id }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x64
+            runner: ubuntu-latest
+            platform: linux
+            architecture: x64
+            suffix: linux.tar.gz
+          - id: linux-arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            architecture: arm64
+            suffix: linux.tar.gz
+          - id: macos-arm64
+            runner: macos-latest
+            platform: darwin
+            architecture: arm64
+            suffix: macos.zip
+          - id: macos-x64
+            runner: macos-15-intel
+            platform: darwin
+            architecture: x64
+            suffix: macos.zip
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check archive and runtime guards on the native platform
+        run: python3 -m unittest discover -s test -p test_posix_installer.py
+        working-directory: apps/cypher-tempre-chat
+      - name: Build exact source and execute per-user setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/cypher-tempre-chat.zip"
+          git -C "$GITHUB_WORKSPACE" archive --format=zip --prefix=cypher-tempre-chat/ --output="$archive" HEAD:apps/cypher-tempre-chat
+          python3 installer/build_posix.py --archive "$archive" --output-dir "$RUNNER_TEMP/chainchat-setup" --platform '${{ matrix.platform }}'
+          version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+          python3 installer/acceptance_posix.py --installer "$RUNNER_TEMP/chainchat-setup/CypherTempre-ChainChat-Setup-$version-${{ matrix.suffix }}" --work-root "$RUNNER_TEMP/chainchat-acceptance"
+          python3 -c 'import json,sys; report=json.load(open(sys.argv[1])); assert report["platform"]==sys.argv[2], "Runner architecture did not match its gate"; assert report["version"]==sys.argv[3]; assert report["shortcutsInSyntheticHome"] is True and report["productionUserInstallationTouched"] is False' "$RUNNER_TEMP/chainchat-acceptance/acceptance-report.json" '${{ matrix.platform }}-${{ matrix.architecture }}' "$version"
+        working-directory: apps/cypher-tempre-chat
+      - name: Keep acceptance report and exact artifact checksums
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chainchat-installer-${{ matrix.id }}
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/chainchat-acceptance/acceptance-report.json
+            ${{ runner.temp }}/chainchat-acceptance/first-install.json
+            ${{ runner.temp }}/chainchat-acceptance/repeat-install.json
+            ${{ runner.temp }}/chainchat-setup/*.json
+            ${{ runner.temp }}/chainchat-setup/*.sha256
