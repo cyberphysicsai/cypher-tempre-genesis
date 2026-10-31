@@ -9,7 +9,7 @@ export function localTabStorage() {
   try { return window.sessionStorage; } catch { return null; }
 }
 function launchRequired() {
-  return Object.assign(new Error('Open ChainChat from the Start menu to connect this local chat automatically.'), { code: 'LOCAL_LAUNCH_REQUIRED' });
+  return Object.assign(new Error('Open ChainChat using its application launcher to connect this local chat automatically.'), { code: 'LOCAL_LAUNCH_REQUIRED' });
 }
 export async function connectLocalSession({ origin, nonce = null, storage, request }) {
   if (!isLocalBridgePage(origin)) throw launchRequired();

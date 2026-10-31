@@ -1,4 +1,14 @@
-# Windows installer
+# ChainChat installers
+
+Windows x64 setup is described below. macOS 13.5+ (Apple Silicon/Intel) and glibc
+Linux (ARM64/x64) packages use the reviewed portable-runtime setup described in
+[POSIX.md](POSIX.md). They include Python and Node automatically; system package
+managers or sudo are not required. macOS ZIP contains an executable `.command`;
+Linux tar.gz contains an executable `.sh`, with an optional direct `.run` file.
+Normal OS confirmation/executable-file policies still apply. macOS signing and
+notarization are not claimed.
+
+## Windows x64
 
 The Windows x64 setup executable installs ChainChat for the current user. It
 embeds the reviewed application ZIP and downloads exact, hash-pinned Node.js and
@@ -12,6 +22,15 @@ release and its embedded Python are separate. `data/` holds persistent ChainChat
 state, OpenClaw state and local operator approval authority; selected existing
 Timechains stay at their original paths. Setup never deletes or rewrites those
 directories. It checks the staged installation before changing `current.json`.
+
+Custom Windows installation roots must be **120 characters or fewer**, after
+resolving the full path. Setup rejects longer roots before creating installation
+files: the pinned upstream model-catalog worker has a Windows temporary-path
+length limit. Keep the default location or choose a shorter dedicated directory.
+For Windows source runs, also keep `CT_CHAT_DATA` short rather than storing runtime
+state beneath a deeply nested checkout; for example, set it to
+`%LOCALAPPDATA%\CypherTempre\ChainChat-dev`. Preserve existing native state and
+Timechains when diagnosing startup; deleting ownership leases is not a repair.
 
 Setup creates a Start Menu launch shortcut and a previous-version shortcut. The
 launcher starts the selected release's gateway and UI through
@@ -41,7 +60,7 @@ beside the executable.
 Build on Windows after producing the sanitized Git-based application ZIP:
 
 ```powershell
-python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.7.1.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe
+python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.8.0.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.8.0-windows-x64.exe
 ```
 
 The .NET Framework compiler consumes the C# source, Windows manifest and font
@@ -60,7 +79,7 @@ Use a dedicated empty test directory, suppress launch/shortcuts, and capture the
 result without touching the current user's actual installation:
 
 ```powershell
-.\CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
+.\CypherTempre-ChainChat-Setup-0.8.0-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
 ```
 
 `--cache-dir` may name a directory containing the exact official Node/CPython ZIP
@@ -85,6 +104,6 @@ missing-origin resume attempts. Test credentials stay in process memory.
 The installed frontend policy must allow bootstrap and read-only audit before
 wallet verification while keeping model operations behind the holdings gate.
 
-Only Windows x64 has an installer in this release. Source deployment on other
-platforms still needs their supported Node/Python runtimes; no untested macOS or
-Linux one-click installer is claimed.
+macOS and Linux packages and their isolated native acceptance procedure are
+described in [POSIX.md](POSIX.md). Platform execution support is established by
+the corresponding native CI acceptance result.

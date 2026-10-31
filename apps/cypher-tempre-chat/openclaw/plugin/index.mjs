@@ -130,6 +130,10 @@ export function createEnforcementHooks(request, options = {}) {
     try { await admission(event, context); return { outcome: "pass" }; }
     catch { return { outcome: "block", reason: "PoI turn admission failed.", message: DENIED }; }
   };
+  const before_agent_reply = async (event, context) => {
+    try { await admission({ ...event, currentUserMessage: event.cleanedBody }, context); return { handled: false }; }
+    catch { return { handled: true, reason: 'PoI turn admission failed.' }; }
+  };
   const before_prompt_build = async (event, context) => {
     try {
       const { state } = await admission(event, context);
@@ -156,9 +160,21 @@ export function createEnforcementHooks(request, options = {}) {
         throw new Error(DENIED);
       const callId = event.toolCallId ?? context.toolCallId;
       if (!nonempty(callId, 256)) throw new Error(DENIED);
-      accept(state, await request("tool", binding, { tool: { name: event.toolName, params: event.params, callId } }, context.abortSignal));
-      return { block: false };
+      const result = accept(state, await request("tool", binding, { tool: { name: event.toolName, params: event.params, callId } }, context.abortSignal));
+      if (result.tool?.name !== event.toolName || result.tool?.callId !== callId || !result.tool.params ||
+          typeof result.tool.params !== 'object' || Array.isArray(result.tool.params)) throw new Error(DENIED);
+      return { block: false, params: result.tool.params };
     } catch { return { block: true, blockReason: DENIED }; }
+  };
+  const after_tool_call = async (event, context) => {
+    try {
+      const binding = bindingFor(event, context), state = stateFor(binding);
+      const callId = event.toolCallId ?? context.toolCallId;
+      if (state.denied || !state.prepared || !state.toolsAllow?.has(event.toolName) || !nonempty(callId, 256)) return;
+      const returnedError = event.result?.isError === true || ['error', 'blocked', 'denied'].includes(event.result?.details?.status);
+      accept(state, await request('tool_result', binding, { tool: { name: event.toolName, callId },
+        outcome: { success: !event.error && !returnedError, result: event.result ?? null, error: event.error ? String(event.error).slice(0, 1000) : null } }, context.abortSignal));
+    } catch { /* A missing observation cannot create an approval or claim successful execution. */ }
   };
   const before_agent_finalize = async (event, context) => {
     const candidate = event.lastAssistantMessage;
@@ -179,6 +195,15 @@ export function createEnforcementHooks(request, options = {}) {
   async function authorizeOutgoing(candidate, event, context) {
     const binding = bindingFor(event, context), state = stateFor(binding);
     const candidateSha256 = typeof candidate === "string" ? textHash(candidate) : null;
+    if (!state.denied && !state.admitted && !state.prepared && candidateSha256) {
+      const control = accept(state, await request('control_outgoing', binding, { candidate, candidateSha256 }, context.abortSignal));
+      if (control.purpose !== 'utility') throw new Error(DENIED);
+      // The broker permits one live control claim per session. A fresh private
+      // attestation supersedes old command receipts, including identical replies.
+      for (const [key, previous] of runs) if (previous !== state && previous.control === true && previous.binding.sessionKey === binding.sessionKey) runs.delete(key);
+      state.receipt = receiptFor(control, candidateSha256, clock()); state.control = true;
+      return;
+    }
     if (state.denied || !state.receipt || !candidateSha256 || state.receipt.candidateSha256 !== candidateSha256 ||
         state.receipt.expiresAt <= clock()) throw new Error(DENIED);
     const response = accept(state, await request("outgoing", binding, { candidate, candidateSha256, kind: "final" }, context.abortSignal));
@@ -193,7 +218,22 @@ export function createEnforcementHooks(request, options = {}) {
     } catch { return { cancel: true, reason: DENIED }; }
   };
   const message_sending = async (event, context) => {
-    try { await authorizeOutgoing(event.content, event, context); return { cancel: false }; }
+    try {
+      let boundContext = context;
+      // The native legacy delivery hook omits runId for pure commands. Recover
+      // only a unique prior control receipt for this exact session and text;
+      // the private broker must still validate its live registered run.
+      if (!event.runId && !context.runId && typeof event.content === 'string') {
+        const sessionKey = context.sessionKey ?? event.sessionKey;
+        if (!nonempty(sessionKey, 2048) || event.sessionKey && context.sessionKey && event.sessionKey !== context.sessionKey) throw new Error(DENIED);
+        const digest = textHash(event.content), now = clock();
+        const matches = [...runs.values()].filter(state => state.control === true && !state.denied &&
+          state.binding.sessionKey === sessionKey && state.expiresAt > now && state.receipt?.expiresAt > now && state.receipt?.candidateSha256 === digest);
+        if (matches.length !== 1) throw new Error(DENIED);
+        boundContext = { ...context, sessionKey, runId: matches[0].binding.runId };
+      }
+      await authorizeOutgoing(event.content, event, boundContext); return { cancel: false };
+    }
     catch { return { cancel: true, cancelReason: DENIED }; }
   };
   const agent_end = async (event, context) => {
@@ -205,7 +245,7 @@ export function createEnforcementHooks(request, options = {}) {
     } catch { /* Cleanup failure cannot grant execution or delivery. */ }
   };
   const gateway_stop = async () => { runs.clear(); };
-  return { before_agent_run, before_prompt_build, before_tool_call, before_agent_finalize,
+  return { before_agent_run, before_agent_reply, before_prompt_build, before_tool_call, after_tool_call, before_agent_finalize,
     reply_payload_sending, message_sending, agent_end, gateway_stop };
 }
 
@@ -215,7 +255,10 @@ export function register(api) {
   // Each callback's own transport deadline expires before the host can discard
   // its explicit deny/cancel result. The UI transport also requires receipts.
   const timeoutMs = 2 * (config.requestTimeoutMs ?? 60000) + 10000;
-  for (const [name, handler] of Object.entries(hooks)) api.on(name, handler, { priority: 1000000, timeoutMs });
+  // The native durable-goal admission contract permits before_agent_reply
+  // after its recovery checkpoint. Registering before_agent_run would make
+  // OpenClaw reject every native goal as restart-unsafe.
+  for (const [name, handler] of Object.entries(hooks)) if (name !== 'before_agent_run') api.on(name, handler, { priority: 1000000, timeoutMs });
 }
 
 export default { id: PLUGIN_ID, name: "Cypher Tempre Proof of Interaction", register };

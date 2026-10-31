@@ -1,5 +1,8 @@
 import { DEFAULT_AUDIT_BRIDGE, normalizeBridgeURL } from './bridge-url.js';
 import { createAuditConnection } from './chainchat-connection.js';
+import { initThemes, motifPalette, normalizeTheme } from '../themes.js';
+
+initThemes();
 
 const embeddedAudit = new URLSearchParams(window.location.search).get('chainchat') === '1';
 let parentAudit = null;
@@ -50,6 +53,12 @@ function setupBridgeState() {
   if ($('bridgeUrl')) $('bridgeUrl').value = state.bridgeBase || DEFAULT_AUDIT_BRIDGE;
 }
 
+function auditMotifPalette(value) {
+  return normalizeTheme(value) === 'dark'
+    ? { main: '238, 232, 213', secondary: '214, 168, 96', soft: '124, 181, 169' }
+    : motifPalette(value);
+}
+
 function initMotifs() {
   const canvas = $('motifCanvas');
   if (!canvas) return;
@@ -59,9 +68,11 @@ function initMotifs() {
   // Mid-century Atomic Age palette: cream linework with brass and dusty-teal
   // accents, every alpha kept low — the dashboard is the subject, this is the
   // wallpaper of a 1950s physics department.
-  const CREAM = '238, 232, 213';
-  const BRASS = '214, 168, 96';
-  const TEAL = '124, 181, 169';
+  let { main: CREAM, secondary: BRASS, soft: TEAL } = auditMotifPalette(document.documentElement.dataset.theme);
+  window.addEventListener('chainchat-theme-change', event => {
+    ({ main: CREAM, secondary: BRASS, soft: TEAL } = auditMotifPalette(event.detail?.theme));
+    if (reducedMotion) render(0);
+  });
   const stroke = (rgb, alpha, w = 1) => {
     ctx.strokeStyle = `rgba(${rgb}, ${alpha})`;
     ctx.lineWidth = w;
@@ -798,8 +809,9 @@ function renderLearning() {
 // the skill's own CLIs (the page never invents an economic operation).
 // --------------------------------------------------------------------------- //
 
-const BRASS_HEX = '#d6a860';
-const TEAL_HEX = '#7cb5a9';
+const BRASS_HEX = 'var(--brass)';
+const TEAL_HEX = 'var(--teal)';
+window.addEventListener('chainchat-theme-change', () => { if (!embeddedAudit) drawLandscape(); });
 
 async function loadObservatory() {
   await Promise.all([
@@ -900,7 +912,7 @@ function setMsg(id, text, isError = false) {
   const el = $(id);
   if (!el) return;
   el.textContent = text;
-  el.style.color = isError ? '#f87171' : '';
+  el.style.color = isError ? 'var(--theme-fg-hex-f87171)' : '';
 }
 
 function renderCphy() {
@@ -1102,7 +1114,7 @@ function renderEtches(c) {
       bar.className = 'bar';
       const fill = document.createElement('i');
       fill.style.width = `${Math.round((e.echelon / 21) * 100)}%`;
-      fill.style.background = `linear-gradient(90deg, ${BRASS_HEX}, #8a6a30)`;
+      fill.style.background = `linear-gradient(90deg, ${BRASS_HEX}, transparent)`;
       bar.append(fill);
       row.append(top, bar);
       return row;
@@ -1151,7 +1163,7 @@ function drawLandscape() {
   if (!canvas || !state.summary) return;
   const count = Math.max(1, state.summary.stats.rings);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth - 16;
+  const cssWidth = Math.max(1, canvas.clientWidth || canvas.parentElement.clientWidth - 16);
   const cssHeight = 96;
   canvas.width = Math.floor(cssWidth * dpr);
   canvas.height = Math.floor(cssHeight * dpr);
@@ -1163,7 +1175,16 @@ function drawLandscape() {
   const colWidth = Math.max(1, cssWidth / count);
   const x = (i) => (i / count) * cssWidth;
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  const paints = getComputedStyle(document.documentElement);
+  const paint = (name, alpha = 1) => {
+    const value = paints.getPropertyValue(name).trim();
+    if (alpha === 1 && value) return value;
+    const hex = /^#([a-f\d]{6})$/i.exec(value);
+    const rgb = hex ? hex[1].match(/../g).map(channel => parseInt(channel, 16)).join(', ') : motifPalette(document.documentElement.dataset.theme).main;
+    return `rgba(${rgb}, ${Math.max(0, Math.min(1, alpha))})`;
+  };
+
+  ctx.strokeStyle = paint('--text', 0.22);
   ctx.beginPath();
   ctx.moveTo(0, mid);
   ctx.lineTo(cssWidth, mid);
@@ -1172,7 +1193,7 @@ function drawLandscape() {
   const hits = state.cphyBlocks?.recallHits || {};
   let maxHits = 1;
   for (const v of Object.values(hits)) maxHits = Math.max(maxHits, Number(v) || 0);
-  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ctx.fillStyle = paint('--text', 0.28);
   for (const [idx, v] of Object.entries(hits)) {
     const h = Math.max(1, (Number(v) / maxHits) * 22);
     ctx.fillRect(x(Number(idx)), cssHeight - h, Math.max(1, colWidth), h);
@@ -1180,7 +1201,7 @@ function drawLandscape() {
 
   const quarantined = new Set(state.immune?.quarantine || []);
   for (const idx of quarantined) {
-    ctx.fillStyle = 'rgba(248,113,113,0.5)';
+    ctx.fillStyle = paint('--theme-fg-hex-f87171', 0.5);
     ctx.fillRect(x(idx), 10, Math.max(1, colWidth), cssHeight - 20);
   }
 
@@ -1189,14 +1210,14 @@ function drawLandscape() {
     const w = Math.max(1.25, colWidth);
     const lg = Math.log2(b.multiplier || 1);
     if (lg > 0.001) {
-      ctx.fillStyle = `rgba(214,168,96,${0.35 + 0.6 * (lg / 2)})`;
+      ctx.fillStyle = paint('--brass', 0.35 + 0.6 * (lg / 2));
       ctx.fillRect(px, mid - (lg / 2) * 44, w, (lg / 2) * 44);
     } else if (lg < -0.001) {
-      ctx.fillStyle = `rgba(124,181,169,${0.35 + 0.6 * (-lg / 2)})`;
+      ctx.fillStyle = paint('--teal', 0.35 + 0.6 * (-lg / 2));
       ctx.fillRect(px, mid, w, (-lg / 2) * 30);
     }
     if (b.etch) {
-      ctx.fillStyle = BRASS_HEX;
+      ctx.fillStyle = paint('--brass');
       ctx.beginPath();
       ctx.moveTo(px + w / 2, 2);
       ctx.lineTo(px + w / 2 + 4, 8);
@@ -1206,14 +1227,14 @@ function drawLandscape() {
       ctx.fill();
     }
     if (b.depositAddress && !b.etch) {
-      ctx.strokeStyle = 'rgba(214,168,96,0.8)';
+      ctx.strokeStyle = paint('--brass', 0.8);
       ctx.beginPath();
       ctx.arc(px + w / 2, 8, 3.2, 0, Math.PI * 2);
       ctx.stroke();
     }
   }
 
-  ctx.fillStyle = '#f2f2f2';
+  ctx.fillStyle = paint('--text');
   ctx.beginPath();
   ctx.arc(x(count - 1), mid, 3, 0, Math.PI * 2);
   ctx.fill();
@@ -1223,8 +1244,8 @@ function drawLandscape() {
   legend.replaceChildren(
     legendItem(BRASS_HEX, 'basin / burn — weight above 1×'),
     legendItem(TEAL_HEX, 'shadow — weight below 1×'),
-    legendItem('#f87171', 'quarantined (scar)'),
-    legendItem('rgba(255,255,255,0.4)', 'retrieval activity'),
+    legendItem('var(--theme-fg-hex-f87171)', 'quarantined (scar)'),
+    legendItem(paint('--text', 0.4), 'retrieval activity'),
     legendItem(BRASS_HEX, '◆ etched · ○ deposit address', true),
   );
 }

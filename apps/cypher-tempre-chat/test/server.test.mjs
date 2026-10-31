@@ -25,7 +25,7 @@ const goodReview = () => ({
 const inspect = (chain) => ({
   ok: true,
   verified: true,
-  genesis: { name: chain.name, covenant: [...FRUITS] },
+  genesis: { name: chain.name, hash: HASH(0), covenant: [...FRUITS] },
   head: { index: chain.index, hash: HASH(chain.index) },
   faculties: [
     { id: "2", key: "modality:2", name: "Reason", kind: "modality" },
@@ -118,11 +118,13 @@ async function fixture(t, overrides = {}) {
       reviewCalls.push({ config, args });
       return overrides.review ? overrides.review(config, args) : goodReview();
     },
+    ...(overrides.openclawFactory ? { openclaw: {}, openclawFactory: overrides.openclawFactory } : {}),
   });
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
   const base = `http://127.0.0.1:${app.server.address().port}`;
   t.after(async () => {
+    await app.closeRuntime();
     if (app.server.listening) await new Promise((resolve) => {
       app.server.closeAllConnections();
       app.server.close(resolve);
@@ -195,6 +197,61 @@ async function allText(root) {
   }
   return text;
 }
+
+test('native controls require owner auth, ignore forged run plans and use trusted chain-scoped sessions', async t => {
+  const generated = [], commands = [];
+  const manager = { start: async () => {}, close: async () => {}, status: () => ({ backend: 'openclaw', running: true, version: '2026.10.9' }),
+    describeControls: async identity => ({ sessionKey: identity ? 'trusted-native-session' : null, config: { revision: 'r1', editable: {} } }),
+    sessionControls: async () => ({ sessionKey: 'trusted-native-session', goal: null }),
+    executeCommand: async args => { commands.push(args); return { kind: 'system', text: 'Native session status.' }; },
+    updateControls: async () => ({ saved: true }),
+    generate: async (config, args, context) => { generated.push({ config, args, context }); return { text: 'A helpful and truthful answer.', usage: {} }; } };
+  const f = await fixture(t, { openclawFactory: () => manager });
+  assert.equal((await f.request('/api/openclaw')).status, 401);
+  await f.ready();
+  const native = await f.request('/api/openclaw');
+  assert.equal(native.status, 200); assert.equal(native.body.sessionKey, 'trusted-native-session');
+  assert.equal(native.body.toolAuthority.grant.enabled, false);
+  assert.equal((await f.request('/api/openclaw/command', { command: '/status', sessionKey: 'attacker' })).status, 400);
+  assert.equal((await f.request('/api/openclaw/command', { command: '/status' })).status, 200);
+  assert.equal(commands[0].genesisHash, HASH(0)); assert.ok(commands[0].agentId);
+  assert.equal((await f.request('/api/openclaw/command', { command: '/name never-persist-this-key' })).status, 502);
+  assert.equal((await f.request('/api/chat', { message: '/goal edit never-persist-this-key' })).status, 502);
+  assert.equal(commands.length, 1, 'Credential isolation must run before native controls can persist input.');
+  const response = await f.request('/api/chat', { message: 'Please introduce yourself.', nativeControl: { sessionKey: 'attacker', intent: { kind: 'session-goal-start' } } });
+  assert.equal(response.status, 200);
+  assert.equal(generated.length, 1);
+  assert.equal(generated[0].args.nativeControl.sessionKey, 'trusted-native-session');
+  assert.equal(generated[0].args.nativeControl.intent, undefined);
+  assert.equal(generated[0].context.nativeIdentity.genesisHash, HASH(0));
+  assert.equal(generated[0].context.toolAuthority.enabled, false);
+  assert.equal(JSON.stringify(native.body).includes('never-persist-this-key'), false);
+});
+
+test('perspective branches cannot inherit explicit host grants while the selected synthesis can', async t => {
+  const generated = [];
+  const f = await fixture(t, { openclawFactory: () => ({ start: async () => {}, close: async () => {},
+    status: () => ({ backend: 'openclaw', version: '2026.10.9', running: true }),
+    describeControls: async () => ({}), executeCommand: async () => ({}),
+    sessionControls: async () => ({ sessionKey: 'stable', goal: null }),
+    generate: async (_config, args, context) => { generated.push({ args, context }); return { text: 'A helpful and truthful answer.', usage: {} }; },
+  }) });
+  await f.ready();
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ct-human-grant-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const grant = { enabled: true, tools: ['read'], roots: [root], networkHosts: [], allowExecution: false, acknowledged: true };
+  assert.equal((await f.request('/api/openclaw/tools', grant)).status, 200);
+  assert.equal((await f.request('/api/settings', { fork: true, perspectives: 3 })).status, 200);
+  const answer = await f.request('/api/chat', { message: 'Consider this question carefully.' });
+  assert.equal(answer.status, 200);
+  assert.equal(generated.length, 4);
+  assert.ok(generated.slice(0, 3).every(x => !x.context.toolAuthority.enabled && !x.args.nativeControl));
+  assert.equal(generated[3].context.toolAuthority.enabled, true);
+  assert.equal(generated[3].args.nativeControl.sessionKey, 'stable');
+  assert.equal((await f.request('/api/openclaw/tools', { enabled: false })).status, 200);
+  const disabled = JSON.parse(await fs.readFile(path.join(f.dataDir, 'tool-permissions.json'), 'utf8'));
+  assert.ok(Object.values(disabled.agents).every(entry => !entry.grant.enabled));
+});
 
 test('installer launch nonce is single-use and scoped to the local page', async t => {
   const f = await fixture(t);
