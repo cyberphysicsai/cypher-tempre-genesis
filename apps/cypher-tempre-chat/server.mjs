@@ -24,6 +24,9 @@ import { sanitizeModelValue, sanitizeModelText } from "./lib/terminology.mjs";
 import { createHoldingsGate } from "./lib/holdings-gate.mjs";
 import { Activity, CAPABILITIES, cognitionFor, validateCognition } from "./lib/cognition.mjs";
 import { enrichPrepared, searchPerspectives } from "./lib/native-cognition.mjs";
+import { createPoIBroker } from "./openclaw/broker.mjs";
+import { createOpenClawGateway } from "./openclaw/gateway.mjs";
+import { discoverTimechains } from "./openclaw/discovery.mjs";
 
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = JSON.parse(
@@ -295,14 +298,28 @@ export async function createApp(options = {}) {
   };
   const generateModel = options.generate || generate;
   const reviewModel = options.review || review;
+  let openclaw = null, poiBroker = null;
   // Normalize only model-visible copies; provider credentials and stored records
   // retain their exact values. Injected transports obey the same boundary.
   const model = async (config, args) => {
     checkCancelled(args.signal);
     await requireHoldings();
     assertCredentialIsolation(config, args);
-    const trace = requestSession.getStore()?.trace;
-    const action = () => generateModel(config, sanitizeModelValue(args));
+    const scope = requestSession.getStore();
+    const trace = scope?.trace;
+    const action = () => {
+      if (!openclaw) return generateModel(config, sanitizeModelValue(args));
+      const record = agentFor(scope?.session);
+      const purpose = scope.plainCall ? "plain" : args.chainchatPurpose === "utility" ? "utility" : "candidate";
+      const input = scope.originalInput || args.messages?.filter(m => m.role === "user").at(-1)?.content;
+      return openclaw.generate(config, sanitizeModelValue(args), {
+        purpose, root: record.root, input, loadout: keys(record.loadout), settings: record.settings,
+        learning: cognitionFor(record).learning, signal: args.signal,
+        authorize: () => requestSession.run(scope, requireHoldings),
+        run: callback => requestSession.run(scope, callback),
+        event: (ability, status, label) => { if (trace?.running) trace.event(ability, status, label); },
+      });
+    };
     const rawResult = trace?.running ? await trace.step("model", "Model inference", action) : await action();
     await requireHoldings();
     checkCancelled(args.signal);
@@ -328,6 +345,14 @@ export async function createApp(options = {}) {
     const result = sanitizeModelValue(rawResult);
     return result;
   };
+  if (options.openclaw) {
+    poiBroker = createPoIBroker({ engine, review: async (config, args) =>
+      strictReview(await reviewer(config, args), args.availableEvidence || []) });
+    await poiBroker.start();
+    openclaw = (options.openclawFactory || createOpenClawGateway)({ ...options.openclaw, broker: poiBroker });
+    try { await openclaw.start(); }
+    catch (error) { await poiBroker.close(); await openclaw.close().catch(() => {}); throw error; }
+  }
   const pairingCode =
     options.pairingCode ||
     randomBytes(12)
@@ -335,6 +360,8 @@ export async function createApp(options = {}) {
       .toUpperCase()
       .match(/.{1,4}/g)
       .join("-");
+  let launchNonce = options.launchNonce || null;
+  let launchExpiry = Date.now() + 60_000;
   const sessions = new Map();
   const busy = new Set();
   const pausing = new Set();
@@ -450,6 +477,7 @@ export async function createApp(options = {}) {
           }
         : null,
       agents: store.agents.map((a) => ({ id: a.id, name: a.name })),
+      executionRuntime: openclaw ? openclaw.status() : { backend: "direct" },
       provider: cleanProvider(session.provider),
       loadout: record?.loadout || { modalities: [], senses: [] },
       settings: record?.settings || validateSettings({}),
@@ -794,10 +822,11 @@ export async function createApp(options = {}) {
           paired: false,
           version: APP_VERSION,
           service: "Cypher Tempre ChainChat",
+          runtime: openclaw ? { backend: "openclaw", ...openclaw.status() } : { backend: "direct" },
         });
       if (req.method === "GET" && url.pathname === "/api/archetypes")
         return send(200, { archetypes });
-      if (req.method === "POST" && url.pathname === "/api/pair") {
+      if (req.method === "POST" && ["/api/pair", "/api/launch"].includes(url.pathname)) {
         const address = req.socket.remoteAddress;
         const now = Date.now();
         const recent = (attempts.get(address) || []).filter(
@@ -812,15 +841,18 @@ export async function createApp(options = {}) {
         recent.push(now);
         attempts.set(address, recent);
         const input = await body(req, 4096);
-        if (
+        const launch = url.pathname === "/api/launch";
+        if (launch ? (origin && origin !== `http://${req.headers.host}` || !launchNonce || Date.now() > launchExpiry ||
+          typeof input.nonce !== "string" || !sameSecret(input.nonce, launchNonce)) : (
           typeof input.code !== "string" ||
           !sameSecret(input.code.trim().toUpperCase(), pairingCode)
-        )
+        ))
           throw err(
             "The pairing code did not match the local bridge.",
             "PAIR_FAILED",
             401,
           );
+        if (launch) launchNonce = null;
         const token = randomBytes(32).toString("hex");
         const paired = {
           origin: origin || `http://${req.headers.host}`,
@@ -859,10 +891,17 @@ export async function createApp(options = {}) {
       return await requestSession.run(
         { session, token, epoch: license.epoch(session) },
         async () => {
+          if (req.method === "GET" && url.pathname === "/api/local-pairing") {
+            if (session.origin !== `http://${req.headers.host}`)
+              throw err("Pairing codes are available only in the local application.", "LOCAL_ONLY", 403);
+            return send(200, { code: pairingCode });
+          }
           if (req.method === "GET" && url.pathname === "/api/license")
             return send(200, await license.describe(session));
           if (req.method === "GET" && url.pathname === "/api/state")
             return send(200, await state(session));
+          if (req.method === "POST" && url.pathname === "/api/agents/discover")
+            return send(200, await discoverTimechains({ agentDataRoot: store.root }));
           if (req.method === "GET" && url.pathname === "/api/activity") {
             const selected = store.agents.find(a => a.id === session.agentId);
             return send(200, selected ? activityFor(session, selected).snapshot() :
@@ -1328,9 +1367,11 @@ export async function createApp(options = {}) {
               });
               const signal = controller.signal;
               requestSession.getStore().signal = signal;
+              requestSession.getStore().originalInput = message;
               const inspected = await engine({ op: "inspect", root: record.root });
               const cognition = controlFor(record, inspected);
               if (cognition.mode === "dormant") {
+                requestSession.getStore().plainCall = true;
                 const raw = await model(config, {
                   system: "You are a helpful assistant. This is an ordinary stateless model call. The user has paused Timechain memory, learning, faculty operations, review and commitment. No chain context or external tools are available. Do not claim to have used them.",
                   messages: [{ role: "user", content: message }], maxTokens: 4096, signal,
@@ -1894,7 +1935,11 @@ export async function createApp(options = {}) {
     }
     sessions.clear();
   });
-  return { server, pairingCode, store, sessions };
+  let closingRuntime;
+  const closeRuntime = () => closingRuntime ||= (async () => { await openclaw?.close(); await poiBroker?.close(); })();
+  server.once("close", () => { void closeRuntime(); });
+  return { server, pairingCode, store, sessions, openclaw, closeRuntime,
+    issueLaunchNonce() { launchNonce = randomBytes(32).toString("hex"); launchExpiry = Date.now() + 60_000; return launchNonce; } };
 }
 
 export function parsePublicOrigins(value) {

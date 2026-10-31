@@ -2,6 +2,27 @@
 
 Validation separates deterministic engine behavior, application orchestration and real-model observations. Passing a transport or gate test does not establish equal answer quality across models, perfect security or elimination of hallucinations.
 
+## OpenClaw edition: 0.7.0
+
+The complete local Node suite passed **236 tests**, with one expected Windows case-sensitivity skip (237 total). Both independent original-skill reference variables and the actual pinned OpenClaw package/Node runtime were explicitly supplied. The Python suite passed **91 tests**, with one Windows symlink-privilege skip (92 total). Separate launcher tests passed after hardening browser-helper failure handling and crash-released Windows startup ownership. Syntax, whitespace, terminology and dependency-pin checks passed. All 65 bundled native engine files remain byte-identical to the independent PoI source commitment.
+
+Actual unmodified OpenClaw 2026.10.9 executed controlled local provider fixtures for OpenAI Responses, OpenAI-compatible Chat Completions, Anthropic Messages and Gemini. Tests exercised exact receipt enforcement, mismatched output rejection, cancellation, child restart and application restart. Six retained chat-API cases exercised verified introductions with equipped native faculties and existing-chain prefixes, covenant rejection, mutated receipts, utility memory planning, paused plain chat, and two perspective candidates plus synthesis with one final conversation seal. They asserted real provider/review calls, real native receipts and chain bytes, activity events, and absence of the supplied fixture API key in configuration. These tests use deterministic text/review scores, not paid-model quality benchmarks.
+
+The private broker tests reject unknown/expired/mismatched runs, changed output, low fruitage and all ungranted tools. Plugin hooks alone are not the release boundary: the transport independently validates the exact candidate receipt, and the orchestrator requires its native commitment/release policy. External host tools remain disabled; this is not a claim that arbitrary shell/browser workflows have been enabled or benchmarked.
+
+Windows setup has executable self-tests for archive traversal, Windows path collisions, long paths, tampering, fonts and atomic activation. `installer/acceptance_windows.py` performs a real isolated fresh/repeat installation with locked dependency downloads, embedded-Python native genesis/verification, data-preservation checks, installed-launcher HTTP mode, authenticated shutdown, tampered-candidate rejection and rollback. It does not touch a user's normal installation or use provider credentials. The real Gateway suites can also target the installed application through `CT_CHAINCHAT_PACKAGE`, `CT_OPENCLAW_PACKAGE`, `CT_OPENCLAW_NODE` and `CT_CHAT_PYTHON`.
+
+To repeat the real runtime cases after installing the exact OpenClaw lockfile:
+
+```powershell
+$env:CT_OPENCLAW_PACKAGE = (Resolve-Path openclaw/runtime/node_modules/openclaw).Path
+$env:CT_OPENCLAW_NODE = (Get-Command node).Source
+node --test test/openclaw-gateway.test.mjs test/openclaw-integration.test.mjs
+python installer/check_upstream.py
+```
+
+Use a supported Node runtime (24.22.1+ within 24.x, or 26.12.1+) and Python 3.10+. Public benchmark scores and an elimination of hallucinations are not established by these integration tests.
+
 ## Current conversation grounding fix: 0.6.1
 
 The previous wrapper could withhold a fresh-chain introduction with six semantic scores of 235/255: it omitted the agent's genesis identity from native grounding and supplied no agent name to the separate reviewer. The native gate reported zero grounding and forced uncertainty for the otherwise supported introduction. The reviewer also required demonstrated strength of every value, which could penalize an ordinary greeting without a value conflict.

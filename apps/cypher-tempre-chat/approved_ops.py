@@ -21,7 +21,7 @@ import threading
 import types
 
 ENGINE = Path(__file__).resolve().parent / "engine" / "proof-of-interaction"
-TRUST_ROOT = Path(__file__).resolve().parent / ".local" / "operator-approvals"
+TRUST_ROOT = Path(os.environ["CT_OPERATOR_TRUST_ROOT"]).expanduser().absolute() if os.environ.get("CT_OPERATOR_TRUST_ROOT") else Path(__file__).resolve().parent / ".local" / "operator-approvals"
 MAX_SOURCE = 1024 * 1024
 MAX_OUTPUT = 512 * 1024
 MAX_INPUT = 8 * 1024 * 1024

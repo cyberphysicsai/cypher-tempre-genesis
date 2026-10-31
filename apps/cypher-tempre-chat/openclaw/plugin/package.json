@@ -1,0 +1,12 @@
+{
+  "name": "@cypher-tempre/openclaw-poi",
+  "version": "0.7.0",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "description": "Turn-bound Proof of Interaction enforcement for the pinned ChainChat OpenClaw runtime.",
+  "openclaw": {
+    "extensions": ["./index.mjs"],
+    "runtimeExtensions": ["./index.mjs"]
+  }
+}

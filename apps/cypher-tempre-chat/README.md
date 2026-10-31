@@ -4,34 +4,51 @@ A bring-your-own-model Agentic Timechain Metaprogramming Interface for Cypher Te
 
 This local application includes the complete Proof of Interaction engine. Its module, gate, score fields, skill instructions, and model-facing vocabulary use PoI throughout. It does not replace an installed skill or rewrite existing history.
 
-## Start
+## OpenClaw edition
 
-Install Node.js 20+ and Python 3.10+. Install the pinned Node dependency used for wallet signature verification; no Python packages are needed.
+ChainChat runs the official, unmodified **OpenClaw 2026.10.9** gateway with a separate Cypher Tempre plugin. The current chat, skill bar, faculty inventory, perspective controls and native Timechain orchestrator remain the interface. The bundled native engine's 65 files are unchanged. This is an OpenClaw-backed distribution; there are no upstream source patches to rebase.
+
+The private plugin broker verifies the paired chain, injects the actual PoI skill and equipped native faculty context, and reviews the exact generated candidate. The transport requires a matching candidate receipt, and the chat orchestrator performs the final native review and atomic commitment before releasing active-chain output. A prompt reminder alone is not the enforcement boundary. OpenClaw's standalone hooks have failure paths that continue execution, so this supported plugin/transport/orchestrator combination must stay together.
+
+External host tools are disabled by default. This edition does not silently grant a model filesystem, browser or shell control. Its cognitive faculties, memory, native growth, perspective search and explicitly requested reviewed maintenance remain available. Utility planning calls cannot invoke tools or recursively commit. Deliberately dormant chat follows the existing plain-call behavior.
+
+## Install on Windows
+
+Download **CypherTempre-ChainChat-Setup-0.7.0-windows-x64.exe** from the release and run it. Setup installs verified portable Node/Python runtimes and locked dependencies for the current user, creates a Start Menu shortcut and opens the local chat. No administrator rights or global runtime installation are needed. First setup requires Internet access. The executable is not Authenticode-signed; release hashes and the open build source are supplied.
+
+Versioned application releases are separate from persistent `data/`. Existing external Timechains stay in their original directories. Setup checks a release before activation and preserves the previous release for rollback. See [installer/README.md](installer/README.md) for installation details and [openclaw/UPSTREAM.md](openclaw/UPSTREAM.md) for tested upstream updates.
+
+## Start from source
+
+Use Node **24.22.1+ within 24.x, or 26.12.1+**, and Python 3.10+. Install both locked dependency sets; no Python packages are needed.
 
 ```sh
 npm ci --ignore-scripts
+npm ci --ignore-scripts --prefix openclaw/runtime
 npm start
 ```
 
-Open **http://127.0.0.1:8790**. Enter the pairing code printed in the terminal, then:
+The launcher opens **http://127.0.0.1:8790** with an expiring one-use pairing link. A subsequent launch reopens the running instance with a new link. You can also enter the local terminal's pairing code manually. Then:
 
 1. Connect your wallet and sign the readable ChainChat sign-in message. Keep at least **21,000 CPHY** in that wallet on Base. Signing does not transfer tokens or approve spending.
-2. Seal a fresh genesis, or pair the absolute directory of an existing Timechain skill containing `chain/` and `registry/`. Existing chains can be paired and inspected before wallet verification.
+2. Seal a fresh genesis, or pair the absolute directory of an existing Timechain skill containing `chain/` and `registry/`. **Find existing local Timechains** searches bounded known agent locations only when clicked; select a result and explicitly verify/pair it. You can always enter a path manually. Existing chains can be paired and inspected before wallet verification.
 3. Connect your provider, exact model ID, optional base URL, and API key.
 4. Equip modalities and senses. Enable perspective forking or adjust Continuum if desired.
-5. Chat. The bridge reviews the generated answer, runs the native PoI gate, and commits accepted interactions according to the selected block policy.
+5. Chat. OpenClaw executes model turns; the private PoI service and native orchestrator review candidates and commit accepted interactions according to the selected block policy. The ability bar reflects actual runtime events.
 
 **Current block height** is the paired chain's last sealed block index. Genesis is height 0. Pending exchanges do not advance it. An unpaired chain shows a dash, and refreshes read the actual chain head rather than predicting the next index.
 
-Use `CT_CHAT_PYTHON` to select a Python executable, `CT_CHAT_PORT` to change the port, or `CT_CHAT_DATA` to select a local data directory. The default data directory is `.local/`, excluded from Git. Close the server to end its credential sessions. Reloading the browser requires a new pairing and model connection.
+Use `CT_CHAT_PYTHON` to select a Python executable, `CT_CHAT_PORT` to change the port, or `CT_CHAT_DATA` to select a local data directory. Source defaults to `.local/`, excluded from Git; setup uses its installation's persistent `data/`. `node openclaw/launcher.mjs --check` verifies the pinned runtime and native engine. `node openclaw/launcher.mjs --stop` authenticates and stops only this installation's owned runtime. Reloading clears browser pairing and requires a fresh launch/pairing and model connection. Developer-only `npm run dev` retains the earlier direct-provider server and does not exercise OpenClaw enforcement.
 
 ## Live beta at cyphertempre.ai
 
-Run `npm run beta` on the same machine as your Timechain, then open https://cyphertempre.ai and pair using the code printed by the bridge. Approve your browser's local-network permission when requested. The official site uses loopback port 8790; it does not tunnel or expose that port to the Internet. A local-only alternative is `npm start` and http://127.0.0.1:8790. Hosted pairing tokens are restricted to their exact originating site and remain in memory.
+Launch the installed ChainChat shortcut or run `npm run beta` on the same machine as your Timechain. In the local chat, open the connection panel and choose **Show website pairing code**. At https://cyphertempre.ai, pair with that code and allow local-network access if your browser requests it. The official site uses loopback port 8790; it does not tunnel or expose that port to the Internet. The complete chat also works on its local page. Hosted pairing tokens are restricted to their exact originating site and remain in memory.
 
-The hosted interface requires bridge **0.6.1 or newer** before pairing. Updating the website does not update a previously running local bridge: install the new bridge package and restart it to receive the native cognition controls and activity feed.
+The hosted interface requires runtime **0.7.0 or newer** before pairing. Updating the website does not update a previously running local installation: install the new package and launch its shortcut.
 
 The chat is followed by the preserved read-only chain auditor. It pairs independently with the original audit bridge on port 8788. Existing chain and registry files are not included in downloads or uploaded to hosting.
+
+The UI, Gateway, native chain, registries and pending blocks run on the user's machine. Model requests still go to the chosen provider, and wallet balance checks go to Base RPC. Provider API keys stay in ChainChat process memory and the local authenticated proxy, never the Gateway's configuration, transcripts, exported faculty packs or browser storage. The Gateway receives private temporary proxy credentials instead. Upstream may store local conversation/runtime artifacts inside the installation's data directory; these are local data, not a cloud backup. Stop the local runtime to clear its credential sessions.
 
 ## CPHY holdings access
 
