@@ -20,8 +20,13 @@ def local_state(root=ROOT):
     entry = lock.get("packages", {}).get("node_modules/openclaw", {})
     if package.get("dependencies", {}).get("openclaw") != expected["version"] or entry.get("version") != expected["version"] or entry.get("integrity") != expected["integrity"] or entry.get("resolved") != expected["source"]:
         raise ValueError("OpenClaw runtime manifest/lockfile/pin consistency check failed.")
+    overrides = pins.get("dependencyOverrides", {})
+    if package.get("overrides", {}) != overrides or any(
+            lock.get("packages", {}).get("node_modules/" + name, {}).get("version") != version
+            for name, version in overrides.items()):
+        raise ValueError("OpenClaw dependency override manifest/lockfile/pin consistency check failed.")
     return {"consistent": True, "pinnedVersion": expected["version"], "pinnedIntegrity": expected["integrity"],
-            "upstreamSourcePatched": False, "automaticInstall": False}
+            "dependencyOverrides": overrides, "upstreamSourcePatched": False, "automaticInstall": False}
 
 
 def main():

@@ -25,9 +25,11 @@ class InstallerSourceTests(unittest.TestCase):
             "installer/windows-installer.cs": "// fixture", "installer/windows.manifest": "<fixture/>",
             "public/fonts/orbitron/Orbitron-Variable.ttf": "font fixture",
             "openclaw/upstream-lock.json": json.dumps(self.pins),
-            "openclaw/runtime/package.json": json.dumps({"dependencies": {"openclaw": pin["version"]}}),
+            "openclaw/runtime/package.json": json.dumps({"dependencies": {"openclaw": pin["version"]},
+                "overrides": self.pins.get("dependencyOverrides", {})}),
             "openclaw/runtime/package-lock.json": json.dumps({"packages": {"node_modules/openclaw": {
-                "version": pin["version"], "integrity": pin["integrity"], "resolved": pin["source"]}}}),
+                "version": pin["version"], "integrity": pin["integrity"], "resolved": pin["source"]},
+                **{"node_modules/" + name: {"version": version} for name, version in self.pins.get("dependencyOverrides", {}).items()}}}),
         }
 
     def tearDown(self):
@@ -85,6 +87,16 @@ class InstallerSourceTests(unittest.TestCase):
             with self.subTest(field=field):
                 with self.assertRaisesRegex(ValueError, "do not match"):
                     builder.inspect_payload(self.archive({"openclaw/runtime/package-lock.json": json.dumps(changed)}))
+
+    def test_security_overrides_must_match_both_manifest_and_lock(self):
+        package = json.loads(self.files["openclaw/runtime/package.json"])
+        package["overrides"] = {**package["overrides"], "undici": "0.0.0"}
+        with self.assertRaisesRegex(ValueError, "overrides and lockfile"):
+            builder.inspect_payload(self.archive({"openclaw/runtime/package.json": json.dumps(package)}))
+        lock = json.loads(self.files["openclaw/runtime/package-lock.json"])
+        lock["packages"]["node_modules/undici"]["version"] = "0.0.0"
+        with self.assertRaisesRegex(ValueError, "overrides and lockfile"):
+            builder.inspect_payload(self.archive({"openclaw/runtime/package-lock.json": json.dumps(lock)}))
 
 
 if __name__ == "__main__":

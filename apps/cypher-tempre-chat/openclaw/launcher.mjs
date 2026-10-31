@@ -32,6 +32,14 @@ async function doctor() {
     throw new Error('This edition requires the bundled Node runtime. Use the ChainChat installer or a supported OpenClaw Node version.');
   const upstream = JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8'));
   if (upstream.name !== 'openclaw' || upstream.version !== lock.openclaw.version) throw new Error('The OpenClaw installation does not match the reviewed upstream pin.');
+  const dependencies = {};
+  for (const [name, expected] of Object.entries(lock.dependencyOverrides || {})) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error('The reviewed dependency overlay is invalid.');
+    const dependency = JSON.parse(await fs.readFile(path.join(packageRoot, '..', name, 'package.json'), 'utf8'));
+    if (dependency.name !== name || dependency.version !== expected)
+      throw new Error('The installed dependencies do not match the reviewed security overlay.');
+    dependencies[name] = dependency.version;
+  }
   await fs.access(path.join(packageRoot, 'openclaw.mjs'));
   await fs.access(path.join(root, 'openclaw/plugin/index.mjs'));
   await exec(python, ['-c', 'import sys; assert sys.version_info >= (3,10); import engine_bridge; print("native-engine-ok")'],
@@ -41,7 +49,7 @@ async function doctor() {
     const actual = createHash('sha256').update(await fs.readFile(path.join(root, 'engine/proof-of-interaction', relative))).digest('hex');
     if (actual !== expected) throw new Error('The installed native engine differs from the packaged integrity manifest.');
   }
-  return { version: packageInfo.version, openclaw: upstream.version, node: process.versions.node, nativeFiles: Object.keys(files).length };
+  return { version: packageInfo.version, openclaw: upstream.version, node: process.versions.node, nativeFiles: Object.keys(files).length, dependencies };
 }
 async function owner() {
   let saved;

@@ -40,6 +40,10 @@ from that reviewed ZIP. There is no compiler download or third-party installer
 toolchain. Runtime versions, URLs and SHA-256 commitments
 live in `openclaw/upstream-lock.json`; the OpenClaw npm lockfile must match its
 exact version and integrity.
+Reviewed dependency overrides are also pinned there. The build checks the
+manifest and lockfile agree, and setup checks their actual installed versions
+before activation. These checks do not assert that every bundled upstream
+dependency has no reported vulnerabilities.
 
 ## Isolated acceptance run
 

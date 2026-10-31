@@ -1,0 +1,53 @@
+# Security boundary and upstream dependencies
+
+This beta is a local, authenticated OpenClaw distribution with a reviewed plugin
+and native Timechain orchestrator. Functional tests do not establish perfect
+security, truthful model judgment or an absence of dependency vulnerabilities.
+
+The official OpenClaw source package stays at the exact commitment in
+`upstream-lock.json`. A separate, exact dependency overlay selects external
+Undici 8.12.3, Zod 4.6.7 and npm 12.2.1. These are ordinary dependency overrides,
+not edits to the upstream source tarball. The runtime lockfile, setup integrity
+checks and launcher doctor validate these selections. Adoption requires actual
+Gateway and installed-application regression tests. Automatic upstream update
+checks and automatic application of updates are disabled in the managed Gateway.
+
+The overlay fixes replaceable external dependency copies. It does **not** replace
+library code embedded inside OpenClaw or npm bundles:
+
+- OpenClaw's compiled schema bundles contain Zod 4.6.5. The upstream collection
+  bounds fix checks limits before parsing elements; replacing the external Zod
+  npm package does not apply that fix to embedded code. See the
+  [upstream Zod fix](https://github.com/colinhacks/zod/commit/a0ebf970f2d752e5f58527cd2942ff48be4f46bd).
+- npm 12.2.1 still bundles Undici 6.29.0, with reported vulnerabilities. The
+  [Undici advisory](https://github.com/nodejs/undici/security/advisories/GHSA-xjj6-f33q-929c)
+  specifies a fixed 6.x version of 6.29.1. npm's own bundled files are not replaced
+  by a top-level Undici override. The npm package-manager dependency tree also
+  retains moderate audit findings. The
+  [npm release notes](https://github.com/npm/cli/releases/tag/v12.2.1)
+  do not establish that all its bundled dependencies are fixed.
+
+The current managed UI does not expose npm/package-manager or external host
+tools. Gateway HTTP is authenticated and bound to numeric loopback; the UI never
+receives its operator token. ChainChat constructs Gateway message envelopes,
+limits them to 200 messages and sends no arbitrary browser-provided tool or
+configuration schemas. Browser chat input becomes message text. The reviewed
+HTTP schema uses unknown message/tool elements rather than the constrained
+collection route identified in the Zod fix. Review found no identified path from
+the current UI to that specific oversized-collection exploit. This is a scoped
+reachability assessment, not proof that every embedded schema is safe.
+
+The provider proxy bounds responses, refuses redirects and strips transport
+encoding headers when forwarding decoded content. Provider credentials remain
+in the parent process; the child receives private proxy credentials. Native
+admission and exact candidate receipts remain required regardless of model
+output. Default-denied tools are not an OS sandbox: explicitly approved native
+operator code still runs with the local user's permissions.
+
+Do not expose the Gateway or ChainChat HTTP ports publicly or treat arbitrary
+standalone OpenClaw plugins, channels, CLI commands or tools as covered by this
+configuration's tests. Extending those paths requires a fresh security review.
+Use `npm audit --omit=dev` in `openclaw/runtime` when reviewing updates, inspect
+embedded libraries as well as lockfile findings, and test a reviewed upstream
+release containing those fixes before removing the residual notices. An audit
+with zero lockfile findings would not itself prove embedded copies are fixed.

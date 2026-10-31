@@ -12,6 +12,8 @@ The private plugin broker verifies the paired chain, injects the actual PoI skil
 
 External host tools are disabled by default. This edition does not silently grant a model filesystem, browser or shell control. Its cognitive faculties, memory, native growth, perspective search and explicitly requested reviewed maintenance remain available. Utility planning calls cannot invoke tools or recursively commit. Deliberately dormant chat follows the existing plain-call behavior.
 
+Exact dependency patches are applied separately from the unmodified upstream package. Known upstream bundled-library audit findings remain; see [the security boundary and residual risks](openclaw/SECURITY.md). This beta is not a zero-vulnerability or hallucination-free claim.
+
 ## Install on Windows
 
 Download **CypherTempre-ChainChat-Setup-0.7.0-windows-x64.exe** from the release and run it. Setup installs verified portable Node/Python runtimes and locked dependencies for the current user, creates a Start Menu shortcut and opens the local chat. No administrator rights or global runtime installation are needed. First setup requires Internet access. The executable is not Authenticode-signed; release hashes and the open build source are supplied.

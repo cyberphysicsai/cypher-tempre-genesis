@@ -85,6 +85,8 @@ test("managed child does not inherit other agent credentials, Node preload, prox
     assert.equal(captured.env.CHAINCHAT_BROKER_TOKEN, "private-broker-fixture-token");
     assert.equal(captured.env.NO_PROXY, "127.0.0.1,localhost,::1");
     assert.equal(captured.windowsHide, true); assert.equal(captured.stdio[3], "ipc");
+    const config = JSON.parse(await fs.readFile(path.join(directory, "managed/gateway.json"), "utf8"));
+    assert.equal(config.update.checkOnStart, false); assert.equal(config.update.auto.enabled, false);
   } finally { for (const [name, value] of previous) if (value === undefined) delete process.env[name]; else process.env[name] = value; }
 });
 
@@ -184,5 +186,6 @@ test("pinned real OpenClaw performs four provider protocols, enforces receipts a
     assert.equal((await engine({ op: "verify", root })).head.index, 0, "The UI orchestrator owns the single later conversation commit.");
     const configuration = await fs.readFile(path.join(directory, "managed/gateway.json"), "utf8");
     assert.equal(configuration.includes("isolated-secret"), false);
+    assert.deepEqual(JSON.parse(configuration).update, { checkOnStart: false, auto: { enabled: false } });
   } catch (error) { throw new Error(`${error.message}\nRuntime diagnostics:\n${diagnostics.join("").slice(-6000)}`, { cause: error }); }
 });

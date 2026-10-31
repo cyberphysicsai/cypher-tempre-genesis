@@ -61,6 +61,7 @@ namespace CypherTempreInstaller {
   }
   public sealed class Manifest {
     public string product, version, payloadSha256, payloadPrefix, openclawVersion;
+    public Dictionary<string,string> dependencyOverrides;
     public RuntimePin node, python;
   }
   public sealed class ActiveRelease {
@@ -389,6 +390,11 @@ namespace CypherTempreInstaller {
         string packageFile=Path.Combine(release,"openclaw","runtime","node_modules","openclaw","package.json");
         Dictionary<string,object> package=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(packageFile));
         if(Convert.ToString(package["version"]) != manifest.openclawVersion) throw new InvalidOperationException("Installed OpenClaw version differs from its pinned release.");
+        if(manifest.dependencyOverrides != null) foreach(KeyValuePair<string,string> dependency in manifest.dependencyOverrides) {
+          string dependencyFile=Child(Path.Combine(release,"openclaw","runtime","node_modules"),Path.Combine(dependency.Key,"package.json"));
+          Dictionary<string,object> installedDependency=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(dependencyFile));
+          if(Convert.ToString(installedDependency["name"]) != dependency.Key || Convert.ToString(installedDependency["version"]) != dependency.Value) throw new InvalidOperationException("An installed dependency differs from its pinned security override.");
+        }
         if(!File.Exists(Path.Combine(release,"installed.json"))) throw new InvalidOperationException("The staged dependency installation is incomplete; preserve install.log and select a fresh installation root or retry a repaired release.");
         Log("Checking bundled Node, Python and ChainChat runtime");
         Run(active.node,new[]{"--version"},release,EnvironmentFor(active,root),30);

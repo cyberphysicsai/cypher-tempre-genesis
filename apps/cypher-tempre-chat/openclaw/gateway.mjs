@@ -207,6 +207,9 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
           heartbeat: { every: "0m" }, maxConcurrent: 1 } },
         tools: toolsPolicy, models: { mode: "replace", catalogRefresh: { enabled: false }, providers },
         discovery: { mdns: { mode: "off" } }, cron: { enabled: false },
+        // Update only through the reviewed downstream installer/pin. This also
+        // suppresses native background update checks and anonymous update pings.
+        update: { checkOnStart: false, auto: { enabled: false } },
         logging: { level: "error", consoleLevel: "error" },
         plugins: { enabled: true, allow: ["cypher-tempre-poi"], load: { paths: [plugin] }, entries: {
           "cypher-tempre-poi": { enabled: true, hooks: { allowConversationAccess: true, allowPromptInjection: true }, config: {

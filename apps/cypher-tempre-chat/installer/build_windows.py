@@ -63,6 +63,11 @@ def inspect_payload(path: Path):
         installed = lock.get("packages", {}).get("node_modules/openclaw", {})
         if runtime.get("dependencies", {}).get("openclaw") != expected["version"] or installed.get("version") != expected["version"] or installed.get("integrity") != expected["integrity"] or installed.get("resolved") != expected["source"]:
             raise ValueError("The OpenClaw dependency and lockfile do not match upstream-lock.json.")
+        overrides = pins.get("dependencyOverrides", {})
+        if runtime.get("overrides", {}) != overrides or any(
+                lock.get("packages", {}).get("node_modules/" + name, {}).get("version") != version
+                for name, version in overrides.items()):
+            raise ValueError("The dependency overrides and lockfile do not match upstream-lock.json.")
         return package, prefix, pins
 
 
@@ -76,6 +81,7 @@ def build(archive: Path, output: Path):
     manifest = {"product": "cypher-tempre-chainchat", "version": package["version"],
                 "payloadSha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "payloadPrefix": prefix,
                 "openclawVersion": pins["openclaw"]["version"],
+                "dependencyOverrides": pins.get("dependencyOverrides", {}),
                 "node": pins["windowsX64"]["node"], "python": pins["windowsX64"]["python"]}
     compiler = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     if not compiler.is_file():
@@ -106,6 +112,7 @@ def build(archive: Path, output: Path):
     result = {"version": package["version"], "platform": "windows-x64", "installer": output.name,
               "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "bytes": output.stat().st_size,
               "payloadSha256": manifest["payloadSha256"], "openclawVersion": manifest["openclawVersion"],
+              "dependencyOverrides": manifest["dependencyOverrides"],
               "nodeVersion": manifest["node"]["version"], "pythonVersion": manifest["python"]["version"],
               "authenticodeSigned": False, "requiresAdministrator": False, "networkNeededForFirstInstall": True}
     output.with_suffix(output.suffix + ".json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
