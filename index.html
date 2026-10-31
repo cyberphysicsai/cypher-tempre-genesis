@@ -105,7 +105,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.6.1</span>
+        ><span class="mono" id="appVersion">v0.7.0</span>
       </div>
       <div class="top-actions">
         <button
@@ -473,10 +473,10 @@
         </button>
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/tag/chat-beta-v0.6.1"
+          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.7.0/CypherTempre-ChainChat-Setup-0.7.0-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
-          >Download local bridge</a
+          >Install ChainChat for Windows</a
         >
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
@@ -595,18 +595,18 @@
         <span class="modal-emblem"
           ><svg><use href="#i-link" /></svg
         ></span>
-        <h2>Pair your local bridge.</h2>
+        <h2>Pair your local runtime.</h2>
         <p>
-          Your Timechain lives on this machine. Enter the pairing code printed
-          in the terminal when you started this app.
+          Launch ChainChat on this machine. Its local page pairs automatically.
+          Open its connection panel to show the code for this website.
         </p>
         <div id="hostedBridgeSetup" class="hidden">
           <div class="info-box">
-            Start the bridge with this exact trusted site:
+            Install and launch ChainChat, or start the source distribution:
             <code
-              >node server.mjs --public-origin
-              <span id="hostedOrigin"></span></code
-            >. Pairing connects only to this machine at 127.0.0.1. Your browser
+              >npm start</code
+            >. This runtime trusts <span id="hostedOrigin"></span>.
+            Pairing connects only to this machine at 127.0.0.1. Your browser
             may ask you to allow local network access.
           </div>
           <label class="field"
@@ -654,7 +654,7 @@
         <span class="modal-emblem"
           ><svg><use href="#i-link" /></svg
         ></span>
-        <h2>Your bridge is paired.</h2>
+        <h2>Your local runtime is paired.</h2>
         <p>
           This browser can work with your local agents. End the session to
           revoke its access and clear its model credential from bridge memory.
@@ -662,6 +662,10 @@
         <div class="info-box">
           Your saved Timechains and pending blocks remain on this machine.
         </div>
+        <button id="showPairingCode" type="button" class="secondary-button full-width session-action hidden">
+          Show website pairing code
+        </button>
+        <div id="websitePairingCode" class="info-box hidden" role="status"></div>
         <button
           id="endSession"
           type="button"
@@ -729,6 +733,8 @@
           Use the absolute path to your original skill or agent root containing
           <code>chain/</code> and <code>registry/</code>.
         </p>
+        <button type="button" class="secondary-button full-width" id="discoverChains">Find existing local Timechains</button>
+        <div id="discoveredChains" class="info-box hidden" role="status"></div>
         <label class="field"
           >Agent root directory<input
             id="existingRoot"
