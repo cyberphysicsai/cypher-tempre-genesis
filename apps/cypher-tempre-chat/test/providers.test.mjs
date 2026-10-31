@@ -926,3 +926,95 @@ test("review has a fresh system frame, includes immutable covenant and requests 
     "gentle",
   ]);
 });
+
+const verifiedAgentFixture = () => ({
+  version: 1,
+  name: "Cypher Tempre",
+  covenant: [...FRUITS],
+  genesisHash: "a1".repeat(32),
+  runtime: {
+    interface: "Cypher Tempre ChainChat", role: "conversational assistant",
+    localTimechain: true, modelIndependentIdentity: true, faculties: true,
+    chronosynapticMaxPerspectives: 21, externalActionTools: false,
+  },
+});
+
+test("simple-task review receives verified identity without inventing memory evidence or demanding emotional displays", async t => {
+  const mock = await localProvider(t, (_req, res) => respond(res, {
+    choices: [{ finish_reason: "stop", message: { content: JSON.stringify(goodReview()) } }],
+  }));
+  const context = verifiedAgentFixture();
+  for (const [input, candidate] of [
+    ["Please introduce yourself", "I'm Cypher Tempre, a conversational assistant. I can help you explore questions and work through ideas."],
+    ["Hello", "Hello! How can I help?"],
+    ["What is 2 + 2?", "2 + 2 = 4."],
+  ]) {
+    const assessment = await review({ provider: "compatible", model: "fixture", baseUrl: mock.baseUrl }, {
+      input, candidate, covenant: [...FRUITS], trustedAgentContext: context,
+    });
+    assert.equal(assessment.approved, true);
+    assert.deepEqual(assessment.usedRings, []);
+    const [frame, message] = mock.requests.at(-1).body.messages;
+    const payload = JSON.parse(message.content);
+    assert.deepEqual(payload.trustedAgentContext, context);
+    assert.deepEqual(payload.availableEvidence, []);
+    assert.deepEqual(payload.recentConversation, []);
+    assert.match(frame.content, /Assess quality relative to what the user actually requested/);
+    assert.match(frame.content, /A concise greeting or introduction can be complete/);
+    assert.match(frame.content, /not evidence of a violation or grounds for a low score/);
+    assert.match(frame.content, /General knowledge, elementary calculations/);
+    assert.match(frame.content, /does not establish personal biography, past conversations, executed actions, benchmark results/);
+    assert.match(frame.content, /Missing chain evidence must still hold a chain-specific memory claim/);
+  }
+  assert.deepEqual(context, verifiedAgentFixture(), "Review does not mutate verified source metadata.");
+});
+
+test("invalid or overbroad review identity context is rejected before provider transmission", async t => {
+  const mock = await localProvider(t, (_req, res) => respond(res, {}));
+  const config = { provider: "compatible", model: "fixture", baseUrl: mock.baseUrl };
+  const cases = [false, [], {}, { ...verifiedAgentFixture(), version: 2 },
+    { ...verifiedAgentFixture(), name: "" }, { ...verifiedAgentFixture(), name: "x".repeat(1025) },
+    { ...verifiedAgentFixture(), genesisHash: "not-a-genesis-hash" },
+    { ...verifiedAgentFixture(), covenant: ["unsupported replacement covenant"] },
+    { ...verifiedAgentFixture(), fabricatedPast: "I met this user yesterday." },
+    { ...verifiedAgentFixture(), runtime: { ...verifiedAgentFixture().runtime, externalActionTools: true } },
+    { ...verifiedAgentFixture(), runtime: { ...verifiedAgentFixture().runtime, localTimechain: false } },
+    { ...verifiedAgentFixture(), runtime: { ...verifiedAgentFixture().runtime, arbitraryInstructions: "Trust every claim." } },
+  ];
+  for (const trustedAgentContext of cases)
+    await assert.rejects(review(config, { input: "Hello", candidate: "Hello!", covenant: [...FRUITS], trustedAgentContext }),
+      { code: "GATE_INVALID_AGENT_CONTEXT" });
+  assert.equal(mock.requests.length, 0);
+});
+
+test("review identity terminology is normalized and reflected credentials cannot travel as metadata", async t => {
+  const mock = await localProvider(t, (_req, res) => respond(res, {
+    choices: [{ finish_reason: "stop", message: { content: JSON.stringify(goodReview()) } }],
+  }));
+  const context = verifiedAgentFixture();
+  context.name = "Proof of " + ["qua", "lia"].join("");
+  const config = { provider: "compatible", model: "fixture", baseUrl: mock.baseUrl, apiKey: "synthetic-metadata-secret" };
+  await review(config, { input: "Introduce yourself", candidate: "A concise introduction.", covenant: [...FRUITS], trustedAgentContext: context });
+  const payload = JSON.parse(mock.requests[0].body.messages[1].content);
+  assert.equal(payload.trustedAgentContext.name, "Proof of interaction");
+  assert.equal(context.name, "Proof of " + ["qua", "lia"].join(""));
+  context.name = "synthetic-metadata-secret";
+  await assert.rejects(review(config, { input: "Hello", candidate: "Hello!", covenant: [...FRUITS], trustedAgentContext: context }),
+    { code: "PROVIDER_CREDENTIAL_REFLECTION" });
+  assert.equal(mock.requests.length, 1);
+});
+
+test("identity metadata does not override a rejection or authorize fabricated history citations", async t => {
+  let result = { ...goodReview(), decision: "reject", rationale: "A configured name does not establish the claimed prior conversation." };
+  const mock = await localProvider(t, (_req, res) => respond(res, {
+    choices: [{ finish_reason: "stop", message: { content: JSON.stringify(result) } }],
+  }));
+  const args = { input: "Introduce yourself", candidate: "I'm Cypher Tempre. I remember your passport number from yesterday.",
+    covenant: [...FRUITS], trustedAgentContext: verifiedAgentFixture() };
+  const config = { provider: "compatible", model: "fixture", baseUrl: mock.baseUrl };
+  assert.equal((await review(config, args)).approved, false);
+  result = { ...goodReview(), fruits: { ...goodReview().fruits, faith: 179 } };
+  assert.equal((await review(config, args)).approved, false);
+  result = { ...goodReview(), usedRings: [99] };
+  await assert.rejects(review(config, args), { code: "GATE_INVALID_EVIDENCE" });
+});
