@@ -167,7 +167,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
   let child = null, proxy = null, port = null, proxyPort = null, active = null, queue = Promise.resolve(), startup = null, stopping = null;
   let gatewayToken = secret(), proxyToken = secret(), closed = false;
   let identity = null, nativeClient = null, nativeConnection = null, lastConfiguration = null, pendingOverlay = null;
-  let browserHosts = [], reasoningCapable = false;
+  let browserHosts = [], reasoningCapable = false, capabilitiesInitialized = false;
   const nativeEvents = new Set();
   const status = () => ({ backend: "openclaw", version: OPENCLAW_VERSION, running: Boolean(child && child.exitCode === null && child.signalCode === null),
     localOnly: true, credentials: "session-memory", hostTools: toolsPolicy.deny?.includes("*") ? "disabled" : "scoped-per-invocation" });
@@ -234,6 +234,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     if (child && child.exitCode === null && child.signalCode === null) return status();
     startup = (async () => {
       await stopping;
+      await initializeModelCapabilities();
       if (closed) throw fail("This OpenClaw manager is closed.", "OPENCLAW_CLOSED");
       identity ||= await supervisorIdentity(directory);
       gatewayToken = identity.gatewayToken; proxyToken = identity.proxyToken;
@@ -410,9 +411,25 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     if (closed) return Promise.reject(fail('This OpenClaw manager is closed.', 'OPENCLAW_CLOSED'));
     const operation = queue.then(callback); queue = operation.catch(() => {}); return operation;
   }
+  async function initializeModelCapabilities() {
+    if (capabilitiesInitialized) return;
+    const file = path.join(directory, 'model-capabilities.json');
+    try {
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1 || stat.size > 1000 || process.platform !== 'win32' && (stat.mode & 0o077))
+        throw fail('The private model capability setting requires local inspection.', 'OPENCLAW_CONFIG_REJECTED');
+      const value = JSON.parse(await fs.readFile(file, 'utf8'));
+      if (value.version !== 1 || typeof value.reasoning !== 'boolean') throw fail('The saved model capability setting is invalid.', 'OPENCLAW_CONFIG_REJECTED');
+      reasoningCapable = value.reasoning;
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    capabilitiesInitialized = true;
+  }
   async function synchronizeModelCapabilities(capabilities) {
+    await initializeModelCapabilities();
     if (typeof capabilities?.reasoning !== 'boolean' || capabilities.reasoning === reasoningCapable) return;
     reasoningCapable = capabilities.reasoning;
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    await atomicJson(path.join(directory, 'model-capabilities.json'), { version: 1, reasoning: reasoningCapable });
     await stopChild();
   }
   async function nativeTurn(params, controller, { allowEmptyFinal = false } = {}) {
@@ -487,10 +504,8 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     // Keep strict hostname navigation closed until a managed browser network
     // adapter exists; allowedHostnames would otherwise trust private addresses.
     const desiredBrowserHosts = [];
-    const desiredReasoning = context.modelCapabilities?.reasoning === true;
-    if (JSON.stringify(desiredBrowserHosts) !== JSON.stringify(browserHosts) || desiredReasoning !== reasoningCapable) {
-      browserHosts = desiredBrowserHosts; reasoningCapable = desiredReasoning; await stopChild();
-    }
+    await synchronizeModelCapabilities(context.modelCapabilities);
+    if (JSON.stringify(desiredBrowserHosts) !== JSON.stringify(browserHosts)) { browserHosts = desiredBrowserHosts; await stopChild(); }
     checkSignal(args.signal); await start(); checkSignal(args.signal);
     const invocationId = randomUUID();
     const native = args.nativeControl;
@@ -502,6 +517,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     const selected = context.nativeIdentity ? await controls.session(context.nativeIdentity) : null;
     const inherited = selected?.entry ? Object.fromEntries(NATIVE_PREFERENCES.filter(key => selected.entry[key] !== undefined)
       .map(key => [key, selected.entry[key]])) : {};
+    if (!reasoningCapable && !['off', 'ultra'].includes(inherited.thinkingLevel)) delete inherited.thinkingLevel;
     const controller = new AbortController();
     const ownNativeGoal = native && context.nativeIdentity && context.purpose === 'candidate' &&
       native.sessionKey === controlSessionKey(context.nativeIdentity) &&
@@ -521,7 +537,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       checkSignal(args.signal);
       if (Object.keys(inherited).length && !native) await nativeRpc('sessions.patch', { key: sessionKey, ...inherited });
       if (native) {
-        await nativeRpc('sessions.patch', { key: sessionKey, model: `${PROVIDERS[config.provider].id}/route`, ...inherited });
+        await nativeRpc('sessions.patch', { key: sessionKey, model: `${PROVIDERS[config.provider].id}/route` });
         const generated = await nativeTurn({ sessionKey, message: args.messages.at(-1).content, idempotencyKey: native.goalOperation?.operationId || invocationId,
           deliver: false, ...(native.intent ? { intent: native.intent } : {}), ...(native.goalOperation ? { goalOperation: native.goalOperation } : {}) }, controller);
         responseComplete = true; assertCredentialIsolation(config, generated);

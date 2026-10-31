@@ -128,10 +128,22 @@ class PortableInstallerGuards(unittest.TestCase):
     @unittest.skipUnless(os.name == 'posix', 'POSIX permission ownership guard')
     def test_existing_public_writable_installation_root_is_refused(self):
         with tempfile.TemporaryDirectory(prefix='ct-posix-permissions-') as temporary:
-            directory = Path(temporary) / 'shared'; directory.mkdir(); directory.chmod(0o777)
+            # macOS exposes its temporary root through the /var system alias.
+            # Test permissions on a canonical path; alias rejection is separate.
+            directory = Path(temporary).resolve() / 'shared'; directory.mkdir(); directory.chmod(0o777)
             with self.assertRaises(ValueError): installer.checked_root(directory)
             directory.chmod(0o700)
             self.assertEqual(installer.checked_root(directory), directory.resolve())
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX symbolic-link ownership guard')
+    def test_symlinked_installation_root_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix='ct-posix-alias-') as temporary:
+            base = Path(temporary).resolve()
+            actual = base / 'actual'; actual.mkdir(mode=0o700)
+            marker = actual / 'preserved'; marker.write_text('preserved', encoding='utf-8')
+            alias = base / 'alias'; alias.symlink_to(actual, target_is_directory=True)
+            with self.assertRaises(ValueError): installer.checked_root(alias)
+            self.assertEqual(marker.read_text(encoding='utf-8'), 'preserved')
 
 
 if __name__ == '__main__': unittest.main()

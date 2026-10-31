@@ -34,8 +34,10 @@ test('real native goals, settings, scoped tools and durable app restarts retain 
       model: 'fixture-model', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     if (toolPlan && !toolReturned) {
       toolReturned = true;
+      const names = new Set((body.tools || []).map(tool => tool.function?.name || tool.name));
+      const deferred = !names.has(toolPlan.name) && names.has('tool_call');
       chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'tool-fixture-' + requests.length, type: 'function',
-        function: { name: toolPlan.name, arguments: JSON.stringify(toolPlan.params) } }] });
+        function: { name: deferred ? 'tool_call' : toolPlan.name, arguments: JSON.stringify(deferred ? { id: toolPlan.name, args: toolPlan.params } : toolPlan.params) } }] });
       response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
         choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\n`);
     } else {
@@ -129,8 +131,19 @@ test('real native goals, settings, scoped tools and durable app restarts retain 
     assert.ok(events.some(event => event.status === 'held' && event.label.includes('read')));
     lowFruit = false; toolPlan = { name: 'update_goal', params: { status: 'complete', note: 'The requested fixture introduction was delivered and verified.' } }; toolReturned = false;
     const completePlan = await manager.executeCommand({ ...identity, command: '/goal resume' });
+    const beforeGoalTool = requests.length, beforeGoalReview = reviews.length;
     assert.equal((await generate(completePlan.message, completePlan.native)).text, answer);
-    assert.equal((await manager.sessionControls(identity)).goal.status, 'complete', 'The real native model-side goal tool must complete its own goal.');
+    assert.equal((await manager.sessionControls(identity)).goal.status, 'complete', 'The real native model-side goal tool must complete its own goal. ' + JSON.stringify({
+      tools: requests[beforeGoalTool]?.body.tools?.map(tool => tool.function?.name || tool.name),
+      results: requests.slice(beforeGoalTool).flatMap(request => (request.body.messages || []).filter(message => message.role === 'tool')).slice(-2),
+      reviews: reviews.slice(beforeGoalReview).filter(candidate => candidate.includes('proposed-host-tool-action')).map(candidate => candidate.slice(0, 2000)),
+      activity: events.slice(-12),
+    }));
+    reasoningCapable = false; toolPlan = null;
+    const beforeModelSwitch = requests.length;
+    assert.equal((await generate('Please introduce yourself using the new non-reasoning model', { kind: 'message', sessionKey: state.sessionKey })).text, answer);
+    assert.equal(requests.slice(beforeModelSwitch).some(request => request.body.reasoning_effort === 'high'), false,
+      'Switching to a non-reasoning model must clamp the previous high effort instead of holding a simple introduction.');
     const walk = async directory => { for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name); if (entry.isDirectory()) await walk(file);
       else if (entry.isFile()) assert.equal((await fs.readFile(file)).includes(Buffer.from('isolated-fixture-provider-key')), false, file);
