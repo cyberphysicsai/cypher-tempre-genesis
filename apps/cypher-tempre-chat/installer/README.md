@@ -23,6 +23,15 @@ state, OpenClaw state and local operator approval authority; selected existing
 Timechains stay at their original paths. Setup never deletes or rewrites those
 directories. It checks the staged installation before changing `current.json`.
 
+Custom Windows installation roots must be **120 characters or fewer**, after
+resolving the full path. Setup rejects longer roots before creating installation
+files: the pinned upstream model-catalog worker has a Windows temporary-path
+length limit. Keep the default location or choose a shorter dedicated directory.
+For Windows source runs, also keep `CT_CHAT_DATA` short rather than storing runtime
+state beneath a deeply nested checkout; for example, set it to
+`%LOCALAPPDATA%\CypherTempre\ChainChat-dev`. Preserve existing native state and
+Timechains when diagnosing startup; deleting ownership leases is not a repair.
+
 Setup creates a Start Menu launch shortcut and a previous-version shortcut. The
 launcher starts the selected release's gateway and UI through
 `openclaw/launcher.mjs` and opens the local application automatically. Users do
@@ -95,6 +104,6 @@ missing-origin resume attempts. Test credentials stay in process memory.
 The installed frontend policy must allow bootstrap and read-only audit before
 wallet verification while keeping model operations behind the holdings gate.
 
-Only Windows x64 has an installer in this release. Source deployment on other
-platforms still needs their supported Node/Python runtimes; no untested macOS or
-Linux one-click installer is claimed.
+macOS and Linux packages and their isolated native acceptance procedure are
+described in [POSIX.md](POSIX.md). Platform execution support is established by
+the corresponding native CI acceptance result.

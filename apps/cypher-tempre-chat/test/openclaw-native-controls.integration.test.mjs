@@ -24,7 +24,7 @@ test('real native goals, settings, scoped tools and durable app restarts retain 
   const inspected = await engine({ op: 'inspect', root, learning: false });
   const identity = { agentId: 'native-test', genesisHash: inspected.genesis.hash };
   const answer = "Hello! I'm NativeControlFixture. I can help with care, patience and honesty.";
-  let toolPlan = null, toolReturned = false, lowFruit = false, reasoningCapable = false;
+  let toolPlan = null, toolReturned = false, lowFruit = false, reasoningCapable = false, canonicalGoalEvidence = null;
   const requests = [], events = [], reviews = [], diagnostics = [];
   const upstream = http.createServer(async (request, response) => {
     let raw = ''; for await (const part of request) raw += part;
@@ -52,7 +52,8 @@ test('real native goals, settings, scoped tools and durable app restarts retain 
     reviews.push(args.candidate);
     const action = args.candidate.includes('proposed-host-tool-action');
     return { approved: true, scores: Object.fromEntries(DIMENSIONS.map(key => [key, 240])),
-      fruitages: Object.fromEntries(FRUITS.map(key => [key, action && lowFruit ? 20 : 240])), usedRings: [],
+      fruitages: Object.fromEntries(FRUITS.map(key => [key, action && lowFruit ? 20 : 240])),
+      usedRings: action && args.candidate.includes('update_goal') && args.availableEvidence?.some(ring => ring.index === canonicalGoalEvidence) ? [canonicalGoalEvidence] : [],
       rationale: 'Supported fixture identity, exact scoped local action and covenant-compatible answer.' };
   } });
   let broker = makeBroker(); await broker.start();
@@ -78,7 +79,17 @@ test('real native goals, settings, scoped tools and durable app restarts retain 
     let state = await manager.describeControls(identity);
     assert.ok(state.schema.schema); assert.equal(state.session, null);
     const plan = await manager.executeCommand({ ...identity, command: '/goal start Please introduce yourself' });
-    assert.equal((await generate(plan.message, plan.native)).text, answer);
+    const introduced = await generate(plan.message, plan.native);
+    assert.equal(introduced.text, answer); assert.equal(introduced.enforcement.reviewed, true);
+    // The real UI seals an approved exchange before any later goal turn. Give
+    // this direct-manager fixture the same canonical completion evidence.
+    const scores = Object.fromEntries(DIMENSIONS.map(key => [key, 240]));
+    const assessment = { approved: true, scores, fruitages: Object.fromEntries(FRUITS.map(key => [key, 240])), usedRings: [],
+      rationale: 'The actual native-approved fixture introduction is supported by its verified genesis identity.' };
+    const committed = await engine({ op: 'commit', root, expectedHead: introduced.enforcement.expectedHead,
+      exchanges: [{ input: plan.message, output: introduced.text, scores, assessment, usedRings: [], loadout: [],
+        model: { provider: 'compatible', model: 'fixture-model' } }], loadout: [], learning: false, growth: false });
+    assert.equal(committed.accepted, true); canonicalGoalEvidence = committed.ring.index;
     state = await manager.sessionControls(identity);
     const goalId = state.goal.id;
     assert.equal(state.goal.status, 'active');

@@ -27,6 +27,7 @@ export const CONTROL_GUARDS = Object.freeze({
   'browser.noSandbox': 'Native Chromium sandbox protection remains enabled.',
   'tools.web.fetch.maxRedirects': 'Fetch redirects remain disabled to preserve the exact requested-host grant.',
   'tools.web.fetch.ssrfPolicy': 'Upstream DNS and private-network protections remain enabled.',
+  'tools.toolSearch': 'The managed direct tool surface preserves exact per-action PoI enforcement without a generic dispatcher grant.',
   channels: 'External channels require a managed admission adapter and explicit authorization.',
   cron: 'Scheduled actions require a managed admission adapter and explicit authorization.',
   hooks: 'External hooks require a managed admission adapter and explicit authorization.',
@@ -61,7 +62,7 @@ export const CONTROL_COMMANDS = Object.freeze([
   ['tools', 'Inspect native effective tool policy and current managed action authority.', 'system'],
   ['queue', 'Read or set the selected native session queue policy.', 'native'],
   ['context', 'Read the actual native context assembly report: list/detail/map/json.', 'native'],
-  ['compact', 'Compact the selected native transcript; Timechain rings remain intact.', 'native'],
+  ['compact', 'Model compaction requires a managed summary admission adapter.', 'guarded'],
   ['new', 'Reset native conversation context; the Timechain is preserved.', 'native'],
   ['reset', 'Reset native conversation context; the Timechain is preserved.', 'native'],
   ['stop', 'Cancel the current ChainChat operation.', 'host'],
@@ -214,11 +215,6 @@ export function createNativeControls({ rpc, getRuntime, readOverlay, saveOverlay
     if (name === 'new' || name === 'reset') {
       const result = await rpc('sessions.reset', { key: target.key, reason: name, ...expected });
       return { kind: 'system', text: 'Native session context reset. The paired Timechain is unchanged.', state: result };
-    }
-    if (name === 'compact') {
-      if (text) throw fail('The pinned native compaction RPC does not accept custom instructions.');
-      const result = await rpc('sessions.compact', { key: target.key });
-      return { kind: 'system', text: JSON.stringify(result), state: result };
     }
     if (name === 'name') {
       if (!text) return { kind: 'system', text: target.entry?.label || 'No explicit native session name is set.' };

@@ -23,8 +23,8 @@ using FileStream = CypherTempreInstaller.LongFileStream;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName=".NET Framework 4.8")]
 
 namespace CypherTempreInstaller {
-  // Use the Windows extended path namespace for filesystem calls, so installation
-  // works in deep user folders without changing the machine's LongPathsEnabled setting.
+  // Extended paths support dependency extraction without changing machine settings.
+  // The upstream runtime's temporary-directory calls still need a bounded install root.
   static class LongPaths {
     public static string Extend(string value) {
       if(value == null || value.StartsWith("\\\\?\\",StringComparison.Ordinal)) return value;
@@ -157,6 +157,7 @@ namespace CypherTempreInstaller {
     const string Product = "cypher-tempre-chainchat";
     const long MaxArchiveBytes = 1024L * 1024 * 1024;
     const long MaxExpandedBytes = 4L * 1024 * 1024 * 1024;
+    const int MaxRootPathLength = 120;
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
     static Action<string> Write = delegate {};
     static string installLog;
@@ -165,6 +166,7 @@ namespace CypherTempreInstaller {
       if (String.IsNullOrWhiteSpace(raw) || raw.Length < 3 || !Char.IsLetter(raw[0]) || raw[1] != ':' || (raw[2] != '\\' && raw[2] != '/') || raw.StartsWith("\\\\")) throw new InvalidOperationException("Choose an absolute local installation directory.");
       string root = Path.GetFullPath(raw).TrimEnd(Path.DirectorySeparatorChar);
       if (root.Length < 8 || root.Equals(Path.GetPathRoot(root).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("The installation directory cannot be a drive root.");
+      if (root.Length > MaxRootPathLength) throw new InvalidOperationException("The upstream OpenClaw Windows temporary-path limit requires an installation directory of 120 characters or fewer. Choose a shorter location, such as the default %LOCALAPPDATA%\\CypherTempre\\ChainChat.");
       foreach (Environment.SpecialFolder special in new [] {Environment.SpecialFolder.Windows, Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86, Environment.SpecialFolder.UserProfile}) {
         string protectedPath = Environment.GetFolderPath(special);
         if (!String.IsNullOrEmpty(protectedPath) && (root.Equals(protectedPath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) ||
@@ -472,6 +474,12 @@ namespace CypherTempreInstaller {
       if(ArchivePath(root,"pkg/file.txt","pkg/") != Path.Combine(root,"file.txt")) throw new Exception("Valid archive path changed.");
       if(Sha256Bytes(Encoding.ASCII.GetBytes("abc")) != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") throw new Exception("Hash check failed.");
       bool relativeRefused=false; try {ValidateRoot("C:relative");} catch(InvalidOperationException) {relativeRefused=true;} if(!relativeRefused) throw new Exception("Drive-relative installation path was accepted.");
+      string boundary=Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))+new string('p',85)+Guid.NewGuid().ToString("N");
+      bool boundaryExisted=Directory.Exists(boundary);
+      if(boundary.Length != MaxRootPathLength || ValidateRoot(boundary) != boundary || Directory.Exists(boundary) != boundaryExisted) throw new Exception("The supported installation path boundary changed or validation wrote a directory.");
+      string tooLong=boundary+"p"; bool tooLongExisted=Directory.Exists(tooLong),tooLongRefused=false;
+      try {ValidateRoot(tooLong);} catch(InvalidOperationException error) {tooLongRefused=error.Message.Contains("temporary-path limit") && error.Message.Contains("shorter location");}
+      if(!tooLongRefused || Directory.Exists(tooLong) != tooLongExisted) throw new Exception("An unsupported deep installation path was accepted or validation wrote a directory.");
       if(Assembly.GetExecutingAssembly().GetManifestResourceInfo("font.ttf") != null) using(InstallForm form=new InstallForm(new Options())) { if(form.Font.FontFamily.Name.IndexOf("Orbitron",StringComparison.OrdinalIgnoreCase) < 0) throw new Exception("Bundled Orbitron font did not load."); }
       Directory.CreateDirectory(root);
       try {

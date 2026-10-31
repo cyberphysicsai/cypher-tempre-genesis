@@ -274,7 +274,8 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
           http: { endpoints: { chatCompletions: { enabled: true } } } },
         agents: { defaults: { workspace, skipBootstrap: true, model: { primary: "chainchat-compatible/route" },
           heartbeat: { every: "0m" }, maxConcurrent: 1 } },
-        tools: mergeControlOverlay(toolsPolicy, { web: { fetch: { maxRedirects: 0, ssrfPolicy: { dangerouslyAllowPrivateNetwork: false } } } }),
+        tools: mergeControlOverlay(toolsPolicy, { toolSearch: false,
+          web: { fetch: { maxRedirects: 0, ssrfPolicy: { dangerouslyAllowPrivateNetwork: false } } } }),
         browser: { enabled: true, evaluateEnabled: false, defaultProfile: 'openclaw', attachOnly: false, noSandbox: false,
           ssrfPolicy: { dangerouslyAllowPrivateNetwork: false, allowedHostnames: browserHosts }, profiles: { openclaw: { cdpPort: identity.browserPort } } },
         models: { mode: "replace", catalogRefresh: { enabled: false }, providers },
@@ -521,9 +522,20 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     const controller = new AbortController();
     const ownNativeGoal = native && context.nativeIdentity && context.purpose === 'candidate' &&
       native.sessionKey === controlSessionKey(context.nativeIdentity) &&
-      (selected?.entry?.goal?.status === 'active' || native.intent?.kind === 'session-goal-start' || native.goalOperation?.action === 'resume');
+      (selected?.entry?.goal || native.intent?.kind === 'session-goal-start' || native.goalOperation?.action === 'resume');
     const registeredContext = { ...context,
       goalAuthority: ownNativeGoal ? { enabled: true, sessionKey, ...(selected?.entry?.goal?.id ? { goalId: selected.entry.goal.id } : {}) } : undefined,
+      readNativeGoal: ownNativeGoal ? async () => {
+        const current = await nativeRpc('sessions.describe', { key: sessionKey, includeDerivedTitles: false, includeLastMessage: false });
+        const goal = current.session?.goal;
+        if (!goal || typeof goal.id !== 'string' || goal.id.length > 512 || typeof goal.objective !== 'string' ||
+            goal.objective.length < 1 || goal.objective.length > 16000 ||
+            !['active', 'paused', 'complete', 'blocked', 'budget_limited', 'usage_limited'].includes(goal.status) ||
+            selected?.entry?.goal?.id && goal.id !== selected.entry.goal.id)
+          throw fail('The selected native goal changed before action review.', 'OPENCLAW_GOAL_SCOPE_DENIED', 409);
+        const snapshot = { id: goal.id, objective: goal.objective, status: goal.status };
+        assertCredentialIsolation(config, snapshot); return snapshot;
+      } : undefined,
       toolProtectedRoots: [...new Set([directory, upstream, plugin, ...(context.toolProtectedRoots || [])])] };
     const claim = await broker.registerInvocation({ config, args, context: registeredContext, sessionKey, invocationId });
     if (!claim || typeof claim.claimId !== "string" || claim.sessionKey !== sessionKey)

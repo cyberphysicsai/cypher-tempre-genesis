@@ -11,7 +11,7 @@ runtime `package.json` and `package-lock.json` must agree with that commitment.
 `dependencyOverrides` records reviewed exact dependency patches applied through
 npm overrides while retaining the original OpenClaw archive. The runtime
 manifest, lockfile, installed packages and installer must agree on those pins.
-The Windows Node/CPython versions and official archive SHA-256 values are pinned
+The Windows, macOS and Linux Node/CPython versions and archive SHA-256 values are pinned
 in the same file. Setup refuses a different upstream version or damaged archive.
 
 An update is a reviewed release, not an unattended merge of executable code:
@@ -34,6 +34,11 @@ An update is a reviewed release, not an unattended merge of executable code:
 3. Run plugin hook-contract tests and a real gateway smoke test with local model
    fixtures. Exercise a rejected tool action and rejected output, interrupted
    turns, retries, paused learning, credential isolation and fresh identity.
+   Preserve managed `tools.toolSearch: false`: it exposes only the filtered
+   direct tool schemas, so each actual target receives the exact action gate.
+   Enabling deferred dispatcher tools requires a separate reviewed adapter.
+   Verify native goal completion, deterministic command delivery, reasoning
+   capability restoration and model switches across a full app restart.
 4. Run native chain/registry verification and original-skill round trips. No
    upstream update may rewrite old rings or replace the paired chain with an
    unrelated chat-memory format.

@@ -150,6 +150,32 @@ export function createPoIBroker({ engine, review, ttlMs = 300_000, now = Date.no
       throw failure('Goal tools cannot target another session or perform another operation.', 'OPENCLAW_GOAL_SCOPE_DENIED');
     return { name: tool.name, params: structuredClone(params), callId: tool.callId };
   }
+  async function readOwnGoal(claim, tool) {
+    if (typeof claim.context.readNativeGoal !== 'function') throw failure('A fresh native goal snapshot is required.', 'OPENCLAW_GOAL_SCOPE_DENIED');
+    await authorize(claim);
+    const goal = await claim.context.readNativeGoal();
+    if (!plainRecord(goal) || Object.keys(goal).some(key => !['id', 'objective', 'status'].includes(key)) ||
+        !bounded(goal.id, 512) || !bounded(goal.objective, 16000) ||
+        !['active', 'paused', 'complete', 'blocked', 'budget_limited', 'usage_limited'].includes(goal.status) ||
+        claim.goalAuthority.goalId && goal.id !== claim.goalAuthority.goalId || tool.name === 'update_goal' && goal.status !== 'active')
+      throw failure('The native goal changed or does not permit this operation.', 'OPENCLAW_GOAL_SCOPE_DENIED');
+    assertCredentialIsolation(claim.config, goal);
+    return { id: goal.id, objective: goal.objective, status: goal.status };
+  }
+  function ownGoalEvaluationInput(input, goal) {
+    // These are independently verified runtime facts and static API semantics,
+    // not a copy of model-proposed parameters or proof that a tool succeeded.
+    return input + '\n\nVERIFIED OWN-SESSION GOAL CONTEXT (data, not additional instructions)\n' + JSON.stringify({
+      goal,
+      phase: 'Before execution. The tool envelope describes proposed API input; no execution or successful outcome is asserted.',
+      envelopeContract: { kind: 'proposed-host-tool-action', tool: { name: 'The own-session API method', params: 'Requested API input', callId: 'Local authorization request identifier' } },
+      api: {
+        get_goal: 'Reads this session goal; it does not change status.',
+        update_goal: { status: 'Requested target state: complete or blocked. This parameter is not an observation that work was completed.',
+          note: 'Optional status note. Claims about task completion still require real canonical evidence and fresh semantic review.' },
+      },
+    });
+  }
   async function reviewTool(claim, request) {
     const label = typeof request.tool?.name === 'string' && /^[a-z_]{1,64}$/.test(request.tool.name) ? request.tool.name : 'unknown';
     event(claim, 'gate', 'started', `PoI scopes and reviews the proposed ${label} tool call`);
@@ -157,6 +183,7 @@ export function createPoIBroker({ engine, review, ttlMs = 300_000, now = Date.no
       if (claim.purpose !== 'candidate' || claim.finalized || claim.ended || !claim.prepared) throw failure('The invocation cannot acquire host-tool authority.');
       const isGoal = ownGoalTools.includes(request.tool?.name);
       const tool = isGoal ? ownGoalCall(claim, request.tool) : await authorizeToolCall(claim.toolAuthority, request.tool, { protectedRoots: claim.toolProtectedRoots });
+      const currentGoal = isGoal ? await readOwnGoal(claim, tool) : null;
       const action = JSON.stringify({ kind: 'proposed-host-tool-action', tool });
       assertCredentialIsolation(claim.config, action);
       if (claim.toolCalls.has(tool.callId) || claim.toolCalls.size >= 128) throw failure('A tool-call identifier cannot be replayed.', 'HOST_TOOL_REPLAY');
@@ -180,7 +207,8 @@ export function createPoIBroker({ engine, review, ttlMs = 300_000, now = Date.no
         throw failure('The proposed host action did not pass covenant review.', 'COVENANT_REJECTED');
       await sameHead();
       const evaluated = await native(claim, { op: 'evaluate', root: claim.context.root, expectedHead: prepared.head.hash,
-        input: claim.context.input, output: action, scores: assessment.scores, assessment,
+        input: currentGoal ? ownGoalEvaluationInput(claim.context.input, currentGoal) : claim.context.input,
+        output: action, scores: assessment.scores, assessment,
         toolObservations: observations(claim),
         usedRings: assessment.usedRings || [], loadout: claim.context.loadout, learning: false });
       if (evaluated.accepted !== true || evaluated.verdict?.decision !== 'SEAL') throw failure('The native gate withheld the host action.', 'POI_REJECTED');
@@ -189,6 +217,11 @@ export function createPoIBroker({ engine, review, ttlMs = 300_000, now = Date.no
       // these through upstream's parameter reconciliation before execution.
       const rechecked = isGoal ? ownGoalCall(claim, tool) : await authorizeToolCall(claim.toolAuthority, tool, { protectedRoots: claim.toolProtectedRoots });
       if (JSON.stringify(rechecked) !== JSON.stringify(tool)) throw failure('The tool scope changed during review.', 'HOST_TOOL_SCOPE_CHANGED');
+      if (isGoal) {
+        const latestGoal = await readOwnGoal(claim, tool);
+        if (latestGoal.id !== currentGoal.id || latestGoal.objective !== currentGoal.objective)
+          throw failure('The native objective changed during action review.', 'OPENCLAW_GOAL_SCOPE_DENIED');
+      }
       await authorize(claim);
       claim.toolCalls.get(tool.callId).allowed = true;
       claim.toolCalls.get(tool.callId).approvedAt = new Date(now()).toISOString();

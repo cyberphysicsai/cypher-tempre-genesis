@@ -114,6 +114,7 @@ async function brokerFixture(t, options = {}) {
   const sessionKey = options.goals && !options.scratch ? `agent:main:chainchat-control:${'a'.repeat(64)}` : 'agent:main:fixture';
   const context = { root: f.secret, input: 'Read my notes.', loadout: [], purpose: options.plain ? 'plain' : options.utility ? 'utility' : 'candidate', toolAuthority: options.disabled ? undefined : f.grant,
     goalAuthority: options.goalAuthority || (options.goals ? { enabled: true, sessionKey, goalId: 'goal-one' } : undefined),
+    readNativeGoal: options.goals ? async () => ({ id: 'goal-one', objective: 'Read my notes.', status: 'active' }) : undefined,
     toolProtectedRoots: [f.secret], event: (...args) => events.push(args), authorize: async () => { authorizations++; if (options.revoked?.()) throw new Error('Revoked'); } };
   await broker.registerInvocation({ context, config, args: { messages: [{ role: 'user', content: context.input }] }, sessionKey, invocationId: 'fixture' });
   const request = async (op, fields = {}) => {
