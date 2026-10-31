@@ -15,11 +15,20 @@ directories. It checks the staged installation before changing `current.json`.
 
 Setup creates a Start Menu launch shortcut and a previous-version shortcut. The
 launcher starts the selected release's gateway and UI through
-`openclaw/launcher.mjs`. The first installation needs Internet access to download
+`openclaw/launcher.mjs` and opens the local application automatically. Users do
+not start a separate bridge or install the skill, Node or Python themselves.
+Setup waits for the owned runtime's authenticated readiness check before
+reporting success; reopening the Start Menu shortcut reuses that running
+instance. API/model selection, wallet verification, and choosing a new or
+existing Timechain remain explicit user controls.
+The first installation needs Internet access to download
 the pinned runtimes and locked npm packages. A failed check keeps the previously
 selected release; `install.log` remains for local diagnosis. Re-run a repaired
 installer to retry. Incomplete releases are retained rather than silently
 overwritten. There is no automatic deletion of old releases or user data.
+If startup fails, including when another program holds the configured port,
+setup shows a safe message pointing to `data/launcher.log`; quiet mode returns
+nonzero JSON instead of reporting success. It never stops an unrelated program.
 
 The source-built executable is **not Authenticode-signed**. Distribution signing
 requires a publisher certificate and is separate from the included SHA-256 and
@@ -32,7 +41,7 @@ beside the executable.
 Build on Windows after producing the sanitized Git-based application ZIP:
 
 ```powershell
-python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.7.0.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.7.0-windows-x64.exe
+python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.7.1.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe
 ```
 
 The .NET Framework compiler consumes the C# source, Windows manifest and font
@@ -51,7 +60,7 @@ Use a dedicated empty test directory, suppress launch/shortcuts, and capture the
 result without touching the current user's actual installation:
 
 ```powershell
-.\CypherTempre-ChainChat-Setup-0.7.0-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
+.\CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
 ```
 
 `--cache-dir` may name a directory containing the exact official Node/CPython ZIP
@@ -66,8 +75,15 @@ For the complete isolated acceptance sequence, run `acceptance_windows.py` with
 twice, verifies an existing synthetic chain and user-data sentinel remain
 byte-identical, briefly starts the installed launcher with a random local port
 and no browser, checks the OpenClaw backend status, stops only that owned runtime
-through its authenticated control, rejects a tampered candidate, and exercises
+through its authenticated control, confirms reopening reuses the same instance,
+confirms an occupied port returns failure while preserving the unrelated
+listener, rejects a tampered candidate, and exercises
 the rollback path. The test installation is retained for inspection.
+It also authenticates the local UI from the launch nonce, resumes the same
+session with a rotated ticket, and rejects replay, hosted-origin and
+missing-origin resume attempts. Test credentials stay in process memory.
+The installed frontend policy must allow bootstrap and read-only audit before
+wallet verification while keeping model operations behind the holdings gate.
 
 Only Windows x64 has an installer in this release. Source deployment on other
 platforms still needs their supported Node/Python runtimes; no untested macOS or

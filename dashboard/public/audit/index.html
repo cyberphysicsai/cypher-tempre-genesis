@@ -51,6 +51,12 @@ npm run bridge</code></pre>
       </section>
 
       <section id="dashboard" class="dashboard hidden">
+        <section id="embeddedAuditNotice" class="band hidden" aria-live="polite">
+          <h2>Paired agent · read-only audit</h2>
+          <p>No separate connection is required. This view uses your active ChainChat agent; credentials stay in the parent interface.</p>
+          <p id="embeddedAuditStatus">Reading the selected local Timechain…</p>
+          <p>Search filters the current ring page. Older history and large files remain on your machine; the standalone auditor remains available for advanced operations.</p>
+        </section>
         <header class="topbar">
           <div>
             <p class="eyebrow">Personal Chain Agent</p>
@@ -384,6 +390,10 @@ npm run bridge</code></pre>
               <pre></pre>
             </article>
           </div>
+          <div id="ringPagination" class="filters hidden">
+            <button id="ringPrevious" class="secondary" disabled>Newer rings</button>
+            <button id="ringNext" class="secondary" disabled>Older rings</button>
+          </div>
         </section>
 
         <section class="band">
@@ -392,6 +402,10 @@ npm run bridge</code></pre>
             <span id="blockspaceMeta"></span>
           </div>
           <div id="blockspaceList" class="blob-list"></div>
+          <div id="blockPagination" class="filters hidden">
+            <button id="blockPrevious" class="secondary" disabled>Previous files</button>
+            <button id="blockNext" class="secondary" disabled>Next files</button>
+          </div>
         </section>
       </section>
     </main>

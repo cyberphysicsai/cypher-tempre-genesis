@@ -313,11 +313,55 @@ namespace CypherTempreInstaller {
     static ActiveRelease ReadRelease(string file, string root) {
       RejectLinks(file); ActiveRelease active = Json.Deserialize<ActiveRelease>(File.ReadAllText(file)); ValidateRelease(active, root); return active;
     }
+    static bool OwnedRuntimeReady(ActiveRelease active,out int ownerPid) {
+      ownerPid=0;
+      try {
+        string ownerFile=Child(active.data,"runtime-owner.json");
+        if(!File.Exists(ownerFile) || new FileInfo(LongPaths.Extend(ownerFile)).Length>16384) return false;
+        Dictionary<string,object> owner=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(ownerFile));
+        int port=Convert.ToInt32(owner["port"]),pid=Convert.ToInt32(owner["pid"]);
+        string token=Convert.ToString(owner["token"]),version=Convert.ToString(owner["version"]),appRoot=Convert.ToString(owner["appRoot"]);
+        if(port<1 || port>65535 || pid<1 || token.Length!=64 || token.Any(c=>!((c>='0' && c<='9') || (c>='a' && c<='f'))) ||
+            version!=active.version || !String.Equals(Path.GetFullPath(appRoot).TrimEnd('\\','/'),Path.GetFullPath(active.release).TrimEnd('\\','/'),StringComparison.OrdinalIgnoreCase)) return false;
+        HttpWebRequest request=(HttpWebRequest)WebRequest.Create("http://127.0.0.1:"+port+"/status");
+        request.Proxy=null; request.AllowAutoRedirect=false; request.Timeout=1500; request.ReadWriteTimeout=1500; request.KeepAlive=false;
+        request.Headers[HttpRequestHeader.Authorization]="Bearer "+token;
+        using(HttpWebResponse response=(HttpWebResponse)request.GetResponse()) {
+          if(response.StatusCode!=HttpStatusCode.OK || response.ContentLength>8192) return false;
+          using(StreamReader input=new StreamReader(response.GetResponseStream(),Encoding.UTF8)) {
+            char[] buffer=new char[1024]; int read; StringBuilder body=new StringBuilder();
+            while((read=input.Read(buffer,0,buffer.Length))>0) { if(body.Length+read>8192) return false; body.Append(buffer,0,read); }
+            Dictionary<string,object> status=Json.Deserialize<Dictionary<string,object>>(body.ToString());
+            bool ready=Convert.ToInt32(status["pid"])==pid && Convert.ToString(status["version"])==version;
+            if(ready) ownerPid=pid; return ready;
+          }
+        }
+      } catch { return false; } // A partial ownership write or starting control server is retried.
+    }
     static void Launch(ActiveRelease active, string root) {
       ValidateRelease(active, root);
       ProcessStartInfo info = new ProcessStartInfo(active.node, Quote(Path.Combine(active.release,"openclaw","launcher.mjs"))) { WorkingDirectory = active.release, UseShellExecute = false, CreateNoWindow = true };
       foreach(KeyValuePair<string,string> item in EnvironmentFor(active, root)) info.EnvironmentVariables[item.Key] = item.Value;
-      Process.Start(info);
+      string failure="ChainChat could not start its local runtime. See "+Path.Combine(active.data,"launcher.log")+" for diagnostics. Check whether the local port is already in use, then open ChainChat again.";
+      Process child;
+      try { child=Process.Start(info); } catch { throw new InvalidOperationException(failure); }
+      if(child==null) throw new InvalidOperationException(failure);
+      Log("Waiting for the local ChainChat runtime to become ready");
+      using(child) {
+        Stopwatch deadline=Stopwatch.StartNew();
+        while(deadline.Elapsed.TotalSeconds<120) {
+          // This private control exists only after the local UI is listening.
+          // Never log its token or request a new browser bootstrap nonce here.
+          int ownerPid;
+          if(OwnedRuntimeReady(active,out ownerPid) && ownerPid==child.Id) { Log("Local ChainChat runtime is ready"); return; }
+          if(child.WaitForExit(200)) {
+            if(child.ExitCode==0 && OwnedRuntimeReady(active,out ownerPid)) { Log("Local ChainChat runtime is ready"); return; }
+            throw new InvalidOperationException(failure);
+          }
+        }
+      }
+      // Never kill an old bridge, an unrelated process, or pending native work.
+      throw new InvalidOperationException(failure);
     }
     static void Shortcut(string target, string arguments, string root) {
       string programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
@@ -335,7 +379,7 @@ namespace CypherTempreInstaller {
       Write = write;
       if(options.selfTest) { SelfTest(); RecordResult(options,true,"Installer self-tests passed."); return; }
       string root = options.root, activeFile = Path.Combine(root,"current.json"), previousFile = Path.Combine(root,"previous.json");
-      if(options.launch) { Launch(ReadRelease(activeFile,root),root); RecordResult(options,true,"Launcher started."); return; }
+      if(options.launch) { Launch(ReadRelease(activeFile,root),root); RecordResult(options,true,"ChainChat local runtime is ready."); return; }
       if(options.rollback) {
         ActiveRelease previous = ReadRelease(previousFile,root); ActiveRelease current = ReadRelease(activeFile,root);
         if(!options.noLaunch) Run(current.node,new[]{Path.Combine(current.release,"openclaw","launcher.mjs"),"--stop"},current.release,EnvironmentFor(current,root),120);

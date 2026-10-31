@@ -77,6 +77,10 @@ test("hosted API targets are restricted to a numeric loopback port", () => {
 });
 
 test("local serving keeps same-origin API requests", () => {
+  assert.equal(bridgeApiUrl('/api/local-pairing', 'http://127.0.0.1:8790'), '/api/local-pairing');
+  assert.equal(bridgeApiUrl('/api/local-resume', 'http://127.0.0.1:8790'), '/api/local-resume');
+  for (const path of ['/api/local--resume', '/api/-resume', '/api/local-/resume', '/api/local-resume?secret=x'])
+    assert.throws(() => bridgeApiUrl(path, 'http://127.0.0.1:8790'));
   for (const origin of [
     "http://127.0.0.1:8790",
     "http://localhost:8790",

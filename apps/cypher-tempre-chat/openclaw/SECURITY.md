@@ -4,6 +4,17 @@ This beta is a local, authenticated OpenClaw distribution with a reviewed plugin
 and native Timechain orchestrator. Functional tests do not establish perfect
 security, truthful model judgment or an absence of dependency vulnerabilities.
 
+The installed UI initially authenticates with an expiring, single-use launcher
+nonce. Same-tab reload can use a rotating opaque resume credential stored in
+local-origin `sessionStorage`. That credential grants access to the same live
+session; it is sensitive even though no provider API key or API bearer is saved
+there. Resume requires both owner proof and the exact local Origin. Merely
+forging loopback Origin/fetch headers cannot create a session. Session end,
+expiry and runtime restart invalidate the grant; closing a tab is not a reliable
+server-side revocation signal. The embedded auditor is trusted same-origin UI,
+not a sandbox boundary. Its messaging protocol deliberately forwards only fixed
+reads and never sends the model key or parent bearer into the frame.
+
 The official OpenClaw source package stays at the exact commitment in
 `upstream-lock.json`. A separate, exact dependency overlay selects external
 Undici 8.12.3, Zod 4.6.7 and npm 12.2.1. These are ordinary dependency overrides,

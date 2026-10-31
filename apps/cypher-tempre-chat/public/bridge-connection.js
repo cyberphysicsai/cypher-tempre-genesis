@@ -16,7 +16,7 @@ export function bridgePort(value) {
 }
 
 export function bridgeApiUrl(path, pageOrigin, port = "8790") {
-  if (!/^\/api\/[a-z]+(?:\/[a-z]+)*$/.test(path))
+  if (!/^\/api\/[a-z]+(?:[-/][a-z]+)*$/.test(path))
     throw new Error("Invalid local bridge request path.");
   if (isLocalBridgePage(pageOrigin)) return path;
   if (new URL(pageOrigin).protocol !== "https:")
