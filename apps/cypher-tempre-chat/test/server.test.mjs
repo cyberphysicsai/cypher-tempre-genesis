@@ -189,6 +189,21 @@ async function allText(root) {
   return text;
 }
 
+test('installer launch nonce is single-use and scoped to the local page', async t => {
+  const f = await fixture(t);
+  const nonce = f.issueLaunchNonce();
+  assert.equal((await f.request('/api/launch', { nonce }, { origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await f.request('/api/launch', { nonce: '0'.repeat(64) })).status, 401);
+  const paired = await f.request('/api/launch', { nonce }, { origin: f.base });
+  assert.equal(paired.status, 200);
+  assert.match(paired.body.token, /^[a-f0-9]{64}$/);
+  assert.equal((await f.request('/api/launch', { nonce }, { origin: f.base })).status, 401);
+  assert.equal((await f.request('/api/local-pairing')).status, 401);
+  const code = await f.request('/api/local-pairing', undefined, { authorization: `Bearer ${paired.body.token}`, origin: f.base });
+  assert.equal(code.status, 200);
+  assert.equal(code.body.code, 'TEST-CODE');
+});
+
 test("injected generation and review outputs are normalized before native scoring and release", async (t) => {
   const priorName = ["qua", "lia"].join("");
   const priorGate = ["Po", "Q"].join("");

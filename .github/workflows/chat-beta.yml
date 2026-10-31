@@ -17,12 +17,40 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26.13.0'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install exact OpenClaw pin and enable real runtime tests
+        run: |
+          npm ci --ignore-scripts --prefix openclaw/runtime
+          python installer/check_upstream.py
+          echo "CT_OPENCLAW_PACKAGE=$GITHUB_WORKSPACE/apps/cypher-tempre-chat/openclaw/runtime/node_modules/openclaw" >> "$GITHUB_ENV"
+          echo "CT_OPENCLAW_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
+        working-directory: apps/cypher-tempre-chat
       - run: npm ci --ignore-scripts && npm run check && npm test && npm run test:engine
         working-directory: apps/cypher-tempre-chat
       - run: node --test dashboard/test/audit-site.test.mjs
       - run: npm ci --ignore-scripts && npm run compile && npm test
         working-directory: apps/cypher-tempre-chat/contracts
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build sanitized application and installer
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'cypher-tempre-chat.zip'
+          $installer = Join-Path $env:RUNNER_TEMP 'ChainChat-Setup.exe'
+          git -C $env:GITHUB_WORKSPACE archive --format=zip --prefix=cypher-tempre-chat/ --output=$archive HEAD:apps/cypher-tempre-chat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python installer/build_windows.py --archive $archive --output $installer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $installer --self-test --quiet
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python installer/acceptance_windows.py --installer $installer --work-root (Join-Path $env:RUNNER_TEMP 'chainchat-acceptance')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        working-directory: apps/cypher-tempre-chat

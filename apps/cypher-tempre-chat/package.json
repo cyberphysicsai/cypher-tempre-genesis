@@ -1,19 +1,20 @@
 {
   "name": "cypher-tempre-chat",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Cypher Tempre ChainChat: bring-your-own-model chat with a local Timechain and verified CPHY holdings.",
   "private": true,
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=20",
+    "node": ">=24.22.1 <25 || >=26.12.1",
     "python": ">=3.10"
   },
   "scripts": {
-    "start": "node server.mjs",
-    "beta": "node server.mjs --public-origin https://cyphertempre.ai --public-origin https://www.cyphertempre.ai",
+    "start": "node openclaw/launcher.mjs",
+    "beta": "node openclaw/launcher.mjs",
+    "bridge": "node server.mjs",
     "dev": "node server.mjs",
-    "check": "node --check server.mjs && node --check public/app.js && node --check public/motifs.js",
+    "check": "node --check server.mjs && node --check openclaw/launcher.mjs && node --check openclaw/broker.mjs && node --check openclaw/gateway.mjs && node --check public/app.js && node --check public/motifs.js",
     "test": "node --test test/*.test.mjs",
     "test:engine": "python -m unittest discover -s test -p test_*.py"
   },

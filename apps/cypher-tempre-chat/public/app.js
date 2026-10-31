@@ -794,15 +794,20 @@ function renderState() {
     agent = state.agent;
   $("pairForm").classList.toggle("hidden", paired);
   $("pairedSession").classList.toggle("hidden", !paired);
+  $("showPairingCode").classList.toggle("hidden", !paired || !localBridgePage);
+  if (!paired) {
+    $("websitePairingCode").textContent = "";
+    $("websitePairingCode").classList.add("hidden");
+  }
   $("disconnectModel").classList.toggle("hidden", !state.provider?.configured);
   const id = agentId();
   $("bridgeDot").classList.toggle("online", paired);
   $("bridgeStatus").textContent = paired
-    ? "LOCAL BRIDGE CONNECTED"
+    ? state.executionRuntime?.backend === "openclaw" ? "OPENCLAW CONNECTED" : "LOCAL RUNTIME CONNECTED"
     : "LOCAL-FIRST WORKSPACE";
   $("pairButton").querySelector("span").textContent = paired
-    ? "Bridge paired"
-    : "Pair bridge";
+    ? "Runtime paired"
+    : "Pair local runtime";
   $("modelLabel").textContent =
     paired && state.provider?.configured
       ? state.provider.model
@@ -1080,6 +1085,17 @@ document.querySelectorAll("dialog").forEach((dialog) =>
   }),
 );
 $("pairButton").addEventListener("click", () => openDialog("pairDialog"));
+$("showPairingCode").addEventListener("click", async () => {
+  const button = $("showPairingCode");
+  button.disabled = true;
+  try {
+    const result = await api("/api/local-pairing");
+    $("websitePairingCode").textContent = `Website pairing code: ${result.code}. Enter it only at cyphertempre.ai. It grants access to this local runtime.`;
+    $("websitePairingCode").classList.remove("hidden");
+  } catch (error) {
+    $("pairedSession").querySelector(".dialog-error").textContent = error.message;
+  } finally { button.disabled = false; }
+});
 function clearLocalSession() {
   chatController?.abort();
   walletController?.abort();
@@ -1153,7 +1169,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Update and restart your local bridge to beta 0.6.1 or newer before pairing. This interface requires complete faculty portability and native execution receipts.");
+      throw new Error("Update and restart your local bridge to beta 0.7.0 or newer before pairing. This interface requires complete faculty portability and native execution receipts.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -1210,6 +1226,26 @@ $("existingForm").addEventListener("submit", (event) => {
       toast("Timechain paired. Verify CPHY holdings to enable chat.");
     }
   });
+});
+$("discoverChains").addEventListener("click", async () => {
+  const button = $("discoverChains"), results = $("discoveredChains");
+  button.disabled = true; results.replaceChildren(); results.classList.remove("hidden");
+  results.textContent = "Checking known agent directories on this machine…";
+  try {
+    const found = await api("/api/agents/discover", {});
+    results.replaceChildren();
+    for (const candidate of found.candidates || []) {
+      const choice = document.createElement("button"); choice.type = "button"; choice.className = "text-button full-width";
+      choice.textContent = `${candidate.label} · ${candidate.root}`;
+      choice.addEventListener("click", () => { $("existingRoot").value = candidate.root; toast("Selected. Verify and pair to continue this chain."); });
+      results.append(choice);
+    }
+    const note = document.createElement("p");
+    note.textContent = found.candidates?.length ? "Select a chain, then verify and pair. Discovery does not change its files." : "No chain found in known agent directories. Enter its path below.";
+    if (!found.complete) note.textContent += " Search limits were reached; other chains may exist.";
+    results.append(note);
+  } catch (error) { results.textContent = error.message; }
+  finally { button.disabled = false; }
 });
 $("agentSelectButton").addEventListener("click", () =>
   requirePair(() => $("agentChoices").classList.toggle("hidden")),
@@ -2479,6 +2515,8 @@ $("verifyHoldingsButton").addEventListener("click", async () => {
   }
 });
 async function start() {
+  const bootstrap = localBridgePage ? new URLSearchParams(location.hash.slice(1)).get("launch") : null;
+  if (bootstrap !== null) history.replaceState(null, "", location.pathname + location.search);
   initMotifs();
   renderState();
   setInterval(() => { void refreshActivity(); }, 1000);
@@ -2522,6 +2560,14 @@ async function start() {
       ? "LOCAL BRIDGE READY"
       : "BRIDGE UPDATE REQUIRED";
     if (status.version) $("appVersion").textContent = `v${status.version}`;
+    if (status.runtime?.backend === "openclaw") $("bridgeStatus").textContent = "OPENCLAW RUNTIME READY";
+    if (bootstrap && /^[a-f0-9]{64}$/.test(bootstrap)) {
+      const paired = await api("/api/launch", { nonce: bootstrap });
+      token = paired.token;
+      applyState(await api("/api/state"));
+      await refreshLicense();
+      toast("ChainChat is connected to your local OpenClaw runtime.");
+    }
   } catch {
     activity("Start the local bridge to connect your agent.", "error");
     $("bridgeStatus").textContent = "BRIDGE OFFLINE";
