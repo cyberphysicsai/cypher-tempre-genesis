@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersion } from "../public/chainchat-display.js";
 
 test("pairing requires the current ChainChat runtime", () => {
-  for (const old of [undefined, null, "", "0.3.0", "0.4.0", "0.4.1", "0.4.3", "0.4.999", "0.5.0", "0.5.1", "0.5.999", "0.6.0", "0.6.1", "0.6.999", "0.7.0-beta", "garbage", "0.07.0", "0.4.9007199254740993"])
+  for (const old of [undefined, null, "", "0.3.0", "0.4.0", "0.4.1", "0.4.3", "0.4.999", "0.5.0", "0.5.1", "0.5.999", "0.6.0", "0.6.1", "0.6.999", "0.7.0", "0.7.0-beta", "garbage", "0.07.0", "0.4.9007199254740993"])
     assert.equal(supportedBridgeVersion(old), false);
-  for (const current of ["0.7.0", "0.7.1", "0.8.0", "1.0.0"])
+  for (const current of ["0.7.1", "0.8.0", "1.0.0"])
     assert.equal(supportedBridgeVersion(current), true);
 });
 
@@ -32,7 +32,7 @@ test("CPHY balance display retains precision at the eligibility boundary", () =>
 test("history inspection, existing-chain pairing and export remain available without holdings", () => {
   for (const path of ["/api/state", "/api/history", "/api/status"])
     assert.equal(requiresHoldings(path), false);
-  for (const path of ["/api/pair", "/api/unpair", "/api/agents/pair", "/api/agents/select", "/api/verify", "/api/faculties/preview", "/api/faculties/export", "/api/license/verify", "/api/license/check", "/api/license/logout"])
+  for (const path of ["/api/pair", "/api/launch", "/api/local-resume", "/api/unpair", "/api/agents/pair", "/api/agents/select", "/api/agents/discover", "/api/audit/read", "/api/verify", "/api/faculties/preview", "/api/faculties/export", "/api/license/verify", "/api/license/check", "/api/license/logout"])
     assert.equal(requiresHoldings(path, {}), false);
   assert.equal(requiresHoldings("/api/provider", { disconnect: true }), false);
   for (const path of ["/api/chat", "/api/continuum", "/api/continuum/flush", "/api/agents", "/api/faculties/import", "/api/provider", "/api/loadout", "/api/settings"])

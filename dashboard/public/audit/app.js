@@ -1,4 +1,10 @@
 import { DEFAULT_AUDIT_BRIDGE, normalizeBridgeURL } from './bridge-url.js';
+import { createAuditConnection } from './chainchat-connection.js';
+
+const embeddedAudit = new URLSearchParams(window.location.search).get('chainchat') === '1';
+let parentAudit = null;
+let ringOffset = 0, blockOffset = 0;
+let ringLoadRevision = 0, blockLoadRevision = 0;
 
 const state = {
   summary: null,
@@ -275,6 +281,26 @@ function shortHash(hash) {
 }
 
 async function api(path, options = {}) {
+  if (embeddedAudit) {
+    if ((options.method || 'GET').toUpperCase() !== 'GET' || options.body !== undefined || typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//'))
+      throw new Error('The embedded auditor permits read-only snapshots only.');
+    const url = new URL(path, location.origin);
+    if (url.pathname === '/api/timechain/summary' && !url.search) return parentAudit.read({ op: 'summary' });
+    if (url.pathname === '/api/timechain/rings' && [...url.searchParams.keys()].every(key => ['q', 'type'].includes(key))) {
+      const result = await parentAudit.read({ op: 'rings', offset: ringOffset, limit: 100 });
+      const query = (url.searchParams.get('q') || '').toLowerCase(), type = url.searchParams.get('type') || '';
+      return { ...result, rings: result.rings.filter(ring => (!type || ring.type === type) && (!query || JSON.stringify(ring).toLowerCase().includes(query))) };
+    }
+    const ring = url.pathname.match(/^\/api\/timechain\/rings\/(\d+)$/);
+    if (ring && !url.search) return parentAudit.read({ op: 'ring', index: Number(ring[1]) });
+    if (url.pathname === '/api/blockspace' && !url.search) {
+      const result = await parentAudit.read({ op: 'blockspace', offset: blockOffset, limit: 80 });
+      return result;
+    }
+    const blob = url.pathname.match(/^\/api\/blockspace\/([a-f0-9]{64})$/);
+    if (blob && !url.search) return parentAudit.read({ op: 'blob', hash: blob[1] });
+    throw new Error('This panel is available in the advanced standalone auditor.');
+  }
   const response = await fetch(`${state.bridgeBase}${path}`, {
     ...options,
     headers: {
@@ -289,6 +315,25 @@ async function api(path, options = {}) {
 }
 
 async function init() {
+  if (embeddedAudit) {
+    $('bridgeGate').classList.add('hidden'); $('embeddedAuditNotice').classList.remove('hidden');
+    $('dashboard').classList.remove('hidden');
+    parentAudit = createAuditConnection();
+    for (const form of document.querySelectorAll('#dashboard form')) {
+      form.inert = true; form.classList.add('hidden');
+      for (const control of form.querySelectorAll('input,button,textarea,select')) control.disabled = true;
+    }
+    for (const id of ['vitalsBand', 'learningBand', 'cphyBand', 'retrievalBand', 'immuneBand', 'forkBand', 'nurseryBand', 'continuumBand', 'chronoBand', 'cambiumBand', 'conscienceBand', 'reflectiveBand', 'censusBand']) $(id)?.classList.add('hidden');
+    for (const id of ['ringPagination', 'blockPagination']) $(id).classList.remove('hidden');
+    $('ringSearch').placeholder = 'Filter this page';
+    const safe = operation => { void operation().catch(error => { setText('embeddedAuditStatus', error.message); }); };
+    $('ringPrevious').addEventListener('click', () => { ringOffset = Math.max(0, ringOffset - 100); safe(loadRings); });
+    $('ringNext').addEventListener('click', () => { ringOffset += 100; safe(loadRings); });
+    $('blockPrevious').addEventListener('click', () => { blockOffset = Math.max(0, blockOffset - 80); safe(loadBlockspace); });
+    $('blockNext').addEventListener('click', () => { blockOffset += 80; safe(loadBlockspace); });
+    window.addEventListener('pagehide', event => { if (!event.persisted) parentAudit.close(); });
+    await unlockDashboard(); return;
+  }
   setupBridgeState();
   $('dashboard').classList.add('hidden');
   if (state.hostedMode && !(await ensureBridgePaired())) return;
@@ -367,16 +412,16 @@ async function unlockDashboard() {
 async function loadDashboard() {
   state.summary = await api('/api/timechain/summary');
   renderSummary();
-  loadLearning();
-  loadObservatory();
+  if (!embeddedAudit) { loadLearning(); loadObservatory(); }
   await loadRings();
   await loadBlockspace();
   if (state.dashboardBound) return;
   state.dashboardBound = true;
-  $('ringSearch').addEventListener('input', debounce(loadRings, 200));
-  $('ringType').addEventListener('change', loadRings);
+  const refreshRings = embeddedAudit ? () => { void loadRings().catch(error => setText('embeddedAuditStatus', error.message)); } : loadRings;
+  $('ringSearch').addEventListener('input', debounce(refreshRings, 200));
+  $('ringType').addEventListener('change', refreshRings);
   $('closeBlob').addEventListener('click', () => $('blobDialog').close());
-  bindObservatory();
+  if (!embeddedAudit) bindObservatory();
 }
 
 function renderSummary() {
@@ -388,7 +433,7 @@ function renderSummary() {
     ['Senses', stats.senses],
     ['Blockspace', stats.blockspaceEntries],
     ['Context Tokens', stats.approxContinuumTokens],
-    ['Integrity', verification.ok ? 'PASS' : 'FAIL'],
+    ['Integrity', verification.ok === true ? 'PASS' : verification.ok === false ? 'FAIL' : 'UNKNOWN'],
   ];
   $('statsGrid').replaceChildren(...statItems.map(([label, value]) => {
     const div = document.createElement('div');
@@ -414,10 +459,15 @@ function renderSummary() {
   renderFacultyBars('modalityBars', state.summary.modalityCategories, stats.modalities);
   renderFacultyBars('senseBars', state.summary.senseCategories, stats.senses);
   setText('facultyMeta', `${stats.modalities} modalities · ${stats.senses} senses · ${stats.emergent} emergent`);
+  if (embeddedAudit) setText('embeddedAuditStatus', (state.summary.notices || []).join(' ') || (verification.ok === true
+    ? 'Native integrity verified for this paired agent. Pages show bounded local projections.'
+    : verification.ok === false ? 'Native integrity did not pass. Inspect the local chain before resuming agent work.'
+      : 'Native integrity is unavailable; no verification PASS is asserted.'));
 }
 
 function renderDomains() {
   const list = $('domainList');
+  if (embeddedAudit) { setText('domainMeta', 'Bounded snapshot'); list.textContent = 'Domain analysis is available in the advanced standalone auditor.'; return; }
   const domains = state.summary.domains || [];
   setText('domainMeta', `${domains.length} detected`);
   if (!domains.length) {
@@ -473,9 +523,12 @@ function renderFacultyBars(id, items, total) {
 }
 
 async function loadRings() {
+  const revision = ++ringLoadRevision;
   const q = encodeURIComponent($('ringSearch').value.trim());
   const type = encodeURIComponent($('ringType').value);
   const data = await api(`/api/timechain/rings?q=${q}&type=${type}`);
+  if (embeddedAudit && revision !== ringLoadRevision) return;
+  if (embeddedAudit) { $('ringPrevious').disabled = data.offset === 0; $('ringNext').disabled = !data.hasMore; }
   state.rings = data.rings;
   renderRings();
 }
@@ -526,7 +579,10 @@ async function selectRing(index, { scroll = false } = {}) {
 }
 
 async function loadBlockspace() {
+  const revision = ++blockLoadRevision;
   const data = await api('/api/blockspace');
+  if (embeddedAudit && revision !== blockLoadRevision) return;
+  if (embeddedAudit) { $('blockPrevious').disabled = data.offset === 0; $('blockNext').disabled = !data.hasMore; }
   setText('blockspaceMeta', `${data.total} entries · ${formatBytes(data.totalBytes)}`);
   const list = $('blockspaceList');
   list.replaceChildren(...data.entries.slice(0, 80).map((blob) => {
@@ -580,6 +636,7 @@ function debounce(fn, wait) {
 initMotifs();
 
 init().catch((error) => {
+  if (embeddedAudit) { $('embeddedAuditNotice').classList.remove('hidden'); setText('embeddedAuditStatus', error.message); return; }
   // Both branches surface through the bridge gate — there is no separate #gate
   // element (a local audit still shows the pairing/onboarding shell on failure).
   $('bridgeGate').classList.remove('hidden');

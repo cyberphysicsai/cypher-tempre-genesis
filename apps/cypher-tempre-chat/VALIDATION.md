@@ -2,6 +2,16 @@
 
 Validation separates deterministic engine behavior, application orchestration and real-model observations. Passing a transport or gate test does not establish equal answer quality across models, perfect security or elimination of hallucinations.
 
+## Automatic installed workflow: 0.7.1
+
+The local frontend previously classified its owner-authorized `/api/launch` request as a holdings-protected mutation. That opened the wallet dialog before any app session existed, preventing the installer's automatic connection. Bootstrap, authenticated resume, discovery and read-only audit requests now bypass that frontend wallet prompt; protected model calls and mutations still require holdings. The local app automatically loads PoI for active Timechain turns; optional hosted-site connection is kept under advanced mode.
+
+The local suite passed **263 Node tests** with one expected Windows case-sensitivity skip (264 total), including actual pinned OpenClaw execution and independent original-skill references. **92 Python tests** passed with one symlink-privilege skip (93 total). New tests cover single-use owner-bound resume credentials, exact local Origin, rejected replay/expiry/foreign origins, preserved wallet revocation and provider memory, frontend storage restrictions, fixed read-only audit messages and bounded filesystem projections. The installer acceptance checks installed frontend bootstrap exemptions in addition to the real launch/resume endpoints.
+
+A real browser test against a disposable native chain and the actual OpenClaw-backed app connected automatically, cleared the launch fragment, resumed the same selected chain on page refresh, and opened the embedded auditor without another code or service. Native integrity displayed PASS and a registry blob preview verified its SHA-256. No wallet transaction, user API key, paid inference or personal chain was used. The local screenshot artifact is `chainchat-automatic-connection-0.7.1.jpg`.
+
+The Windows front door waits for authenticated owned-runtime readiness rather than reporting success immediately after spawning Node. Isolated probes verified first launch, same-PID reuse, a visible fixed failure on an occupied port, and survival of the unrelated listener. Installation still preserves persistent data and selected external chains. The embedded auditor deliberately exposes only bounded reads; legacy mutations remain confined to the separately opened advanced auditor.
+
 ## OpenClaw edition: 0.7.0
 
 The complete local Node suite passed **236 tests**, with one expected Windows case-sensitivity skip (237 total). Both independent original-skill reference variables and the actual pinned OpenClaw package/Node runtime were explicitly supplied. The Python suite passed **92 tests**, with one Windows symlink-privilege skip (93 total). Separate launcher tests passed after hardening browser-helper failure handling and crash-released Windows startup ownership. Syntax, whitespace, terminology and dependency-pin checks passed. All 65 bundled native engine files remain byte-identical to the independent PoI source commitment.

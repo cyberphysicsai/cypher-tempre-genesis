@@ -19,9 +19,12 @@ import {
   bridgePort,
   isLocalBridgePage,
 } from "./bridge-connection.js";
+import { connectLocalSession, clearLocalResume, localTabStorage } from "./local-session.js";
+import { createAuditParent } from "./audit-parent.js";
 const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
+let auditedAgent = null;
 const FRUITS = [
   "Love",
   "Peace",
@@ -219,7 +222,7 @@ function covenantReview(gate) {
 
 async function api(path, data, options = {}) {
   if (!localBridgePage && !token && !["/api/pair", "/api/status"].includes(path))
-    throw new Error("Pair your local bridge before connecting to it.");
+    throw new Error("Install and launch ChainChat, or connect in optional website mode.");
   if (requiresHoldings(path, data)) await ensureHoldings();
   const requestToken = token;
   const headers = { Accept: "application/json" };
@@ -242,14 +245,14 @@ async function api(path, data, options = {}) {
   } catch (error) {
     if (error.name === "AbortError" || localBridgePage) throw error;
     throw new Error(
-      "Could not reach the local bridge. Check its port, start it with this site's exact trusted origin, and allow local network access if your browser requests it. You can also use the local bridge page.",
+      "Could not reach the installed app. Open ChainChat from the Start menu. Optional website mode may also need local-network permission.",
     );
   }
   let result;
   try {
     result = await response.json();
   } catch {
-    throw new Error("The local bridge returned an unreadable response.");
+    throw new Error("The local app returned an unreadable response.");
   }
   if (!response.ok) {
     const error = new Error(
@@ -285,13 +288,31 @@ function openDialog(id) {
 function closeDialog(id) {
   $(id).close();
 }
+function refreshEmbeddedAuditor() {
+  const frame = $("auditFrame");
+  if (!token || !state.agent) {
+    frame.classList.add("hidden");
+    frame.removeAttribute("src");
+    $("loadAuditor").classList.remove("hidden");
+    auditedAgent = null;
+  } else if (!frame.classList.contains("hidden") && auditedAgent !== agentId()) {
+    auditedAgent = agentId();
+    frame.src = "./audit/?chainchat=1";
+  }
+}
+window.addEventListener("message", createAuditParent({ origin: location.origin,
+  source: () => $("auditFrame").contentWindow,
+  context: () => ({ session: token, agent: state.agent?.id || null }),
+  read: request => api("/api/audit/read", request),
+  respond: (target, message, origin) => target.postMessage(message, origin),
+}));
 function requirePair(action) {
   if (token) {
     action();
     return;
   }
   pendingAction = action;
-  openDialog("pairDialog");
+  openDialog("installDialog");
 }
 function requireAgent(action) {
   requirePair(() => {
@@ -362,7 +383,7 @@ async function refreshState() {
     const result = await api("/api/state");
     if (token === sessionToken) applyState(result);
   } catch (error) {
-    if (!token) activity("Session ended. Pair your bridge to reconnect.");
+    if (!token) activity("Session ended. Open ChainChat from the Start menu to reconnect.");
     else console.warn("State refresh unavailable.");
   } finally {
     polling = false;
@@ -473,7 +494,7 @@ function renderRuntimeActivity() {
     if (!badge) { badge = el("span", "slot-live"); button.append(badge); }
     badge.textContent = paired ? indicator.status : "IDLE";
   }
-  $("monitorConnection").textContent = !paired ? "NOT CONNECTED" : fresh ? "LIVE BRIDGE" : "ACTIVITY UNAVAILABLE";
+  $("monitorConnection").textContent = !paired ? "NOT CONNECTED" : fresh ? "LIVE APP" : "ACTIVITY UNAVAILABLE";
   const running = fresh && runtimeActivity?.running;
   $("cancelTurn").classList.toggle("hidden", !(requestBusy || running));
   $("cancelTurn").disabled = stoppingBusy;
@@ -481,9 +502,9 @@ function renderRuntimeActivity() {
   const last = events.at(-1);
   const mainStatus = activityLineState(runtimeActivity, { paired, fresh, requestBusy });
   $("monitorStage").textContent = !paired ? "Pair a Timechain to see its actual runtime stages."
-    : !fresh ? "Live activity is unavailable. No ability is shown as running until the bridge confirms it."
+    : !fresh ? "Live activity is unavailable. No ability is shown as running until the app confirms it."
       : running ? mainStatus.text
-        : last?.label || "Idle. Equipped abilities will light up when the bridge runs them.";
+        : last?.label || "Idle. Equipped abilities will light up when the app runs them.";
   if (mainStatus) activity(mainStatus.text, mainStatus.kind);
   const list = $("activityTimeline");
   list.replaceChildren();
@@ -495,7 +516,7 @@ function renderRuntimeActivity() {
     if (event.detail) row.append(el("p", "fine-print", event.detail));
     list.append(row);
   }
-  if (!events.length) list.append(el("li", "", "No activity recorded in this bridge session yet."));
+  if (!events.length) list.append(el("li", "", "No activity recorded in this app session yet."));
 }
 
 async function refreshActivity() {
@@ -801,13 +822,15 @@ function renderState() {
   }
   $("disconnectModel").classList.toggle("hidden", !state.provider?.configured);
   const id = agentId();
+  $("installNotice").classList.toggle("hidden", localBridgePage || paired);
+  refreshEmbeddedAuditor();
   $("bridgeDot").classList.toggle("online", paired);
   $("bridgeStatus").textContent = paired
     ? state.executionRuntime?.backend === "openclaw" ? "OPENCLAW CONNECTED" : "LOCAL RUNTIME CONNECTED"
-    : "LOCAL-FIRST WORKSPACE";
+    : localBridgePage ? "OPEN CHAINCHAT FROM START MENU" : "INSTALL & LAUNCH CHAINCHAT";
   $("pairButton").querySelector("span").textContent = paired
-    ? "Runtime paired"
-    : "Pair local runtime";
+    ? "App connected"
+    : "Install & open";
   $("modelLabel").textContent =
     paired && state.provider?.configured
       ? state.provider.model
@@ -965,7 +988,7 @@ function renderConversation() {
       if (executions.length) {
         const details = el("details", "perspective-details faculty-execution-details");
         details.append(el("summary", "", `Faculty receipts · ${executions.length} equipped`));
-        details.append(el("p", "fine-print", "Computed means the bridge completed a mechanism. Frame applied means a faculty instruction was added to model context. Neither label measures answer quality."));
+        details.append(el("p", "fine-print", "Computed means the app completed a mechanism. Frame applied means a faculty instruction was added to model context. Neither label measures answer quality."));
         for (const execution of executions) {
           const row = el("div", "perspective-note");
           row.dataset.mode = execution.mode;
@@ -1084,7 +1107,12 @@ document.querySelectorAll("dialog").forEach((dialog) =>
     }
   }),
 );
-$("pairButton").addEventListener("click", () => openDialog("pairDialog"));
+$("pairButton").addEventListener("click", () => openDialog(token ? "pairDialog" : "installDialog"));
+$("getStartedButton").addEventListener("click", () => openDialog("installDialog"));
+$("advancedWebsitePairing").addEventListener("click", () => {
+  closeDialog("installDialog");
+  openDialog("pairDialog");
+});
 $("showPairingCode").addEventListener("click", async () => {
   const button = $("showPairingCode");
   button.disabled = true;
@@ -1097,6 +1125,7 @@ $("showPairingCode").addEventListener("click", async () => {
   } finally { button.disabled = false; }
 });
 function clearLocalSession() {
+  clearLocalResume(localBridgePage ? localTabStorage() : null);
   chatController?.abort();
   walletController?.abort();
   walletWatch?.close();
@@ -1126,7 +1155,7 @@ function clearLocalSession() {
   renderLicense(null);
   renderState();
   renderConversation();
-  activity("Bridge disconnected. Pair again to continue your saved Timechain.");
+  activity("App disconnected. Open ChainChat from the Start menu to continue your saved Timechain.");
 }
 $("endSession").addEventListener("click", async () => {
   const button = $("endSession");
@@ -1135,7 +1164,7 @@ $("endSession").addEventListener("click", async () => {
     await api("/api/unpair", {});
     clearLocalSession();
     closeDialog("pairDialog");
-    toast("Bridge session ended. Its model credential was cleared.");
+    toast("App session ended. Its model credential was cleared.");
   } catch (error) {
     $("pairedSession").querySelector(".dialog-error").textContent =
       error.message;
@@ -1155,7 +1184,7 @@ $("disconnectModel").addEventListener("click", async () => {
     $("baseUrl").value = "";
     renderState();
     closeDialog("modelDialog");
-    toast("Model disconnected. Its key was cleared from bridge memory.");
+    toast("Model disconnected. Its key was cleared from app memory.");
   } catch (error) {
     $("modelForm").querySelector(".dialog-error").textContent = error.message;
   } finally {
@@ -1169,14 +1198,14 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Update and restart your local bridge to beta 0.7.0 or newer before pairing. This interface requires complete faculty portability and native execution receipts.");
+      throw new Error("Install ChainChat 0.7.1 or newer to use this interface. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
     applyState(await api("/api/state"));
     await refreshLicense();
     closeDialog("pairDialog");
-    toast("Local bridge paired.");
+    toast("Website connected to the local app.");
     try {
       const data = await api("/api/archetypes");
       archetypes = data.archetypes || [];
@@ -1274,7 +1303,7 @@ function updateProviderPlaceholder() {
   $("apiKey").placeholder =
     provider === "compatible"
       ? "Optional for an unauthenticated local provider"
-      : "Held only in this bridge session";
+      : "Held only in this app session";
 }
 $("provider").addEventListener("change", () => {
   $("baseUrl").value = "";
@@ -1340,7 +1369,7 @@ $("chatForm").addEventListener("submit", async (event) => {
   $("messageInput").value = "";
   activity(
     turnMode === "dormant" ? "Starting plain model chat · no Timechain review or recording."
-      : "Starting the Timechain run · waiting for live bridge activity…",
+      : "Starting the Timechain run · waiting for live app activity…",
     "busy",
   );
   try {
@@ -1354,7 +1383,7 @@ $("chatForm").addEventListener("submit", async (event) => {
     const response = result.message || result;
     if (typeof response.content !== "string")
       throw new Error(
-        "No accepted response was returned. Inspect the bridge before trying again.",
+        "No accepted response was returned. Inspect the app before trying again.",
       );
     addMessage({ role: "assistant", input: message, mode: turnMode, ...response });
     activity(
@@ -1489,7 +1518,7 @@ function renderArchetypes() {
       el(
         "p",
         "fine-print",
-        "The archetype catalogue is unavailable. Pair your bridge and try again.",
+        "The archetype catalogue is unavailable. Open ChainChat and try again.",
       ),
     );
 }
@@ -2084,7 +2113,7 @@ function renderPackPreview(result) {
       details.append(row);
     }
     panel.append(details);
-  } else panel.append(el("p", "fine-print", "This bridge did not provide a mechanism compatibility report. A verified checksum alone does not establish that a faculty can execute."));
+  } else panel.append(el("p", "fine-print", "This app did not provide a mechanism compatibility report. A verified checksum alone does not establish that a faculty can execute."));
   packReportList(
     panel,
     "Ready for covenant review",
@@ -2283,7 +2312,7 @@ $("exportPackForm").addEventListener("submit", (event) => {
       domain: $("exportPackDomain").value.trim(),
     });
     if (!result.pack || !result.count)
-      throw new Error("The bridge did not return a non-empty faculty pack.");
+      throw new Error("The app did not return a non-empty faculty pack.");
     const blob = new Blob([JSON.stringify(result.pack, null, 2) + "\n"], {
       type: "application/json",
     });
@@ -2321,7 +2350,7 @@ function hasHoldingsAccess() {
     currentLicense.verification?.expiresAt > Date.now();
 }
 function licenseMessage(info) {
-  if (!token) return "Pair your local bridge, then verify at least 21,000 CPHY held on Base.";
+  if (!token) return "Launch the installed ChainChat app, then verify at least 21,000 CPHY held on Base.";
   if (info?.status === "local-test-mode") return "Local test configuration: holdings enforcement is disabled.";
   if (info?.status === "verification-unavailable")
     return "Holdings could not be verified. New operations are paused; your saved history remains available.";
@@ -2385,7 +2414,7 @@ function renderLicense(info) {
   $("checkLicenseButton").disabled = !token || !info?.session || walletBusy;
   $("logoutHoldingsButton").disabled = !token || !info?.session || walletBusy;
   if (info?.identityVerified && !matched)
-    $("licenseError").textContent = "This website and local bridge use different holdings settings. Install the matching ChainChat bridge release.";
+    $("licenseError").textContent = "This website and local app use different holdings settings. Install the matching ChainChat app release.";
   renderHoldingsControls();
 }
 async function readLicense() {
@@ -2393,9 +2422,9 @@ async function readLicense() {
   const info = await api("/api/license/check", { challenge });
   await verifyBridgeIdentity(info, challenge, location.origin);
   if (!sessionToken || token !== sessionToken || revision !== licenseRevision)
-    throw new Error("The bridge or wallet session changed during verification. Verify again.");
+    throw new Error("The app or wallet session changed during verification. Verify again.");
   if (!matchingConfiguration(licenseDeployment, info.configuration))
-    throw new Error("The website and local bridge have different holdings settings. Install the matching ChainChat release.");
+    throw new Error("The website and local app have different holdings settings. Install the matching ChainChat release.");
   if (walletRevoked && info.session)
     throw new Error("This wallet sign-in was revoked. Sign out and verify holdings again.");
   if (info.session && walletWatch) await walletWatch.check(info.selectedOwner);
@@ -2445,7 +2474,7 @@ async function invalidateWalletSession(message = "Wallet account or network chan
       await api("/api/license/logout", {});
       if (token === sessionToken) await refreshLicense();
     } catch {
-      $("licenseError").textContent = "Could not confirm wallet sign-out with the bridge. End the bridge session or stop the local bridge before reconnecting.";
+      $("licenseError").textContent = "Could not confirm wallet sign-out with the app. End the app session or stop the local app before reconnecting.";
     }
   }
 }
@@ -2456,9 +2485,12 @@ $("modelVerifyHoldings").addEventListener("click", () => {
   requirePair(showLicense);
 });
 $("loadAuditor").addEventListener("click", () => {
-  $("auditFrame").src = "./audit/";
-  $("auditFrame").classList.remove("hidden");
-  $("loadAuditor").classList.add("hidden");
+  requireAgent(() => {
+    $("auditFrame").src = "./audit/?chainchat=1";
+    $("auditFrame").classList.remove("hidden");
+    $("loadAuditor").classList.add("hidden");
+    auditedAgent = agentId();
+  });
 });
 $("checkLicenseButton").addEventListener("click", refreshLicense);
 $("logoutHoldingsButton").addEventListener("click", () => invalidateWalletSession("Wallet signed out. Your saved Timechain remains available."));
@@ -2475,14 +2507,14 @@ $("verifyHoldingsButton").addEventListener("click", async () => {
   try {
     await api("/api/license/logout", {});
     if (token !== sessionToken || revision !== licenseRevision)
-      throw new Error("The bridge changed before wallet sign-in. Verify again.");
+      throw new Error("The app changed before wallet sign-in. Verify again.");
     const info = await verifyHoldingsWithWallet({
       wallet: window.ethereum,
       config: licenseDeployment,
       origin: location.origin,
       deviceKey: currentLicense?.deviceKey,
       api: (path, data) => {
-        if (token !== sessionToken) throw new Error("The bridge session changed during wallet verification.");
+        if (token !== sessionToken) throw new Error("The app session changed during wallet verification.");
         return api(path, data);
       },
       signal: walletController.signal,
@@ -2490,11 +2522,11 @@ $("verifyHoldingsButton").addEventListener("click", async () => {
       onInvalidated: () => { void invalidateWalletSession(); },
     });
     if (token !== sessionToken || revision !== licenseRevision)
-      throw new Error("The bridge or wallet changed during sign-in. Verify again.");
+      throw new Error("The app or wallet changed during sign-in. Verify again.");
     walletWatch = watchWallet(window.ethereum, () => { void invalidateWalletSession(); });
     await walletWatch.check(info.selectedOwner);
     if (token !== sessionToken || revision !== licenseRevision)
-      throw new Error("The bridge or wallet changed during sign-in. Verify again.");
+      throw new Error("The app or wallet changed during sign-in. Verify again.");
     walletRevoked = false;
     renderLicense(info);
     if (info.status === "active") toast("CPHY holdings verified. Your tokens remain in your wallet.");
@@ -2549,28 +2581,39 @@ async function start() {
     console.warn("Base catalogue preview is unavailable.");
   }
   if (!localBridgePage) {
-    $("bridgeStatus").textContent = "PAIR YOUR LOCAL BRIDGE";
-    activity("Pair your local bridge to connect your Timechain.");
+    $("bridgeStatus").textContent = "INSTALL & LAUNCH CHAINCHAT";
+    activity("Install ChainChat. The app opens its local chat with OpenClaw and PoI already included.");
     setInterval(refreshState, 10000);
     return;
   }
   try {
     const status = await api("/api/status");
     $("bridgeStatus").textContent = supportedBridgeVersion(status.version)
-      ? "LOCAL BRIDGE READY"
-      : "BRIDGE UPDATE REQUIRED";
+      ? "LOCAL APP READY"
+      : "APP UPDATE REQUIRED";
     if (status.version) $("appVersion").textContent = `v${status.version}`;
     if (status.runtime?.backend === "openclaw") $("bridgeStatus").textContent = "OPENCLAW RUNTIME READY";
-    if (bootstrap && /^[a-f0-9]{64}$/.test(bootstrap)) {
-      const paired = await api("/api/launch", { nonce: bootstrap });
-      token = paired.token;
-      applyState(await api("/api/state"));
-      await refreshLicense();
-      toast("ChainChat is connected to your local OpenClaw runtime.");
+    if (!supportedBridgeVersion(status.version)) throw new Error("Install the latest ChainChat app to connect automatically.");
+    const paired = await connectLocalSession({ origin: location.origin, nonce: bootstrap,
+      storage: localTabStorage(), request: api });
+    token = paired.token;
+    applyState(await api("/api/state"));
+    await refreshLicense();
+    toast("Connected to your local OpenClaw app. PoI is ready for active Timechain chats.");
+    if (currentLicense?.identityVerified) {
+      try {
+        walletWatch?.close();
+        walletWatch = watchWallet(window.ethereum, () => { void invalidateWalletSession(); });
+        await walletWatch.check(currentLicense.selectedOwner);
+      } catch {
+        await invalidateWalletSession("Verify your wallet again to continue this resumed session.");
+      }
     }
-  } catch {
-    activity("Start the local bridge to connect your agent.", "error");
-    $("bridgeStatus").textContent = "BRIDGE OFFLINE";
+    if (!paired.resumable) activity("Connected. To reopen this chat, use the ChainChat Start menu shortcut; tab storage is unavailable.");
+  } catch (error) {
+    console.warn("Local app connection unavailable.", error.code || error.name || "CONNECTION_FAILED");
+    activity("Open ChainChat from the Start menu. Its authenticated local chat opens automatically.");
+    $("bridgeStatus").textContent = "OPEN CHAINCHAT FROM START MENU";
   }
   try {
     const result = await api("/api/archetypes");

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { isIP } from "node:net";
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +28,7 @@ import { enrichPrepared, searchPerspectives } from "./lib/native-cognition.mjs";
 import { createPoIBroker } from "./openclaw/broker.mjs";
 import { createOpenClawGateway } from "./openclaw/gateway.mjs";
 import { discoverTimechains } from "./openclaw/discovery.mjs";
+import { readChainAudit } from "./lib/audit-snapshot.mjs";
 
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = JSON.parse(
@@ -223,6 +225,10 @@ function sameSecret(a, b) {
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 }
+function isLoopbackPeer(address) {
+  const ip = String(address || "").replace(/^::ffff:/, "");
+  return ip === "::1" || (isIP(ip) === 4 && ip.startsWith("127."));
+}
 async function mapConcurrent(items, limit, action) {
   const out = new Array(items.length);
   let cursor = 0;
@@ -363,10 +369,44 @@ export async function createApp(options = {}) {
   let launchNonce = options.launchNonce || null;
   let launchExpiry = Date.now() + 60_000;
   const sessions = new Map();
+  const resumeTickets = new Map();
   const busy = new Set();
   const pausing = new Set();
   const idleJobs = new Map();
   const attempts = new Map();
+  function sessionAttempt(address) {
+    const now = Date.now();
+    const recent = (attempts.get(address) || []).filter(at => now - at < 60_000);
+    if (recent.length >= 6)
+      throw err("Too many pairing attempts. Try again in one minute.", "PAIR_RATE_LIMIT", 429);
+    recent.push(now);
+    attempts.set(address, recent);
+  }
+  function createBrowserSession(origin) {
+    const token = randomBytes(32).toString("hex");
+    const paired = {
+      origin,
+      expires: Date.now() + 12 * 60 * 60 * 1000,
+      provider: null,
+      controllers: new Set(),
+      agentId: store.agents[0]?.id || null,
+    };
+    license.attach(paired);
+    sessions.set(token, paired);
+    return token;
+  }
+  function forgetResume(session) {
+    if (session.resumeDigest) resumeTickets.delete(session.resumeDigest);
+    delete session.resumeDigest;
+  }
+  function rotateResume(token, session) {
+    forgetResume(session);
+    const ticket = randomBytes(32).toString("hex");
+    const digest = createHash("sha256").update(ticket).digest("hex");
+    resumeTickets.set(digest, { token, session });
+    session.resumeDigest = digest;
+    return ticket;
+  }
   const abortSession = (session) => {
     for (const controller of session.controllers || []) controller.abort();
     session.provider = null;
@@ -377,6 +417,7 @@ export async function createApp(options = {}) {
       if (session.expires < now) {
         abortSession(session);
         license.revoke(session);
+        forgetResume(session);
         sessions.delete(token);
       }
   }, 60_000);
@@ -743,8 +784,8 @@ export async function createApp(options = {}) {
       res.end(JSON.stringify(value));
     };
     try {
-      if (!localHosts.includes(req.headers.host) || !permitted)
-        throw err("Untrusted browser origin or host.", "ORIGIN_REJECTED", 403);
+      if (!isLoopbackPeer(req.socket.remoteAddress) || !localHosts.includes(req.headers.host) || !permitted)
+        throw err("Untrusted browser origin, host or client address.", "ORIGIN_REJECTED", 403);
       if (req.method === "OPTIONS") {
         const requestedMethod = req.headers["access-control-request-method"];
         const requestedHeaders = String(
@@ -826,20 +867,28 @@ export async function createApp(options = {}) {
         });
       if (req.method === "GET" && url.pathname === "/api/archetypes")
         return send(200, { archetypes });
+      const localBrowser = origin === `http://${req.headers.host}` &&
+        (req.headers["sec-fetch-site"] === undefined || req.headers["sec-fetch-site"] === "same-origin");
+      if (req.method === "POST" && url.pathname === "/api/local-resume") {
+        if (!localBrowser)
+          throw err("Resume is available only to the same-origin local application.", "LOCAL_ONLY", 403);
+        sessionAttempt(req.socket.remoteAddress);
+        const input = await body(req, 4096);
+        const digest = typeof input.resumeTicket === "string" && /^[a-f0-9]{64}$/.test(input.resumeTicket)
+          ? createHash("sha256").update(input.resumeTicket).digest("hex") : null;
+        const record = digest && resumeTickets.get(digest);
+        if (!record || sessions.get(record.token) !== record.session || record.session.origin !== origin ||
+            record.session.resumeDigest !== digest || record.session.expires < Date.now()) {
+          if (record && record.session.expires < Date.now()) {
+            abortSession(record.session); license.revoke(record.session); forgetResume(record.session);
+            sessions.delete(record.token);
+          }
+          throw err("This local resume ticket is invalid, expired or already used. Launch ChainChat again.", "RESUME_REJECTED", 403);
+        }
+        return send(200, { token: record.token, resumeTicket: rotateResume(record.token, record.session) });
+      }
       if (req.method === "POST" && ["/api/pair", "/api/launch"].includes(url.pathname)) {
-        const address = req.socket.remoteAddress;
-        const now = Date.now();
-        const recent = (attempts.get(address) || []).filter(
-          (t) => now - t < 60_000,
-        );
-        if (recent.length >= 6)
-          throw err(
-            "Too many pairing attempts. Try again in one minute.",
-            "PAIR_RATE_LIMIT",
-            429,
-          );
-        recent.push(now);
-        attempts.set(address, recent);
+        sessionAttempt(req.socket.remoteAddress);
         const input = await body(req, 4096);
         const launch = url.pathname === "/api/launch";
         if (launch ? (origin && origin !== `http://${req.headers.host}` || !launchNonce || Date.now() > launchExpiry ||
@@ -848,22 +897,13 @@ export async function createApp(options = {}) {
           !sameSecret(input.code.trim().toUpperCase(), pairingCode)
         ))
           throw err(
-            "The pairing code did not match the local bridge.",
+            "The pairing code did not match the local app.",
             "PAIR_FAILED",
             401,
           );
         if (launch) launchNonce = null;
-        const token = randomBytes(32).toString("hex");
-        const paired = {
-          origin: origin || `http://${req.headers.host}`,
-          expires: Date.now() + 12 * 60 * 60 * 1000,
-          provider: null,
-          controllers: new Set(),
-          agentId: store.agents[0]?.id || null,
-        };
-        license.attach(paired);
-        sessions.set(token, paired);
-        return send(200, { token });
+        const token = createBrowserSession(origin || `http://${req.headers.host}`);
+        return send(200, { token, ...(launch && localBrowser ? { resumeTicket: rotateResume(token, sessions.get(token)) } : {}) });
       }
       const token = String(req.headers.authorization || "").replace(
         /^Bearer /,
@@ -874,17 +914,18 @@ export async function createApp(options = {}) {
         if (session) {
           abortSession(session);
           license.revoke(session);
+          forgetResume(session);
         }
         sessions.delete(token);
         throw err(
-          "Pair this browser with the local bridge first.",
+          "Open ChainChat from the Start menu, or reconnect in optional website mode.",
           "PAIR_REQUIRED",
           401,
         );
       }
       if (session.origin !== (origin || `http://${req.headers.host}`))
         throw err(
-          "This bridge session belongs to a different browser origin.",
+          "This app session belongs to a different browser origin.",
           "SESSION_ORIGIN_REJECTED",
           403,
         );
@@ -970,6 +1011,7 @@ export async function createApp(options = {}) {
           if (url.pathname === "/api/unpair") {
             abortSession(session);
             license.revoke(session);
+            forgetResume(session);
             sessions.delete(token);
             return send(200, { ok: true });
           }
@@ -1023,6 +1065,13 @@ export async function createApp(options = {}) {
             return send(200, await state(session));
           }
           const record = agentFor(session);
+          if (url.pathname === "/api/audit/read") {
+            if (Object.keys(input).some(key => !["op", "index", "offset", "limit", "hash"].includes(key)))
+              throw err("Use only the supported read-only audit parameters.", "AUDIT_INVALID_REQUEST", 400);
+            return send(200, await readChainAudit({ root: record.root, op: input.op,
+              index: input.index, offset: input.offset, limit: input.limit, hash: input.hash,
+              inspect: () => engine({ op: "inspect", root: record.root, learning: false }) }));
+          }
           if (url.pathname === "/api/cancel") {
             cancelAgent(record);
             activityFor(session, record).event("operation", "cancelled", "Stop requested; an atomic write already started may finish");
@@ -1054,7 +1103,7 @@ export async function createApp(options = {}) {
               return await exclusive(record, async () => {
                 const inspected = await engine({ op: "inspect", root: record.root });
                 if (inspected.runtime?.supported !== true)
-                  throw err("Update the local bridge to use cognition controls.", "RUNTIME_UNAVAILABLE", 409);
+                  throw err("Update the local app to use cognition controls.", "RUNTIME_UNAVAILABLE", 409);
                 if (modeChange) {
                   await engine({ op: "dormancy", root: record.root,
                     action: next.mode === "dormant" ? "pause" : "resume", confirmed: true,
@@ -1078,7 +1127,7 @@ export async function createApp(options = {}) {
               if (!allowed.includes(input.action)) throw err("Choose an available native action.");
               const inspected = await engine({ op: "inspect", root: record.root });
               requireAwake(inspected);
-              if (inspected.runtime?.supported !== true) throw err("Update the local bridge.", "RUNTIME_UNAVAILABLE", 409);
+              if (inspected.runtime?.supported !== true) throw err("Update the local app.", "RUNTIME_UNAVAILABLE", 409);
               if (input.preview !== true && !cognitionFor(record).learning)
                 throw err("Enable learning before changing faculties or running maintenance.", "LEARNING_PAUSED", 409);
               const operation = { op: lifecycle ? "faculty_action" : "maintenance", root: record.root,
@@ -1934,6 +1983,7 @@ export async function createApp(options = {}) {
       license.revoke(session);
     }
     sessions.clear();
+    resumeTickets.clear();
   });
   let closingRuntime;
   const closeRuntime = () => closingRuntime ||= (async () => { await openclaw?.close(); await poiBroker?.close(); })();
@@ -2005,7 +2055,7 @@ if (
     console.error(
       error.code === "EADDRINUSE"
         ? "Port is in use. Set CT_CHAT_PORT to another port."
-        : "The local bridge could not start.",
+        : "The local app could not start.",
     );
     process.exitCode = 1;
   });

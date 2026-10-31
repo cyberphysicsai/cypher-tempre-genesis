@@ -105,7 +105,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.7.0</span>
+        ><span class="mono" id="appVersion">v0.7.1</span>
       </div>
       <div class="top-actions">
         <button
@@ -119,10 +119,19 @@
           ><span id="modelLabel">Connect a model</span
           ><span class="chevron">⌄</span></button
         ><button class="pair-button" id="pairButton">
-          <svg><use href="#i-link" /></svg><span>Pair bridge</span>
+          <svg><use href="#i-link" /></svg><span>Install & open</span>
         </button>
       </div>
     </header>
+
+    <section id="installNotice" class="install-notice hidden" aria-labelledby="installNoticeTitle">
+      <div>
+        <span class="eyebrow">OPENCLAW + PROOF OF INTERACTION INCLUDED</span>
+        <h2 id="installNoticeTitle">Install once. Launch your agent.</h2>
+        <p>Setup opens your local chat automatically. Choose your model and Timechain; PoI is already equipped. No separate bridge installation or pairing code.</p>
+      </div>
+      <button id="getStartedButton" class="primary-button" type="button">Install ChainChat ↗</button>
+    </section>
 
     <main class="workspace">
       <aside
@@ -460,7 +469,7 @@
         <span class="eyebrow">CYPHER TEMPRE CHAINCHAT / LIVE BETA</span>
         <h2 id="betaTitle">Your agent. Your machine.</h2>
         <p id="licenseSummary">
-          Pair your local bridge, then verify a wallet holding at least 21,000 CPHY on Base.
+          Launch the installed ChainChat app, then verify a wallet holding at least 21,000 CPHY on Base.
         </p>
         <p class="fine-print">
           Keep your CPHY in your wallet. Sign in to prove wallet control; no
@@ -473,7 +482,7 @@
         </button>
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.7.0/CypherTempre-ChainChat-Setup-0.7.0-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.7.1/CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
@@ -491,12 +500,12 @@
           <span class="eyebrow">BLOCKSPACE / CHAIN AUDITOR</span>
           <h2 id="auditTitle">Inspect the chain beneath your agent.</h2>
           <p>
-            The original read-only auditor is here. It pairs separately with the
-            audit bridge on port 8788.
+            Inspect your selected agent through the same local app. No second
+            connection or separate audit service is needed.
           </p>
         </div>
         <button id="loadAuditor" class="secondary-button">
-          Load chain auditor
+          Audit selected Timechain
         </button>
       </div>
       <iframe
@@ -512,7 +521,7 @@
         href="./audit/"
         target="_blank"
         rel="noopener noreferrer"
-        >Open auditor in a separate tab</a
+        >Open legacy auditor (advanced)</a
       >
     </section>
 
@@ -530,14 +539,14 @@
       </div>
       <h2>Hold CPHY. Keep it yours.</h2>
       <p id="licenseStatus" role="status">
-        Pair your local bridge, then verify a wallet holding at least 21,000 CPHY.
+        Launch ChainChat, then verify a wallet holding at least 21,000 CPHY.
       </p>
       <label class="field"
-        >Paired bridge key<input
+        >Local app identity<input
           id="licenseDeviceKey"
           readonly
           spellcheck="false"
-          placeholder="Pair your local bridge first"
+          placeholder="Launch ChainChat first"
       /></label>
       <label class="field"
         >Verified wallet<input
@@ -548,7 +557,7 @@
           placeholder="Connect your wallet to prove control"
       /></label>
       <p class="fine-print">
-        Your wallet signs a one-use ChainChat sign-in message for this paired bridge.
+        Your wallet signs a one-use ChainChat sign-in message for this local app.
         A wallet address alone cannot unlock access.
       </p>
       <div class="info-box">
@@ -579,10 +588,28 @@
       <p class="dialog-error" id="licenseError" role="alert"></p>
     </dialog>
 
+    <dialog id="installDialog" class="modal compact-modal">
+      <div class="dialog-top">
+        <span class="eyebrow">YOUR AGENT RUNS ON YOUR MACHINE</span>
+        <button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button>
+      </div>
+      <h2>One install. Everything starts together.</h2>
+      <p>The installer includes OpenClaw, Proof of Interaction, the Timechain engine and this chat interface. It starts the app and connects the local chat automatically.</p>
+      <ol class="install-steps">
+        <li>Download and run setup for Windows.</li>
+        <li>In the chat it opens, choose your API model and verify CPHY holdings.</li>
+        <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
+      </ol>
+      <a class="primary-button full-width" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.7.1/CypherTempre-ChainChat-Setup-0.7.1-windows-x64.exe" rel="noopener noreferrer">Download Windows setup ↗</a>
+      <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from the Windows Start menu. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
+      <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>
+      <button id="advancedWebsitePairing" type="button" class="quiet-button">Use website mode (advanced)</button>
+    </dialog>
+
     <dialog id="pairDialog" class="modal compact-modal">
       <form id="pairForm">
         <div class="dialog-top">
-          <span class="eyebrow">A PRIVATE CONNECTION</span
+          <span class="eyebrow">OPTIONAL WEBSITE CONNECTION</span
           ><button
             type="button"
             class="icon-button"
@@ -595,22 +622,19 @@
         <span class="modal-emblem"
           ><svg><use href="#i-link" /></svg
         ></span>
-        <h2>Pair your local runtime.</h2>
+        <h2>Use the hosted interface.</h2>
         <p>
-          Launch ChainChat on this machine. Its local page pairs automatically.
-          Open its connection panel to show the code for this website.
+          The installed chat connects automatically. To use this website instead,
+          open its connection panel and show the website connection code.
         </p>
         <div id="hostedBridgeSetup" class="hidden">
           <div class="info-box">
-            Install and launch ChainChat, or start the source distribution:
-            <code
-              >npm start</code
-            >. This runtime trusts <span id="hostedOrigin"></span>.
-            Pairing connects only to this machine at 127.0.0.1. Your browser
+            This optional mode connects <span id="hostedOrigin"></span>
+            to your installed app on this machine at 127.0.0.1. Your browser
             may ask you to allow local network access.
           </div>
           <label class="field"
-            >Local bridge port<input
+            >Local app port<input
               id="bridgePort"
               type="number"
               min="1"
@@ -622,26 +646,26 @@
           /></label>
         </div>
         <label class="field"
-          >Pairing code<input
+            >Website connection code<input
             id="pairCode"
             required
             autocomplete="off"
             spellcheck="false"
-            placeholder="Paste the code from your terminal"
+            placeholder="Code from your local app's connection panel"
         /></label>
         <div class="dialog-error" role="alert"></div>
         <button class="primary-button full-width" type="submit">
           Pair securely <span>↗</span>
         </button>
         <p class="fine-print">
-          Reloading disconnects this browser. The bridge keeps your key in
-          memory until you end the session, it expires, or the bridge stops.
-          Your key is never saved in browser storage.
+          This optional website session reconnects with a code after reload.
+          The installed chat can resume its authenticated tab automatically.
+          Model API keys remain in local process memory.
         </p>
       </form>
       <section id="pairedSession" class="hidden">
         <div class="dialog-top">
-          <span class="eyebrow">LOCAL BRIDGE CONNECTED</span
+          <span class="eyebrow">LOCAL OPENCLAW APP CONNECTED</span
           ><button
             type="button"
             class="icon-button"
@@ -657,7 +681,7 @@
         <h2>Your local runtime is paired.</h2>
         <p>
           This browser can work with your local agents. End the session to
-          revoke its access and clear its model credential from bridge memory.
+          revoke its access and clear its model credential from app memory.
         </p>
         <div class="info-box">
           Your saved Timechains and pending blocks remain on this machine.
@@ -671,7 +695,7 @@
           type="button"
           class="secondary-button full-width session-action"
         >
-          End bridge session
+          End app session
         </button>
         <div class="dialog-error" role="alert"></div>
       </section>
@@ -802,7 +826,7 @@
             type="password"
             autocomplete="new-password"
             spellcheck="false"
-            placeholder="Held only in this bridge session"
+            placeholder="Held only in local app memory"
         /></label>
         <div class="info-box">
           In active Timechain mode, your prompt, selected memories and candidate answer go to this
@@ -1157,7 +1181,7 @@
             Your pack includes the selected faculty definitions and their
             provenance and portable mechanism metadata, not your conversation history.
             Authored code remains quarantined until separately approved locally. Base faculties are
-            already included in every agent. The bridge lists which learned or
+            already included in every agent. The app lists which learned or
             quarantined faculties can be shared; sharing does not equip or execute them.
             Authored packs may include the whole operator module and helper functions.
             Review definitions, learned metadata and source for private material before sharing.
