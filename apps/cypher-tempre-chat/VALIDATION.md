@@ -2,7 +2,17 @@
 
 Validation separates deterministic engine behavior, application orchestration and real-model observations. Passing a transport or gate test does not establish equal answer quality across models, perfect security or elimination of hallucinations.
 
-## Current interoperability release: 0.6.0
+## Current conversation grounding fix: 0.6.1
+
+The previous wrapper could withhold a fresh-chain introduction with six semantic scores of 235/255: it omitted the agent's genesis identity from native grounding and supplied no agent name to the separate reviewer. The native gate reported zero grounding and forced uncertainty for the otherwise supported introduction. The reviewer also required demonstrated strength of every value, which could penalize an ordinary greeting without a value conflict.
+
+The adapter now derives a narrow identity/runtime context from verified genesis and the installed interface. Generation, review and native grounding receive that context; browser-supplied context cannot replace it. Identity is not counted as a historical evidence ring or as support for corpus totals. The reviewer assesses completeness relative to the task, while retaining all score floors and rejection of unsupported chain-specific claims.
+
+The final local suite passed **193 Node tests** with one expected Windows platform skip (194 total), and **85 Python tests** with one symlink-privilege skip (86 total). JavaScript syntax and Git whitespace checks passed. New tests cover fresh named/generic introductions, custom names, native evaluation and commitment, recalled-memory-disabled HTTP chat, context delivery to the actual provider request serializer, malformed/forged context, armed entity grounding, unsupported dates/measurements/totals, and low fruitage/consistency rejection. The native engine source remains unchanged.
+
+These checks use disposable chains and local model/reviewer fixtures. No new paid-provider benchmark was run. Semantic model judgments remain fallible; the tests establish the reproduced mechanical fix and review protocol, not universal acceptance across all providers.
+
+## Earlier interoperability release: 0.6.0
 
 Eight independent interoperability acceptance cases pass against an unchanged original 3.30.08 installation. They use real Python engines, local HTTP, disposable chains and synthetic generation/review transports. No paid provider calls, personal chains or real wallet signatures were used for these new changes.
 

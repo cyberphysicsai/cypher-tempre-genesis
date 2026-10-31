@@ -183,6 +183,35 @@ def genesis_for(tc):
             "hash": ring["ring_hash"], "timestamp": ring["timestamp"]}
 
 
+def trusted_agent_context(root, tc):
+    """Facts owned by this verified agent and the installed chat runtime.
+
+    This is identity/affordance context, not recalled experience or evidence
+    that an external task was performed. Never read a request-supplied copy.
+    """
+    genesis = genesis_for(tc)
+    return {"version": 1, "name": genesis["name"], "covenant": genesis["covenant"],
+            "genesisHash": genesis["hash"],
+            "runtime": {"interface": "Cypher Tempre ChainChat", "role": "conversational assistant",
+                        "localTimechain": True, "modelIndependentIdentity": True, "faculties": True,
+                        "chronosynapticMaxPerspectives": 21, "externalActionTools": False}}
+
+
+def trusted_agent_projection(context):
+    """A small factual projection; prompt metadata never becomes evidence."""
+    return ("Verified paired-agent identity and runtime: The agent is named "
+            + json.dumps(context["name"], ensure_ascii=False)
+            + ". It is a conversational AI assistant in the Cypher Tempre ChainChat interface. "
+              "Its conversational role is to greet users, introduce itself, offer help, answer questions, "
+              "explore ideas, and think through problems. Hello and welcome are greetings; asking how "
+              "it can help today or what the user would like to work on is a conversational invitation. "
+              "The agent's genesis covenant is "
+            + json.dumps(context["covenant"], ensure_ascii=False)
+            + ". Its identity and memory live in a local Timechain and persist across model changes. "
+              "The interface supports equipped modalities and senses and up to 21 Chronosynaptic perspectives. "
+              "External shell, browser, filesystem and other action tools are unavailable in this chat.")
+
+
 def catalog(root):
     out = []
     for kind, plural in (("modality", "modalities"), ("sense", "senses")):
@@ -376,7 +405,8 @@ def assess_exchange(root, tc, request, source_evidence=None):
     source_texts = list(source_evidence or [])
     # Broad preparation JSON contains faculty IDs, scores, and other prompt
     # metadata. It is never factual evidence for a candidate's specific claims.
-    context = incoming
+    identity = trusted_agent_projection(trusted_agent_context(root, tc))
+    context = incoming + "\n\n" + identity
     if evidence:
         context += "\n\nDeclared canonical evidence:\n" + "\n".join(e["text"] for e in evidence)
     if source_texts:
@@ -389,9 +419,9 @@ def assess_exchange(root, tc, request, source_evidence=None):
     verdict = gate.evaluate(outgoing, window, context=context,
                             external_scores=scores, span_guard=True,
                             declared_evidence=len(used),
-                            # A truthy empty sentinel activates the native entity
-                            # check even when no historical evidence was declared.
-                            evidence_texts=[e["text"] for e in evidence] + source_texts or [""])
+                            # Verified runtime facts ground identity specifics;
+                            # they never add historical evidence credit.
+                            evidence_texts=[e["text"] for e in evidence] + source_texts + [identity])
     if verdict["decision"] != "SEAL":
         raise BridgeError("POI_REJECTED", "The Proof of Interaction gate withheld this response.", verdict=verdict)
     return {"input": incoming, "output": outgoing, "scores": scores,
@@ -418,7 +448,8 @@ def op_inspect(request):
     tc, report, consensus = verified_chain(root)
     history = recent_history(tc, 20)
     head = compact_head(tc)
-    return {"root": str(root), "genesis": genesis_for(tc), "head": head, "height": head["index"] + 1,
+    return {"root": str(root), "genesis": genesis_for(tc), "trustedAgentContext": trusted_agent_context(root, tc),
+            "head": head, "height": head["index"] + 1,
             "verified": True, "verification": report, "consensus": consensus,
             "locked": (tc.dir / "LOCKED").exists() or bool(maintenance_status(root)), "paused": (tc.dir / "PAUSED").exists(),
             "maintenancePending": maintenance_status(root),
@@ -554,7 +585,8 @@ def op_prepare(request):
                           "recalled_memories": memories,
                           "recent_dialogue": [{"input": x["input"], "output": x["output"], "ring": x["ring"]}
                                               for x in recent]}, ensure_ascii=False)
-    return {"head": compact_head(tc), "genesis": g, "context": context, "memories": memories,
+    return {"head": compact_head(tc), "genesis": g, "trustedAgentContext": trusted_agent_context(root, tc),
+            "context": context, "memories": memories,
             "loadout": selected, "computed": labels.get("computed", {}),
             "frames": labels.get("frames", []), "labels": labels, "screening": screening,
             "facultyExecution": labels["facultyExecution"],

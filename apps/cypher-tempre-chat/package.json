@@ -1,6 +1,6 @@
 {
   "name": "cypher-tempre-chat",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Cypher Tempre ChainChat: bring-your-own-model chat with a local Timechain and verified CPHY holdings.",
   "private": true,
   "type": "module",

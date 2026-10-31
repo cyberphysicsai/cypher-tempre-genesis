@@ -1153,7 +1153,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Update and restart your local bridge to beta 0.6.0 or newer before pairing. This interface requires complete faculty portability and native execution receipts.");
+      throw new Error("Update and restart your local bridge to beta 0.6.1 or newer before pairing. This interface requires complete faculty portability and native execution receipts.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
