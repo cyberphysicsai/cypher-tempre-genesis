@@ -2,7 +2,7 @@ export function supportedBridgeVersion(version) {
   if (typeof version !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) return false;
   const value = version.split(".").map(Number);
   if (!value.every(Number.isSafeInteger)) return false;
-  const minimum = [0, 7, 1];
+  const minimum = [0, 8, 0];
   for (let i = 0; i < minimum.length; i++) {
     if (value[i] > minimum[i]) return true;
     if (value[i] < minimum[i]) return false;
@@ -31,6 +31,8 @@ export function formatTokenBalance(raw) {
 
 export function requiresHoldings(path, data) {
   if (data === undefined) return false;
+  if (path === "/api/openclaw/tools" && data?.enabled === false) return false;
+  if (path === "/api/openclaw/command" && /^\/(?:stop|goal\s+pause)\s*$/i.test(data?.command || '')) return false;
   if (path === "/api/cancel") return false;
   if (path === "/api/cognition" && data?.mode === "dormant" && data.confirm === true &&
       Object.keys(data).every(key => ["mode", "confirm"].includes(key))) return false;

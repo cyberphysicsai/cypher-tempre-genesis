@@ -1,4 +1,5 @@
 import { initMotifs } from "./motifs.js";
+import { initThemes } from "./themes.js";
 import {
   validateHoldingsConfig,
   verifyHoldingsWithWallet,
@@ -21,6 +22,7 @@ import {
 } from "./bridge-connection.js";
 import { connectLocalSession, clearLocalResume, localTabStorage } from "./local-session.js";
 import { createAuditParent } from "./audit-parent.js";
+import { initOpenClawSettings } from "./openclaw-settings.js";
 const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
@@ -245,7 +247,7 @@ async function api(path, data, options = {}) {
   } catch (error) {
     if (error.name === "AbortError" || localBridgePage) throw error;
     throw new Error(
-      "Could not reach the installed app. Open ChainChat from the Start menu. Optional website mode may also need local-network permission.",
+      "Could not reach the installed app. Open ChainChat using its application launcher. Optional website mode may also need local-network permission.",
     );
   }
   let result;
@@ -383,7 +385,7 @@ async function refreshState() {
     const result = await api("/api/state");
     if (token === sessionToken) applyState(result);
   } catch (error) {
-    if (!token) activity("Session ended. Open ChainChat from the Start menu to reconnect.");
+    if (!token) activity("Session ended. Open ChainChat using its application launcher to reconnect.");
     else console.warn("State refresh unavailable.");
   } finally {
     polling = false;
@@ -827,7 +829,7 @@ function renderState() {
   $("bridgeDot").classList.toggle("online", paired);
   $("bridgeStatus").textContent = paired
     ? state.executionRuntime?.backend === "openclaw" ? "OPENCLAW CONNECTED" : "LOCAL RUNTIME CONNECTED"
-    : localBridgePage ? "OPEN CHAINCHAT FROM START MENU" : "INSTALL & LAUNCH CHAINCHAT";
+    : localBridgePage ? "OPEN INSTALLED CHAINCHAT" : "INSTALL & LAUNCH CHAINCHAT";
   $("pairButton").querySelector("span").textContent = paired
     ? "App connected"
     : "Install & open";
@@ -950,6 +952,7 @@ function renderConversation() {
         "",
         message.held
           ? "RESPONSE HELD"
+          : message.control ? "OPENCLAW CONTROL"
           : message.role === "user"
             ? "YOU"
             : state.agent?.name?.toUpperCase() || "CYPHER AGENT",
@@ -965,6 +968,7 @@ function renderConversation() {
           "",
           messageIsDormant(message)
             ? "Plain model chat · not reviewed or recorded in Timechain"
+            : message.control ? "Native control result · Timechain history preserved"
             : message.pending
             ? "✓ Covenant accepted · pending block"
             : ring
@@ -1125,6 +1129,7 @@ $("showPairingCode").addEventListener("click", async () => {
   } finally { button.disabled = false; }
 });
 function clearLocalSession() {
+  nativePanel.close();
   clearLocalResume(localBridgePage ? localTabStorage() : null);
   chatController?.abort();
   walletController?.abort();
@@ -1155,7 +1160,7 @@ function clearLocalSession() {
   renderLicense(null);
   renderState();
   renderConversation();
-  activity("App disconnected. Open ChainChat from the Start menu to continue your saved Timechain.");
+  activity("App disconnected. Open ChainChat using its application launcher to continue your saved Timechain.");
 }
 $("endSession").addEventListener("click", async () => {
   const button = $("endSession");
@@ -1182,6 +1187,7 @@ $("disconnectModel").addEventListener("click", async () => {
     $("apiKey").value = "";
     $("modelId").value = "";
     $("baseUrl").value = "";
+    $("reasoningCapable").checked = false;
     renderState();
     closeDialog("modelDialog");
     toast("Model disconnected. Its key was cleared from app memory.");
@@ -1198,7 +1204,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.7.1 or newer to use this interface. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.8.0 or newer to use this interface. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -1284,6 +1290,7 @@ function openModel() {
   $("provider").value = provider.provider || "openai";
   $("modelId").value = provider.model || "";
   $("baseUrl").value = provider.baseUrl || "";
+  $("reasoningCapable").checked = provider.reasoningCapable === true;
   $("apiKey").value = "";
   updateProviderPlaceholder();
   renderHoldingsControls();
@@ -1308,6 +1315,7 @@ function updateProviderPlaceholder() {
 $("provider").addEventListener("change", () => {
   $("baseUrl").value = "";
   $("modelId").value = "";
+  $("reasoningCapable").checked = false;
   updateProviderPlaceholder();
 });
 $("modelForm").addEventListener("submit", (event) => {
@@ -1317,6 +1325,7 @@ $("modelForm").addEventListener("submit", (event) => {
       provider: $("provider").value,
       model: $("modelId").value.trim(),
       baseUrl: $("baseUrl").value.trim() || $("baseUrl").placeholder,
+      reasoningCapable: $("reasoningCapable").checked,
       apiKey: $("apiKey").value,
     };
     try {
@@ -1340,10 +1349,31 @@ $("modelDialog").addEventListener("close", () => ($("apiKey").value = ""));
 $("chatForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = $("messageInput").value.trim();
-  if (!message || requestBusy) return;
+  if (!message) return;
+  if (requestBusy && /^\/stop\s*$/i.test(message)) {
+    chatController?.abort();
+    await api('/api/cancel', {}).catch(() => {});
+    return;
+  }
+  if (requestBusy) return;
   if (!token) {
     requirePair(() => $("messageInput").focus());
     return;
+  }
+  if (/^\/[a-z][a-z0-9_-]*(?:\s|$)/i.test(message)) {
+    try {
+      const result = await api('/api/openclaw/command', { command: message });
+      if (result.state) applyState(result.state);
+      if (result.kind !== 'turn') {
+        $("messageInput").value = '';
+        addMessage({ role: 'user', content: message });
+        addMessage({ role: 'assistant', content: result.text || 'Native command completed.', control: true });
+        if (result.action === 'model') openModel();
+        if (result.action === 'config') nativePanel.open();
+        if (result.action === 'stop') chatController?.abort();
+        return;
+      }
+    } catch (error) { toast(error.message, true); return; }
   }
   if (!state.agent) {
     toast("Begin a new genesis or pair your existing agent first.");
@@ -1387,7 +1417,8 @@ $("chatForm").addEventListener("submit", async (event) => {
       );
     addMessage({ role: "assistant", input: message, mode: turnMode, ...response });
     activity(
-      messageIsDormant(response)
+      response.control ? "Native OpenClaw control completed."
+        : messageIsDormant(response)
         ? "Plain model response · Timechain remains paused and unchanged."
         : response.pending
         ? `Covenant accepted · ${bytes(state.pending?.bytes)} pending toward the next block.`
@@ -2549,6 +2580,7 @@ $("verifyHoldingsButton").addEventListener("click", async () => {
 async function start() {
   const bootstrap = localBridgePage ? new URLSearchParams(location.hash.slice(1)).get("launch") : null;
   if (bootstrap !== null) history.replaceState(null, "", location.pathname + location.search);
+  initThemes();
   initMotifs();
   renderState();
   setInterval(() => { void refreshActivity(); }, 1000);
@@ -2609,11 +2641,11 @@ async function start() {
         await invalidateWalletSession("Verify your wallet again to continue this resumed session.");
       }
     }
-    if (!paired.resumable) activity("Connected. To reopen this chat, use the ChainChat Start menu shortcut; tab storage is unavailable.");
+    if (!paired.resumable) activity("Connected. To reopen this chat, use the ChainChat application launcher; tab storage is unavailable.");
   } catch (error) {
     console.warn("Local app connection unavailable.", error.code || error.name || "CONNECTION_FAILED");
-    activity("Open ChainChat from the Start menu. Its authenticated local chat opens automatically.");
-    $("bridgeStatus").textContent = "OPEN CHAINCHAT FROM START MENU";
+    activity("Open ChainChat using its application launcher. Its authenticated local chat opens automatically.");
+    $("bridgeStatus").textContent = "OPEN INSTALLED CHAINCHAT";
   }
   try {
     const result = await api("/api/archetypes");
@@ -2621,4 +2653,18 @@ async function start() {
   } catch {}
   setInterval(refreshState, 10000);
 }
+const nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, onClose: renderState,
+  executeCommand: async command => {
+    const result = await api('/api/openclaw/command', { command });
+    if (result.state) applyState(result.state);
+    if (result.kind === 'turn') {
+      nativePanel.close();
+      $("messageInput").value = command;
+      $("chatForm").requestSubmit();
+    } else if (result.action === 'model') openModel();
+    else if (result.action === 'config') nativePanel.open();
+    else if (result.action === 'stop') chatController?.abort();
+    return result;
+  },
+});
 start();
