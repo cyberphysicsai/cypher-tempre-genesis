@@ -343,7 +343,8 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       const deviceIdentity = await operatorIdentity(directory);
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { client.stop(); reject(fail('The native OpenClaw control connection did not authenticate.', 'OPENCLAW_CONTROL_TIMEOUT')); }, 20000);
-        const client = new GatewayClient({ url: `ws://127.0.0.1:${port}`, token: gatewayToken,
+        const controlUrl = `ws://127.0.0.1:${port}`;
+        const client = new GatewayClient({ url: controlUrl, deviceAuthScope: controlUrl, token: gatewayToken,
           clientName: 'cli', clientDisplayName: 'Cypher Tempre private controls', mode: 'backend', role: 'operator',
           caps: ['session-scoped-events'],
           scopes: ['operator.read', 'operator.write', 'operator.admin'], deviceIdentity, sharedStateMode: 'read-only',
