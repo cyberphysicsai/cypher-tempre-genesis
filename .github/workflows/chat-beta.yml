@@ -45,7 +45,7 @@ jobs:
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'cypher-tempre-chat.zip'
           $installer = Join-Path $env:RUNNER_TEMP 'ChainChat-Setup.exe'
-          git archive --format=zip --prefix=cypher-tempre-chat/ --output=$archive HEAD:apps/cypher-tempre-chat
+          git -C $env:GITHUB_WORKSPACE archive --format=zip --prefix=cypher-tempre-chat/ --output=$archive HEAD:apps/cypher-tempre-chat
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python installer/build_windows.py --archive $archive --output $installer
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
