@@ -23,7 +23,8 @@ test('forced native legacy fallback cannot obtain a model lease or persist an un
   const pluginPath = path.join(directory, 'fixture-plugin');
   await fs.cp(fileURLToPath(new URL('../openclaw/plugin', import.meta.url)), pluginPath, { recursive: true });
   const compactionFile = path.join(pluginPath, 'compaction.mjs'), source = await fs.readFile(compactionFile, 'utf8');
-  const broken = source.replace("  if (typeof sdk?.SessionManager", "  console.error('CHAINCHAT_FIXTURE_CONTEXT_FACTORY_FAILURE');\n  throw new Error('Disposable context-engine factory failure');\n  if (typeof sdk?.SessionManager");
+  const factoryStart = 'export function createReviewedContextEngine({ sdk, request, workspaceDir, commitStore, targetRegistry } = {}) {';
+  const broken = source.replace(factoryStart, factoryStart + "\n  console.error('CHAINCHAT_FIXTURE_CONTEXT_FACTORY_FAILURE');\n  throw new Error('Disposable context-engine factory failure');");
   assert.notEqual(source, broken, 'The disposable fixture must actually force native context-factory fallback.');
   await engine({ op: 'init', root, name: 'LegacyContainmentFixture' });
   const inspected = await engine({ op: 'inspect', root, learning: false }), identity = { agentId: 'legacy-fixture', genesisHash: inspected.genesis.hash };
