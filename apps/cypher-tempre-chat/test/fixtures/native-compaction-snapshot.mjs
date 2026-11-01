@@ -68,6 +68,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     assert.equal(JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8')).version, '2026.10.9');
     const { SessionManager, buildSessionContext } = await import(pathToFileURL(path.join(packageRoot, 'dist/plugin-sdk/agent-sessions.js')).href);
     const manager = await SessionManager.openAsync(sessionTarget, stateDir), branch = manager.getBranch(), messages = buildSessionContext(branch).messages;
+    const persistedBoundary = snapshot.compactions.at(-1);
+    assert.ok(persistedBoundary?.details?.retainedCompleteTurns >= 2, 'The actual automatic boundary must retain two complete prior native turns.');
+    assert.ok(persistedBoundary.retainedUserTurns >= 2 && persistedBoundary.retainedAssistantMessages >= 2);
     const activeCompactions = branch.filter(entry => entry.type === 'compaction').map(entry => ({ id: entry.id, summary: entry.summary }));
     const view = JSON.stringify(messages), latest = activeCompactions.at(-1);
     snapshot.sdk = { activeCompactions, modelViewContainsLatestSummary: !!latest && view.includes(latest.summary),
