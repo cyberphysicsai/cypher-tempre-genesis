@@ -293,7 +293,7 @@ export function register(api) {
     const ordinary = hooks[name];
     hooks[name] = async (event, context) => (await channels[name](event, context)) ?? ordinary(event, context);
   }
-  hooks.before_dispatch = channels.before_dispatch;
+  hooks.message_received = channels.message_received;
   api.registerContextEngine?.(PLUGIN_ID, async context => createReviewedContextEngine({
     sdk: await import('openclaw/plugin-sdk/agent-sessions'), request, workspaceDir: context.workspaceDir,
     targetRegistry: stats(),
@@ -302,8 +302,9 @@ export function register(api) {
   // its explicit deny/cancel result. The UI transport also requires receipts.
   const timeoutMs = 2 * (config.requestTimeoutMs ?? 60000) + 10000;
   // The native durable-goal admission contract permits before_agent_reply
-  // after its recovery checkpoint. Registering before_agent_run would make
-  // OpenClaw reject every native goal as restart-unsafe.
+  // after its recovery checkpoint. before_dispatch and before_agent_run are
+  // both restart-unsafe, so channel ingress uses observation only; it cannot
+  // grant a native run, bypass output review, or return a synthetic reply.
   for (const [name, handler] of Object.entries(hooks)) if (name !== 'before_agent_run') api.on(name, handler, { priority: 1000000, timeoutMs });
 }
 

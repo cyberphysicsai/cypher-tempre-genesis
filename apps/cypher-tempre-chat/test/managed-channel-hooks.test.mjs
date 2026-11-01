@@ -13,20 +13,23 @@ test('canonical ingress uses exact native host fields and refuses conflicting mi
     { ...context, text: event.content });
   for (const key of ['messageId', 'senderId', 'sessionKey', 'channel']) assert.throws(() => canonicalNativeInbound({ ...event, [key]: 'forged' }, context), /did not authorize/);
   for (const key of Object.keys(context)) assert.throws(() => canonicalNativeInbound(event, { ...context, [key]: undefined }), /did not authorize/);
+  for (const fields of [{ media: [{ url: 'https://example.com/unreviewed-image' }] }, { originalMedia: [{ path: '/unreviewed' }] },
+    { mediaStagingPending: true }, { media: {} }]) assert.throws(() => canonicalNativeInbound({ ...event, ...fields }, context), /did not authorize/);
+  assert.equal(canonicalNativeInbound({ ...event, media: [], originalMedia: [], mediaStagingPending: false }, context).text, event.content);
 });
 
-test('native inbound takeover never returns an unreviewed reply or falls through on refusal', async () => {
+test('native inbound observation queues only canonical data and never grants a run or direct reply', async () => {
   const calls = [], held = [];
   const hooks = createChannelHooks(async (operation, binding, fields) => { calls.push({ operation, binding, fields }); return { allowed: true, accepted: true }; },
     { channelIds: () => ['fixture'], onHeld: entry => held.push(entry) });
-  assert.deepEqual(await hooks.before_dispatch(event, context), { handled: true });
+  assert.equal(await hooks.message_received(event, context), undefined);
   assert.equal(calls[0].operation, 'channel_ingress'); assert.equal(calls[0].fields.channel.sessionKey, context.sessionKey);
   assert.match(calls[0].binding.runId, /^channel-transport:/); assert.notEqual(calls[0].binding.runId, event.content);
-  assert.deepEqual(await hooks.before_dispatch(event, { ...context, senderId: 'forged' }), { handled: true });
+  assert.equal(await hooks.message_received(event, { ...context, senderId: 'forged' }), undefined);
   assert.equal(calls.length, 1); assert.equal(held.length, 1);
-  assert.deepEqual(await hooks.before_dispatch(event, { ...context, channelId: 'webchat' }), { handled: false });
+  assert.equal(await hooks.message_received(event, { ...context, channelId: 'webchat' }), undefined);
   const denied = createChannelHooks(async () => ({ allowed: false }), { channelIds: () => ['fixture'] });
-  assert.deepEqual(await denied.before_dispatch(event, context), { handled: true });
+  assert.equal(await denied.message_received(event, context), undefined);
 });
 
 test('configured native sends require a fresh exact candidate gate; ordinary UI sends remain composable', async () => {

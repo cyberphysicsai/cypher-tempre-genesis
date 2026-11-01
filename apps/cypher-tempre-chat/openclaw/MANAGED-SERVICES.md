@@ -28,6 +28,17 @@ perception helper does not grant model-supplied code execution. Uploads require 
 file roots; downloads remain in the owned download directory. Local/private
 destinations and unrelated browser profiles are unavailable through this adapter.
 
+On Ubuntu 23.10+ and systems with restricted unprivileged user namespaces,
+downloaded Chromium may be refused by AppArmor before the browser starts. Use
+an OS-supported Chrome/Chromium installation with its distribution security
+profile, or ask an administrator to review an AppArmor namespace exception for
+the exact managed executable. The exception is specific to that executable;
+keep its installation directory private and review it again when the binary
+path changes. ChainChat keeps Chromium's sandbox enabled and does not modify
+system policy or disable namespace restrictions globally. See the
+[Chromium AppArmor guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md)
+and [Linux setup notes](../installer/POSIX.md#linux-browser-sandbox-policy).
+
 ## Channels and scheduled turns
 
 First enable the matching bundled or third-party channel plugin through Trusted
@@ -39,6 +50,15 @@ text messages enter the same prepare/generate/review/commit pipeline as chat.
 Outgoing text receives a separate review and a one-use exact-route/content
 authorization before the native transport sends it. Media payloads require their
 own reviewed adapter and are held by the current text transport.
+
+Ingress uses the published `message_received` observation hook with native
+channel, account, conversation, sender and message identities. Observation does
+not admit the native channel's model run: that unregistered run and its replies
+remain held. Only the separately admitted managed turn may infer and deliver.
+This keeps native goals compatible with OpenClaw's restart-safety rules.
+Human operator commands follow OpenClaw's own channel authorization. PoI's
+model-action boundary does not turn those explicit human controls into model
+actions; ChainChat's local pause and revocation controls remain available.
 
 Native cron schedules run a fixed, inert local signal. The parent then starts the
 reviewed turn; cron cannot select an arbitrary command, independent model run or

@@ -41,6 +41,27 @@ an explicit managed Chromium setup action; downloads stay under
 not run `sudo` or install Linux browser system libraries. Personal browser
 profiles are not imported.
 
+### Linux browser sandbox policy
+
+The base application install remains per-user and needs no administrator
+permission. Optional browser automation also needs working Chromium system
+libraries and its sandbox. Ubuntu 23.10+ can block user namespaces for downloaded
+browsers through AppArmor. A launch error mentioning `No usable sandbox`,
+`userns` or `AppArmor` requires an OS policy review; reinstalling the application
+does not grant this permission.
+
+Prefer a supported Chrome/Chromium package with an appropriate distribution
+security profile. An administrator can instead approve only the exact managed
+Chromium executable using the
+[upstream per-executable AppArmor procedure](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
+Use its canonical absolute binary path, not a wildcard covering downloaded
+programs or the whole user directory. Anyone able to replace a binary at that
+approved path gains the same namespace permission, so keep its directory
+private and review the profile when a managed-browser update changes the path.
+The installer does not create this privileged exception. Do not disable
+Chromium's sandbox or the system-wide namespace restriction to work around a
+launch failure.
+
 The Python front door waits for the private owned-runtime status and supports
 relaunch without replacing a live matching runtime. It does not report success
 merely because Node was spawned, and it never kills another program to obtain a

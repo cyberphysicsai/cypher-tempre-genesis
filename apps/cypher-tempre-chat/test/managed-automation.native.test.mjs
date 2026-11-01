@@ -62,7 +62,7 @@ test('real pinned native scheduler signals invoke a PoI-reviewed model turn and 
       return { allowed: Boolean(allowed), candidateSha256: channel.candidateSha256 };
     },
   }); await broker.start();
-  const diagnostics = [];
+  const diagnostics = [], phases = [];
   const manager = createOpenClawGateway({ stateDir: path.join(directory, 'managed'), packageRoot, nodePath,
     pluginPath: fileURLToPath(new URL('../openclaw/plugin', import.meta.url)), broker, startupTimeoutMs: 180000,
     onDiagnostic: line => diagnostics.push(line) });
@@ -71,7 +71,8 @@ test('real pinned native scheduler signals invoke a PoI-reviewed model turn and 
     assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep) && path.basename(directory).startsWith('ct-auto-native-'));
     await fs.rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
   });
-  await manager.start();
+  try {
+  await manager.start(); phases.push('initial-native-ready');
   const existing = await manager.automationRpc('cron.list', { includeDisabled: true });
   assert.equal((existing.jobs || []).filter(job => job.enabled).length, 0, 'Synthetic state must not enable an unrelated native job. ' + JSON.stringify((existing.jobs || []).map(job => ({ id: job.id, enabled: job.enabled, payload: job.payload, declarationKey: job.declarationKey }))));
   coordinator = await createManagedAutomation({ directory: path.join(directory, 'automation'),
@@ -106,17 +107,39 @@ test('real pinned native scheduler signals invoke a PoI-reviewed model turn and 
   await manager.enableManagedAutomation();
   const fixturePath = fileURLToPath(new URL('./fixtures/native-channel', import.meta.url));
   const mandatoryPath = fileURLToPath(new URL('../openclaw/plugin', import.meta.url));
+  phases.push('configure-native-channel');
   await manager.configureManagedServices({ channels: { 'chainchat-fixture': { enabled: true } }, plugins: {
-    allow: ['cypher-tempre-poi', 'chainchat-fixture'], load: { paths: [mandatoryPath, fixturePath] }, entries: {
+    allow: ['cypher-tempre-poi', 'browser', 'chainchat-fixture'], load: { paths: [mandatoryPath, fixturePath] }, entries: {
       'chainchat-fixture': { enabled: true, hooks: { allowConversationAccess: true }, config: { sinkUrl: `http://127.0.0.1:${upstream.address().port}/sink` } },
     },
   } });
+  phases.push('native-channel-ready');
   const fixtureService = manager.registerNativeService({ id: 'fixture-channel', methods: { 'chainchatFixture.credentials': () => ({}) } });
   channelSecret = (await fixtureService.request('chainchatFixture.credentials', {})).secret;
   sendService = manager.registerNativeService({ id: 'fixture-native-send', methods: { send: params => {
     if (!permittedSends.has(JSON.stringify(params))) throw new Error('The test host did not register this send.'); return params;
   } } });
   const bound = await coordinator.bindChannel(identity, { channelId: 'chainchat-fixture', accountId: 'default', conversationId: 'room', allowSenders: ['fixture-sender'], name: 'Native fixture sink' });
+  // The same mandatory plugin must preserve durable native goal admission
+  // while an external channel is enabled; observation grants no native run.
+  const nativeIdentity = { agentId: identity.agentId, genesisHash: identity.genesisHash };
+  const goalTurn = plan => manager.generate({ provider: 'compatible', model: 'fixture-model', apiKey: 'isolated-fixture-key',
+    baseUrl: `http://127.0.0.1:${upstream.address().port}/v1` }, { messages: [{ role: 'user', content: plan.message }],
+    maxTokens: 256, nativeControl: plan.native }, { root, input: plan.message, loadout: [], learning: false, purpose: 'candidate',
+    nativeIdentity, modelCapabilities: { reasoning: false } });
+  const beforeGoalCalls = modelCalls;
+  const goalPlan = await manager.executeCommand({ ...nativeIdentity, command: '/goal start Please introduce yourself.' });
+  assert.equal((await goalTurn(goalPlan)).text, answer);
+  phases.push('configured-channel-goal-start');
+  assert.equal((await manager.sessionControls(nativeIdentity)).goal.status, 'active');
+  await manager.executeCommand({ ...nativeIdentity, command: '/goal pause' });
+  const resumePlan = await manager.executeCommand({ ...nativeIdentity, command: '/goal resume' });
+  assert.equal((await goalTurn(resumePlan)).text, answer);
+  phases.push('configured-channel-goal-resume');
+  assert.equal((await manager.sessionControls(nativeIdentity)).goal.status, 'active');
+  await manager.executeCommand({ ...nativeIdentity, command: '/goal pause' });
+  assert.equal(modelCalls, beforeGoalCalls + 2, 'Configured external channels cannot disable recoverable registered goal turns.');
+  assert.equal(externalDeliveries, 0, 'Local goal turns carry no channel delivery authorization.');
   const create = () => coordinator.createJob(identity, { name: 'Actual native at timer', prompt: 'Please introduce yourself.',
     schedule: { kind: 'at', at: new Date(Date.now() + 1500).toISOString() }, channelBindingId: bound.id });
   async function waitTerminal(id) {
@@ -145,11 +168,18 @@ test('real pinned native scheduler signals invoke a PoI-reviewed model turn and 
   const receiveUrl = `http://127.0.0.1:${privateTransport.gatewayPort}/chainchat-fixture/inbound`;
   const incomingRequest = { method: 'POST', headers: { authorization: 'Bearer ' + channelSecret, 'content-type': 'application/json' },
     body: JSON.stringify({ id: 'native-wire-1', sender: 'fixture-sender', text: 'Please introduce yourself through the native channel.' }) };
+  const beforeIncoming = modelCalls;
   assert.equal((await fetch(receiveUrl, incomingRequest)).status, 200);
   assert.equal((await waitTerminal(bound.id)).status, 'delivered'); assert.equal(externalDeliveries, 2);
+  assert.equal(modelCalls, beforeIncoming + 1, 'Only the privately admitted managed turn may infer; the unregistered native channel run stays held.');
   assert.equal(ingressClaims.length, 1); assert.equal(ingressClaims[0].senderId, 'fixture-sender');
   const beforeDuplicate = modelCalls;
   assert.equal((await fetch(receiveUrl, incomingRequest)).status, 200); await coordinator.wake();
   assert.equal(externalDeliveries, 2); assert.equal(modelCalls, beforeDuplicate);
   const verified = await engine({ op: 'verify', root }); assert.equal(verified.verified, true);
+  } catch (error) {
+    let details = `${error.stack || error.message}\nNative automation phases: ${phases.join(', ')}\n${diagnostics.join('').slice(-10000)}`;
+    for (const secret of [broker.token, channelSecret, 'isolated-fixture-key'].filter(Boolean)) details = details.split(secret).join('[redacted fixture credential]');
+    throw new Error(details, { cause: error });
+  }
 });

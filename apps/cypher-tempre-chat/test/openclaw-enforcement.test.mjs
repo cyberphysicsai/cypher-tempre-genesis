@@ -219,6 +219,9 @@ test("plugin registers all required blocking and delivery hooks against the publ
     "reply_payload_sending", "message_sending", "tool_result_persist", "after_tool_call", "agent_end", "gateway_stop"])
     assert.ok(registered.some(entry => entry.name === required));
   assert.equal(registered.some(entry => entry.name === 'before_agent_run'), false, 'Native durable goals reject restart-unsafe before_agent_run hooks.');
+  assert.equal(registered.some(entry => ['before_dispatch', 'before_message_write', 'reply_dispatch'].includes(entry.name)), false,
+    'Native durable goals reject all pre-checkpoint takeover hooks even when their handler would decline.');
+  assert.ok(registered.some(entry => entry.name === 'message_received'), 'Channel observation cannot acquire native inference authority.');
   assert.ok(registered.every(entry => entry.options.timeoutMs > 120000));
 });
 

@@ -17,6 +17,19 @@ export function register(api) {
       if (!response.ok) throw new Error('Fixture sink refused delivery.'); return { messageId: (await response.json()).id };
     } } },
   });
+  // This is a webhook channel: its registered native HTTP route is the actual
+  // inbound transport. Keep a real account lifecycle alive until native stop,
+  // instead of declaring a configured channel with no running monitor.
+  plugin.gateway = { async startAccount(context) {
+    context.setStatus({ ...context.getStatus(), accountId: context.accountId, enabled: true, configured: true,
+      running: true, connected: true, lifecycle: 'ready', lastTransportActivityAt: Date.now() });
+    try { await new Promise(resolve => {
+      if (context.abortSignal.aborted) resolve();
+      else context.abortSignal.addEventListener('abort', resolve, { once: true });
+    }); } finally {
+      context.setStatus({ ...context.getStatus(), running: false, connected: false, lifecycle: 'stopped' });
+    }
+  } };
   api.registerChannel({ plugin });
   api.registerGatewayMethod('chainchatFixture.credentials', async ({ respond }) => { respond(true, { secret }); });
   api.registerHttpRoute({ path: '/chainchat-fixture/inbound', auth: 'plugin', handler: async (req, res) => {

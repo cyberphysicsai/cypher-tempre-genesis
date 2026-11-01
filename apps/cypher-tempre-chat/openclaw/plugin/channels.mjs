@@ -11,6 +11,10 @@ function equalMirror(event, context, eventKey, contextKey = eventKey) {
   if (event[eventKey] !== undefined && context[contextKey] !== undefined && event[eventKey] !== context[contextKey]) deny();
 }
 export function canonicalNativeInbound(event = {}, context = {}) {
+  // This adapter carries text only. Do not acknowledge a staged attachment as
+  // though its omitted content had been reviewed by the managed conversation.
+  if (event.mediaStagingPending === true || ['media', 'originalMedia'].some(key =>
+      event[key] !== undefined && (!Array.isArray(event[key]) || event[key].length > 0))) deny();
   for (const name of ['messageId', 'senderId', 'sessionKey']) equalMirror(event, context, name);
   equalMirror(event, context, 'channel', 'channelId');
   for (const [name, maximum] of [['channelId', 128], ['accountId', 128], ['conversationId', 512], ['senderId', 512], ['messageId', 512], ['sessionKey', 2048]])
@@ -33,15 +37,16 @@ export function createChannelHooks(request, { channelIds = () => [], onHeld = ()
   const enabled = context => typeof context?.channelId === 'string' && channelIds().includes(context.channelId);
   const binding = sessionKey => ({ sessionKey, runId: 'channel-transport:' + randomUUID() });
   return {
-    async before_dispatch(event, context = {}) {
-      if (!enabled(context)) return { handled: false };
+    async message_received(event, context = {}) {
+      if (!enabled(context)) return;
       try {
         const channel = canonicalNativeInbound(event, context);
         const result = await request('channel_ingress', binding(channel.sessionKey), { channel });
         if (result?.allowed !== true || result.accepted !== true) deny();
       } catch { onHeld({ kind: 'ingress', reason: 'channel_admission_held' }); }
-      // Never let an unregistered native model run or synthetic direct reply escape.
-      return { handled: true };
+      // This is observation, not native run authority. The ordinary mandatory
+      // before_agent_reply still denies this unregistered channel session;
+      // only the separately admitted host turn can infer and deliver a reply.
     },
     async message_sending(event, context = {}) {
       if (!enabled(context)) return null; // Compose with the ordinary PoI sender.
