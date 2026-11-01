@@ -78,9 +78,26 @@ or fabricated conversation seals.
 Granting exec/process permits broad execution as the local OS user. Directory and
 requested-host lists do not sandbox arbitrary subprocesses. File grants are
 canonicalized, reject symlink escapes and protect application/data/paired-chain
-roots. Browser automation grants are unavailable until a managed network adapter
-can safely constrain Chromium traffic; requested-navigation checks alone cannot
-contain DNS changes, redirects and page subresources. Web-fetch grants retain
+roots. Browser automation uses an owned profile and a managed authenticated
+network proxy; requested-navigation checks alone cannot contain DNS changes,
+redirects and page subresources. Each native primitive action receives fresh
+semantic/native review. Compound actions and unverifiable cross-origin frame
+references are held. Model-supplied JavaScript requires the separate broad
+evaluation, credential and payment acknowledgments; it is not keyword-sandboxed.
+Web-fetch grants retain
 native DNS/private-network checks and disable redirects. These checks do not
-constitute a system firewall or OS sandbox. Separate native channels/cron/operator entry points
-remain guarded because they do not inherit browser-turn admission automatically.
+constitute a system firewall or OS sandbox. Native channel text and scheduled
+turns use explicit immutable bindings and the shared review/commit pipeline;
+separate outgoing permits expire on source, wallet or provider revocation.
+
+Compaction requires an exact-source summary receipt and native transcript CAS.
+Private, per-invocation model-route capabilities are added by the mandatory
+context engine and stripped before provider forwarding. Missing reviewed
+context, including a legacy engine fallback, cannot authorize model generation.
+
+The pinned first-party browser backend is a required service; its original
+tool receives mandatory parameter scoping, PoI review and result reduction. Third-party native plugins require explicit exact
+artifact trust and native lifecycle consent. **They execute with the local user's
+OS permissions and can act outside model hooks.** PoI gates model actions, not
+arbitrary trusted plugin code. Do not treat importing a chain, enabling a tool,
+or passing deterministic tests as a native-plugin sandbox or proof of security.

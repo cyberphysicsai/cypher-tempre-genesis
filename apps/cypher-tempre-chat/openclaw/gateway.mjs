@@ -12,6 +12,8 @@ import path from "node:path";
 import { once } from "node:events";
 import { validateProvider, assertCredentialIsolation } from "../lib/providers.mjs";
 import { createNativeControls, readControlOverlay, mergeControlOverlay, validateControlPatch, NATIVE_PREFERENCES, controlSessionKey, redactNativeControl } from "../lib/openclaw-controls.mjs";
+import { createPrivateNativeServices } from '../lib/openclaw-services.mjs';
+import { createNativeBrowserInspector } from '../lib/native-browser-inspection.mjs';
 
 export const OPENCLAW_VERSION = "2026.10.9";
 const MAX_BYTES = 24 * 1024 * 1024;
@@ -114,6 +116,39 @@ function inspectResponse(config, buffer) {
   }
 }
 
+/** A private per-invocation capability can occur once in system instructions.
+ * Strip it before BYOK egress. Unreviewed fallback summarizers have no lease.
+ */
+export function consumeModelRouteCapability(body, provider, capability) {
+  if (!/^[a-f0-9]{64}$/.test(capability || '')) throw fail('Private model admission is unavailable.', 'OPENCLAW_MODEL_ADMISSION', 403);
+  const marker = `[CHAINCHAT_PRIVATE_MODEL_ROUTE:${capability}]`, copy = structuredClone(body);
+  let total = 0, admitted = 0;
+  const count = value => {
+    if (typeof value === 'string') total += value.split(marker).length - 1;
+    else if (Array.isArray(value)) value.forEach(count);
+    else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) { count(key); count(child); }
+  };
+  count(copy);
+  const strip = (object, key) => { if (typeof object?.[key] === 'string') {
+    admitted += object[key].split(marker).length - 1; object[key] = object[key].replaceAll(marker, '');
+  } };
+  const content = (object, key) => {
+    if (typeof object?.[key] === 'string') strip(object, key);
+    else if (Array.isArray(object?.[key])) object[key].forEach(part => strip(part, 'text'));
+  };
+  if (provider === 'anthropic') content(copy, 'system');
+  else if (provider === 'gemini') {
+    for (const part of copy.systemInstruction?.parts || copy.system_instruction?.parts || []) strip(part, 'text');
+  } else {
+    strip(copy, 'instructions');
+    for (const message of [...(Array.isArray(copy.messages) ? copy.messages : []), ...(Array.isArray(copy.input) ? copy.input : [])])
+      if (['system', 'developer'].includes(message?.role)) content(message, 'content');
+  }
+  if (admitted !== 1 || total !== 1) throw Object.assign(fail('No exact model-route capability was supplied by the mandatory prompt hook.', 'OPENCLAW_MODEL_ADMISSION', 403),
+    { admissionCounts: { system: admitted, total } });
+  return copy;
+}
+
 /** Resolve only model protocol paths, never an arbitrary request URL. */
 export function providerRequest(config, incomingPath, body, { openCodeSession } = {}) {
   if (typeof incomingPath !== "string" || !incomingPath.startsWith("/") || incomingPath.startsWith("//"))
@@ -156,28 +191,63 @@ export function providerRequest(config, incomingPath, body, { openCodeSession } 
 /** Returns a manager; constructing it does not spawn processes or write files. */
 export function createOpenClawGateway({ stateDir, packageRoot, nodePath = process.execPath, pluginPath, broker,
   toolsPolicy = { profile: "full", deny: [] }, startupTimeoutMs = 180000, requestTimeoutMs = 240000,
-  fetchImpl = fetch, spawnImpl = spawn, onDiagnostic } = {}) {
+  fetchImpl = fetch, spawnImpl = spawn, onDiagnostic, browserService, serviceEnvironment = () => ({}), serviceSecrets = () => [], modelContextTokens } = {}) {
   if (!stateDir || !packageRoot || !pluginPath || !broker || typeof broker.registerInvocation !== "function" ||
       typeof broker.assertCandidate !== "function") throw new TypeError("A local OpenClaw runtime, plugin and enforcement broker are required.");
+  if (modelContextTokens !== undefined && (!Number.isSafeInteger(modelContextTokens) || modelContextTokens < 16384 || modelContextTokens > 131072))
+    throw new TypeError('The private native model context cap must be an integer from 16384 through 131072.');
   const directory = path.resolve(stateDir), upstream = path.resolve(packageRoot), plugin = path.resolve(pluginPath);
   // Private transport identity remains stable so native session/goal storage
   // survives restarts without retaining a stale loopback model endpoint/token.
   // Real BYOK credentials are never stored in that identity or native config.
   const providerSessions = new WeakMap();
-  let child = null, proxy = null, port = null, proxyPort = null, active = null, queue = Promise.resolve(), startup = null, stopping = null;
+  let child = null, proxy = null, port = null, proxyPort = null, active = null, queue = Promise.resolve(), startup = null, stopping = null, stoppingChild = null;
   let gatewayToken = secret(), proxyToken = secret(), closed = false;
   let identity = null, nativeClient = null, nativeConnection = null, lastConfiguration = null, pendingOverlay = null;
   let browserHosts = [], reasoningCapable = false, capabilitiesInitialized = false;
+  let managedServices = {};
+  let lastServiceEnvironmentHash = null;
   const nativeEvents = new Set();
+  const privateServiceSecrets = () => [gatewayToken, proxyToken, broker.token, ...(serviceSecrets() || []), ...(browserService?.redactionSecrets?.() || [])]
+    .filter(value => typeof value === 'string' && value.length > 0);
+  const checkServiceIsolation = value => {
+    for (const secret of privateServiceSecrets()) {
+      for (const encoded of new Set([secret, encodeURIComponent(secret), Buffer.from(secret).toString('base64'), Buffer.from(secret).toString('hex')]))
+        assertCredentialIsolation({ apiKey: encoded }, value);
+    }
+  };
+  function serviceEnvironmentSnapshot() {
+    const values = serviceEnvironment();
+    if (!values || typeof values !== 'object' || Array.isArray(values) || Object.entries(values).some(([name, value]) =>
+        !/^CHAINCHAT_CHANNEL_[A-F0-9]{32}_[A-Z0-9_]+$/.test(name) || typeof value !== 'string' || value.length > 65536 || /\0/.test(value)))
+      throw fail('Private native channel environment is invalid.', 'OPENCLAW_SERVICE_DENIED', 403);
+    return { values, hash: createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b))))).digest('hex') };
+  }
   const status = () => ({ backend: "openclaw", version: OPENCLAW_VERSION, running: Boolean(child && child.exitCode === null && child.signalCode === null),
     localOnly: true, credentials: "session-memory", hostTools: toolsPolicy.deny?.includes("*") ? "disabled" : "scoped-per-invocation" });
-  async function stopChild() {
+  async function stopChild({ force = false } = {}) {
+    if (force) {
+      // A missing assembly capability is a runtime integrity fault. Terminate
+      // this exact owned process before acknowledging a failed model request:
+      // graceful shutdown could let upstream persist a fallback summary first.
+      const owned = child || stoppingChild; child = null;
+      const client = nativeClient; nativeClient = null; nativeConnection = null;
+      if (owned && owned.exitCode === null && owned.signalCode === null) {
+        owned.kill('SIGKILL');
+        await waitForExit(owned, 5000);
+        if (owned.exitCode === null && owned.signalCode === null)
+          throw fail('The isolated runtime could not be stopped after an integrity fault.', 'OPENCLAW_STOP_FAILED');
+      }
+      await client?.stopAndWait({ timeoutMs: 2000 }).catch(() => {});
+      return;
+    }
     if (stopping) return stopping;
     const owned = child; child = null;
     if (!owned || owned.exitCode !== null || owned.signalCode !== null) {
       const client = nativeClient; nativeClient = null; nativeConnection = null;
       await client?.stopAndWait({ timeoutMs: 2000 }).catch(() => {}); return;
     }
+    stoppingChild = owned;
     stopping = (async () => {
       const client = nativeClient; nativeClient = null; nativeConnection = null;
       if (client) await client.stopAndWait({ timeoutMs: 2000 }).catch(() => {});
@@ -197,7 +267,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         await waitForExit(owned, 3000);
         if (owned.exitCode === null && owned.signalCode === null) { try { process.kill(-owned.pid, "SIGKILL"); } catch { owned.kill("SIGKILL"); } }
       }
-    })().finally(() => { stopping = null; });
+    })().finally(() => { stopping = null; stoppingChild = null; });
     return stopping;
   }
   async function handleProxy(request, response) {
@@ -207,21 +277,39 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
           (request.headers["x-api-key"] ? `Bearer ${request.headers["x-api-key"]}` : request.headers["x-goog-api-key"] ? `Bearer ${request.headers["x-goog-api-key"]}` :
             new URL(request.url, "http://127.0.0.1").searchParams.get("key") ? `Bearer ${new URL(request.url, "http://127.0.0.1").searchParams.get("key")}` : ""), proxyToken))
         throw fail("Local provider authentication required.", "OPENCLAW_PROXY_AUTH", 401);
+      if (current?.kind === 'compaction') {
+        // Reviewed summaries use the parent broker's direct provider route.
+        // Any child inference here is an unadmitted legacy summarizer; stop it
+        // before even returning an error that could trigger a fallback write.
+        try { await stopChild({ force: true }); } finally { current.controller.abort(); }
+        throw fail('Unadmitted native compaction inference was held.', 'OPENCLAW_MODEL_ADMISSION', 403);
+      }
       if (request.method !== "POST" || !current || current.controller.signal.aborted)
         throw fail("No admitted local model invocation.", "OPENCLAW_PROXY_INACTIVE", 409);
-      const raw = await collect(request), decoded = JSON.parse(raw.toString("utf8"));
+      const raw = await collect(request), received = JSON.parse(raw.toString("utf8"));
+      let decoded;
+      try { decoded = consumeModelRouteCapability(received, current.config.provider, current.modelRouteCapability); }
+      catch (error) {
+        // No response (including an HTTP error) reaches the native summarizer
+        // while it could still write a deterministic fallback to its transcript.
+        try { await stopChild({ force: true }); }
+        finally { current.controller.abort(); }
+        throw error;
+      }
+      checkServiceIsolation(decoded);
       const upstreamRequest = providerRequest(current.config, request.url, decoded, { openCodeSession: current.openCodeSession });
       if (current !== active) throw fail("The model invocation ended.", "REQUEST_CANCELLED", 499);
       emit(current.context, "model", "started", "OpenClaw provider inference");
       const result = await fetchImpl(upstreamRequest.url, { method: "POST", headers: upstreamRequest.headers,
         body: JSON.stringify(upstreamRequest.body), redirect: "error", signal: current.controller.signal });
       if (!result.ok) throw redactError();
-      const payload = await collect(result.body); inspectResponse(current.config, payload);
+      const payload = await collect(result.body); inspectResponse(current.config, payload); checkServiceIsolation(payload.toString('utf8'));
       if (current !== active || current.controller.signal.aborted) throw fail("The model invocation ended.", "REQUEST_CANCELLED", 499);
       emit(current.context, "model", "completed", "OpenClaw provider inference");
       response.writeHead(200, { "content-type": String(result.headers.get("content-type") || "application/json"), "cache-control": "no-store" });
       response.end(payload);
     } catch (error) {
+      onDiagnostic?.(`[chainchat] private model request held code=${/^[A-Z0-9_]+$/.test(error.code || '') ? error.code : 'PROVIDER_FAILED'}${error.admissionCounts ? ` systemMarkers=${error.admissionCounts.system} totalMarkers=${error.admissionCounts.total}` : ''}\n`);
       emit(current?.context, "model", "held", "OpenClaw provider held");
       if (!response.headersSent) response.writeHead(Number.isInteger(error.status) ? error.status : 502,
         { "content-type": "application/json", "cache-control": "no-store" });
@@ -267,12 +355,14 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         baseUrl: `http://127.0.0.1:${proxyPort}${value.prefix}`, apiKey: "${CHAINCHAT_PROVIDER_TOKEN}", api: value.api,
         authHeader: true, models: [{ id: "route", name: "User selected model (in-memory transport)", api: value.api,
           reasoning: reasoningCapable, input: ["text"], contextWindow: 131072, maxTokens: 32768,
+          ...(modelContextTokens !== undefined ? { contextTokens: modelContextTokens } : {}),
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
       }]));
       const baseConfiguration = { gateway: { mode: "local", bind: "loopback", port,
           auth: { mode: "token", token: "${CHAINCHAT_GATEWAY_TOKEN}" }, controlUi: { enabled: false },
           http: { endpoints: { chatCompletions: { enabled: true } } } },
         agents: { defaults: { workspace, skipBootstrap: true, model: { primary: "chainchat-compatible/route" },
+          compaction: { memoryFlush: { enabled: false } },
           heartbeat: { every: "0m" }, maxConcurrent: 1 } },
         tools: mergeControlOverlay(toolsPolicy, { toolSearch: false,
           web: { fetch: { maxRedirects: 0, ssrfPolicy: { dangerouslyAllowPrivateNetwork: false } } } }),
@@ -284,12 +374,14 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         // suppresses native background update checks and anonymous update pings.
         update: { checkOnStart: false, auto: { enabled: false } },
         logging: { level: "error", consoleLevel: "error" },
-        plugins: { enabled: true, allow: ["cypher-tempre-poi"], load: { paths: [plugin] }, entries: {
+        plugins: { enabled: true, allow: ["cypher-tempre-poi", "browser"], slots: { contextEngine: "cypher-tempre-poi" }, load: { paths: [plugin] }, entries: {
+          browser: { enabled: true },
           "cypher-tempre-poi": { enabled: true, hooks: { allowConversationAccess: true, allowPromptInjection: true }, config: {
             brokerUrl: brokerUrl.href.replace(/\/$/, ""), brokerTokenEnv: "CHAINCHAT_BROKER_TOKEN" } } } } };
+      const controlledConfiguration = mergeControlOverlay(baseConfiguration, managedServices);
       const overlay = pendingOverlay || (await readControlOverlay(directory)).patch;
-      const configuration = mergeControlOverlay(baseConfiguration, overlay);
-      lastConfiguration = baseConfiguration;
+      const configuration = mergeControlOverlay(controlledConfiguration, overlay);
+      lastConfiguration = controlledConfiguration;
       const configPath = path.join(directory, "gateway.json"); await atomicJson(configPath, configuration);
       // Avoid importing other agents' credentials, diagnostics, preload scripts,
       // proxy settings or OpenClaw configuration into this managed child.
@@ -298,18 +390,22 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         !/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i.test(name) &&
         !/^(?:NODE_OPTIONS|NODE_INSPECT_RESUME_ON_START|(?:HTTPS?|ALL|NO)_PROXY)$/i.test(name)));
       Object.assign(environment, { OPENCLAW_STATE_DIR: runtimeState, OPENCLAW_CONFIG_PATH: configPath,
-        OPENCLAW_NO_RESPAWN: "1", OPENCLAW_SKIP_CHANNELS: "1", CHAINCHAT_GATEWAY_TOKEN: gatewayToken,
+        OPENCLAW_NO_RESPAWN: "1", CHAINCHAT_GATEWAY_TOKEN: gatewayToken,
         CHAINCHAT_PROVIDER_TOKEN: proxyToken, CHAINCHAT_BROKER_TOKEN: broker.token,
         NO_PROXY: "127.0.0.1,localhost,::1" });
+      if (!Object.values(managedServices.channels || {}).some(channel => channel && channel.enabled !== false)) environment.OPENCLAW_SKIP_CHANNELS = '1';
+      const serviceEnv = serviceEnvironmentSnapshot();
+      Object.assign(environment, serviceEnv.values);
       const bootstrap = 'import { pathToFileURL } from "node:url"; process.on("message", message => { if (message?.type === "chainchat:shutdown") { process.emit("SIGTERM"); if (process.connected) process.disconnect(); } }); await import(pathToFileURL(process.argv[1]).href);';
       if (closed) throw fail("This OpenClaw manager is closed.", "OPENCLAW_CLOSED");
       child = spawnImpl(nodePath, ["--input-type=module", "--eval", bootstrap, path.join(upstream, "openclaw.mjs"), "gateway", "run", "--port", String(port), "--bind", "loopback"],
         { cwd: directory, env: environment, windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"], detached: process.platform !== "win32" });
+      lastServiceEnvironmentHash = serviceEnv.hash;
       let spawnError = false;
       child.on("error", () => { spawnError = true; });
       for (const stream of [child.stdout, child.stderr]) stream?.on("data", chunk => {
         let line = chunk.toString("utf8");
-        for (const token of [gatewayToken, proxyToken, broker.token, active?.config?.apiKey].filter(Boolean)) line = line.split(token).join("[REDACTED]");
+        for (const token of [gatewayToken, proxyToken, broker.token, active?.config?.apiKey, active?.modelRouteCapability, ...privateServiceSecrets()].filter(Boolean)) line = line.split(token).join("[REDACTED]");
         onDiagnostic?.(line.slice(-8192));
       });
       const readyAt = Date.now() + startupTimeoutMs;
@@ -350,7 +446,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
           scopes: ['operator.read', 'operator.write', 'operator.admin'], deviceIdentity, sharedStateMode: 'read-only',
           onHelloOk() { clearTimeout(timer); resolve(client); },
           onConnectError() { clearTimeout(timer); client.stop(); reject(fail('Native OpenClaw control authentication failed.', 'OPENCLAW_CONTROL_AUTH')); },
-          onEvent(event) { for (const listener of nativeEvents) listener(event); },
+          onEvent(event) { for (const listener of nativeEvents) { try { listener(event); } catch {} } },
           onClose() { if (active?.nativeRun) active.nativeClose?.(); },
         });
         nativeClient = client; client.start();
@@ -358,13 +454,19 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     })().catch(error => { nativeConnection = null; throw error; });
     return nativeConnection;
   }
-  async function nativeRpc(method, params) {
+  async function nativeRpc(method, params, { timeoutMs = 30000 } = {}) {
     const client = await nativeConnectionReady();
-    return client.request(method, params, { timeoutMs: 30000 });
+    return client.request(method, params, { timeoutMs });
   }
+  const subscribeNativeEvents = listener => {
+    if (typeof listener !== 'function') throw new TypeError('A private native event listener is required.');
+    nativeEvents.add(listener); return () => nativeEvents.delete(listener);
+  };
+  const services = createPrivateNativeServices({ rpc: nativeRpc, subscribe: subscribeNativeEvents, nodePath });
   const controls = createNativeControls({
     rpc: nativeRpc, getRuntime: status, readOverlay: () => readControlOverlay(directory),
-    sanitize: value => redactNativeControl(value, [gatewayToken, proxyToken, broker.token, identity?.proxyToken, identity?.gatewayToken]),
+    sanitize: value => redactNativeControl(value, [gatewayToken, proxyToken, broker.token, identity?.proxyToken, identity?.gatewayToken,
+      ...privateServiceSecrets()]),
     async runSystemCommand({ sessionKey, command }) {
       if (active) throw fail('Wait for the current model run before changing native session controls.', 'OPENCLAW_CONTROL_BUSY', 409);
       if (!/^\/(?:queue|context|usage)(?:\s|$)/.test(command)) throw fail('This native command is not admitted.', 'OPENCLAW_COMMAND_GUARDED', 403);
@@ -403,6 +505,9 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         await nativeRpc('config.set', { raw: JSON.stringify(mergeControlOverlay(base, patch)), baseHash: current.hash });
         await stopChild(); await start();
       } catch (error) {
+        const safe = redactNativeControl({ code: error?.code || 'OPENCLAW_CONFIG_APPLY_FAILED', message: String(error?.message || 'Native configuration apply failed.') },
+          [gatewayToken, proxyToken, broker.token, active?.config?.apiKey, ...privateServiceSecrets()].filter(Boolean));
+        onDiagnostic?.(`[chainchat] native settings apply held ${JSON.stringify(safe)}\n`);
         pendingOverlay = previous;
         await stopChild(); await start().catch(() => {});
         throw fail('OpenClaw did not apply the settings; the previous managed settings were restored.', 'OPENCLAW_CONFIG_REJECTED', 422);
@@ -412,6 +517,51 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
   function serializedControl(callback) {
     if (closed) return Promise.reject(fail('This OpenClaw manager is closed.', 'OPENCLAW_CLOSED'));
     const operation = queue.then(callback); queue = operation.catch(() => {}); return operation;
+  }
+  function validatedManagedServices(patch) {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
+        Object.keys(patch).some(key => !['browser', 'cron', 'channels', 'plugins'].includes(key)) || Buffer.byteLength(JSON.stringify(patch)) > 256 * 1024)
+      throw fail('Invalid private native service configuration.', 'OPENCLAW_SERVICE_DENIED', 403);
+    for (const value of Object.values(patch)) if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw fail('Native service sections must be objects.', 'OPENCLAW_SERVICE_DENIED', 403);
+    if (patch.cron && (Object.keys(patch.cron).some(key => key !== 'enabled') || typeof patch.cron.enabled !== 'boolean'))
+      throw fail('Only managed scheduler activation is admitted.', 'OPENCLAW_SERVICE_DENIED', 403);
+    if (patch.plugins && (patch.plugins.enabled === false ||
+        Object.hasOwn(patch.plugins, 'slots') && (!patch.plugins.slots || Array.isArray(patch.plugins.slots) ||
+          Object.hasOwn(patch.plugins.slots, 'contextEngine') && patch.plugins.slots.contextEngine !== 'cypher-tempre-poi') ||
+        Object.hasOwn(patch.plugins, 'entries') && (!patch.plugins.entries || Array.isArray(patch.plugins.entries) || Object.hasOwn(patch.plugins.entries, 'cypher-tempre-poi') ||
+          Object.hasOwn(patch.plugins.entries, 'browser') && patch.plugins.entries.browser?.enabled !== true) ||
+        Object.hasOwn(patch.plugins, 'allow') && (!Array.isArray(patch.plugins.allow) || !['cypher-tempre-poi', 'browser'].every(id => patch.plugins.allow.includes(id))) ||
+        Object.hasOwn(patch.plugins, 'deny') && (!Array.isArray(patch.plugins.deny) || ['cypher-tempre-poi', 'browser'].some(id => patch.plugins.deny.includes(id))) ||
+        Object.hasOwn(patch.plugins, 'load') && (!patch.plugins.load || !Array.isArray(patch.plugins.load.paths) || !patch.plugins.load.paths.map(value => path.resolve(value)).includes(plugin))))
+      throw fail('Managed services cannot replace mandatory PoI enforcement.', 'OPENCLAW_SERVICE_DENIED', 403);
+    return structuredClone(patch);
+  }
+  async function applyManagedServices(patch, { forceReload = false, replaceChannelAccount } = {}) {
+    if (typeof forceReload !== 'boolean') throw fail('Invalid private native service reload option.', 'OPENCLAW_SERVICE_DENIED', 403);
+    if (active) throw fail('Wait for the current model run before changing native services.', 'OPENCLAW_CONTROL_BUSY', 409);
+    const previous = managedServices, validated = validatedManagedServices(patch);
+    let seed = previous;
+    if (replaceChannelAccount !== undefined) {
+      const selection = replaceChannelAccount, validId = value => typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value) &&
+        !['__proto__', 'constructor', 'prototype'].includes(value);
+      if (!selection || typeof selection !== 'object' || Array.isArray(selection) ||
+          Object.keys(selection).length !== 2 || Object.keys(selection).some(key => !['channelId', 'accountId'].includes(key)) ||
+          !validId(selection.channelId) || !validId(selection.accountId) ||
+          !Object.hasOwn(validated.channels || {}, selection.channelId) ||
+          !Object.hasOwn(validated.channels[selection.channelId]?.accounts || {}, selection.accountId))
+        throw fail('An exact private native channel account replacement is required.', 'OPENCLAW_SERVICE_DENIED', 403);
+      seed = structuredClone(previous);
+      if (seed.channels?.[selection.channelId]?.accounts) delete seed.channels[selection.channelId].accounts[selection.accountId];
+    }
+    const next = mergeControlOverlay(seed, validated);
+    if (!forceReload && JSON.stringify(previous) === JSON.stringify(next) && lastServiceEnvironmentHash === serviceEnvironmentSnapshot().hash) return status();
+    managedServices = next;
+    // A private service may be staged before the first start. Avoid starting a
+    // Gateway only to stop it immediately once its owned browser lease exists.
+    if (!child && !startup && !proxy) return status();
+    try { await stopChild(); await start(); return status(); }
+    catch (error) { managedServices = previous; await stopChild(); await start().catch(() => {}); throw error; }
   }
   async function initializeModelCapabilities() {
     if (capabilitiesInitialized) return;
@@ -499,17 +649,28 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     if (!context || !["candidate", "utility", "plain"].includes(context.purpose))
       throw fail("An explicit trusted OpenClaw invocation purpose is required.", "OPENCLAW_CONTEXT_REQUIRED", 422);
     const rawConfig = config;
-    config = validateProvider(config); assertCredentialIsolation(config, args);
+    config = validateProvider(config); assertCredentialIsolation(config, args); checkServiceIsolation(args);
     if (!providerSessions.has(rawConfig)) providerSessions.set(rawConfig, randomUUID());
     const openCodeSession = providerSessions.get(rawConfig);
+    await synchronizeModelCapabilities(context.modelCapabilities);
+    let browserInvocation = null;
+    try {
+    const inspectNativeTarget = createNativeBrowserInspector({ rpc: nativeRpc, assertIsolation: checkServiceIsolation,
+      assertCurrent: async () => {
+        if (active?.context !== context || active.controller.signal.aborted || context.purpose !== 'candidate' || browserInvocation?.profile !== 'chainchat-owned')
+          throw fail('No current owned browser invocation admits native perception.', 'OPENCLAW_BROWSER_INSPECTION_DENIED', 403);
+        await context.authorize?.();
+      } });
+    browserInvocation = browserService?.prepareInvocation ? await browserService.prepareInvocation({ ...context, inspectNativeTarget }) : null;
+    if (browserInvocation?.config) await applyManagedServices({ browser: browserInvocation.config.browser || browserInvocation.config });
     // Chromium cannot pin a hostname to the addresses reviewed by the broker.
     // Keep strict hostname navigation closed until a managed browser network
     // adapter exists; allowedHostnames would otherwise trust private addresses.
     const desiredBrowserHosts = [];
-    await synchronizeModelCapabilities(context.modelCapabilities);
     if (JSON.stringify(desiredBrowserHosts) !== JSON.stringify(browserHosts)) { browserHosts = desiredBrowserHosts; await stopChild(); }
     checkSignal(args.signal); await start(); checkSignal(args.signal);
     const invocationId = randomUUID();
+    const modelRouteCapability = secret();
     const native = args.nativeControl;
     if (native && (context.purpose !== 'candidate' || !/^agent:main:chainchat-control:[a-f0-9]{64}$/.test(native.sessionKey || '') ||
         !(native.kind === 'message' || native.intent?.kind === 'session-goal-start' || native.goalOperation?.action === 'resume') ||
@@ -524,7 +685,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     const ownNativeGoal = native && context.nativeIdentity && context.purpose === 'candidate' &&
       native.sessionKey === controlSessionKey(context.nativeIdentity) &&
       (selected?.entry?.goal || native.intent?.kind === 'session-goal-start' || native.goalOperation?.action === 'resume');
-    const registeredContext = { ...context,
+    const registeredContext = { ...context, modelRouteCapability, assertContentIsolation: checkServiceIsolation, ...(browserInvocation ? { browserInvocation } : {}),
       goalAuthority: ownNativeGoal ? { enabled: true, sessionKey, ...(selected?.entry?.goal?.id ? { goalId: selected.entry.goal.id } : {}) } : undefined,
       readNativeGoal: ownNativeGoal ? async () => {
         const current = await nativeRpc('sessions.describe', { key: sessionKey, includeDerivedTitles: false, includeLastMessage: false });
@@ -538,13 +699,47 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         assertCredentialIsolation(config, snapshot); return snapshot;
       } : undefined,
       toolProtectedRoots: [...new Set([directory, upstream, plugin, ...(context.toolProtectedRoots || [])])] };
+    // Official native compaction runs before admitting/appending the current
+    // input. Never write through a second SessionManager during assemble: that
+    // would stale OpenClaw's active writer and its transcript read fence.
+    if (native && context.purpose === 'candidate' && context.nativeIdentity && selected?.entry?.sessionId &&
+        typeof broker.estimateInvocation === 'function') {
+      const estimate = await broker.estimateInvocation({ config, args, context: registeredContext, sessionKey, invocationId });
+      const reserve = 12000 + (args.maxTokens || 4096) + Math.ceil(Buffer.byteLength(args.messages.at(-1).content, 'utf8') / 4);
+      const limit = Math.floor((modelContextTokens || 131072) * 0.80);
+      const readStats = async () => {
+        const result = await nativeRpc('chainchat.compactionStats', { sessionKey, sessionId: selected.entry.sessionId });
+        if (result?.version !== 1 || typeof result.known !== 'boolean' || result.known &&
+            (result.sessionKey !== sessionKey || result.sessionId !== selected.entry.sessionId ||
+             !Number.isSafeInteger(result.estimatedTokens) || result.estimatedTokens < 0 || typeof result.compactable !== 'boolean'))
+          throw fail('Native context budget could not be verified.', 'OPENCLAW_COMPACTION_HELD', 422);
+        return result;
+      };
+      let stats = await readStats();
+      // An existing pre-upgrade session has not yet registered its trusted SDK
+      // target. The official lifecycle seeds it; client paths are never used.
+      if (!stats.known) {
+        await performCompaction(config, { identity: context.nativeIdentity, signal: args.signal }, context);
+        stats = await readStats();
+        if (!stats.known) throw fail('The native session target is not available for budget verification.', 'OPENCLAW_COMPACTION_HELD', 422);
+      }
+      for (let pass = 0; stats.estimatedTokens + estimate.estimatedTokens + reserve > limit; pass++) {
+        if (!stats.compactable || pass >= 8)
+          throw fail('The current request and retained native turns exceed the safe context budget. Shorten this input or start a new native conversation.', 'OPENCLAW_CONTEXT_BUDGET', 422);
+        const before = stats;
+        const compacted = await performCompaction(config, { identity: context.nativeIdentity, signal: args.signal }, context);
+        stats = await readStats();
+        if (compacted.compacted !== true || !stats.known || stats.branchSha256 === before.branchSha256 || stats.estimatedTokens >= before.estimatedTokens)
+          throw fail('Proof of Interaction held automatic compaction; the next turn was not admitted.', 'OPENCLAW_COMPACTION_HELD', 422);
+      }
+    }
     const claim = await broker.registerInvocation({ config, args, context: registeredContext, sessionKey, invocationId });
     if (!claim || typeof claim.claimId !== "string" || claim.sessionKey !== sessionKey)
       throw fail("The local enforcement broker refused the invocation.", "OPENCLAW_ADMISSION_FAILED", 422);
     const abort = () => { controller.abort(); void stopChild(); };
     const timer = setTimeout(abort, requestTimeoutMs);
     args.signal?.addEventListener("abort", abort, { once: true });
-    active = { config, args, context, controller, claimId: claim.claimId, sessionKey, openCodeSession };
+    active = { config, args, context, controller, claimId: claim.claimId, sessionKey, openCodeSession, modelRouteCapability };
     let responseComplete = false;
     try {
       checkSignal(args.signal);
@@ -553,7 +748,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         await nativeRpc('sessions.patch', { key: sessionKey, model: `${PROVIDERS[config.provider].id}/route` });
         const generated = await nativeTurn({ sessionKey, message: args.messages.at(-1).content, idempotencyKey: native.goalOperation?.operationId || invocationId,
           deliver: false, ...(native.intent ? { intent: native.intent } : {}), ...(native.goalOperation ? { goalOperation: native.goalOperation } : {}) }, controller);
-        responseComplete = true; assertCredentialIsolation(config, generated);
+        responseComplete = true; assertCredentialIsolation(config, generated); checkServiceIsolation(generated);
         const enforcement = await broker.assertCandidate({ claimId: claim.claimId, candidate: generated.text });
         checkSignal(args.signal);
         return { ...generated, enforcement, runtime: { backend: 'openclaw', version: OPENCLAW_VERSION, invocationId, sessionKey } };
@@ -566,7 +761,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         signal: controller.signal, redirect: "error" });
       const buffer = await collect(response.body); responseComplete = true;
       if (!response.ok) throw redactError();
-      inspectResponse(config, buffer);
+      inspectResponse(config, buffer); checkServiceIsolation(buffer.toString('utf8'));
       const result = JSON.parse(buffer.toString("utf8")), candidate = result.choices?.[0]?.message?.content;
       if (typeof candidate !== "string" || !candidate.trim()) throw fail("OpenClaw returned no final candidate.", "OPENCLAW_EMPTY_RESPONSE");
       const enforcement = await broker.assertCandidate({ claimId: claim.claimId, candidate });
@@ -581,17 +776,62 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       clearTimeout(timer); args.signal?.removeEventListener("abort", abort); active = null;
       await broker.finishInvocation?.({ claimId: claim.claimId });
     }
+    } finally { await browserInvocation?.releaseInvocation?.(); }
   }
   function generate(config, args, context) {
     if (closed) return Promise.reject(fail("This OpenClaw manager is closed.", "OPENCLAW_CLOSED"));
     const operation = queue.then(() => perform(config, args, context)); queue = operation.catch(() => {}); return operation;
   }
+  async function performCompaction(rawConfig, { identity: nativeIdentity, instructions = '', signal } = {}, context) {
+    if (closed) throw fail('This OpenClaw manager is closed.', 'OPENCLAW_CLOSED');
+    if (!context || context.purpose !== 'candidate' || typeof instructions !== 'string' || Buffer.byteLength(instructions) > 16000 ||
+        typeof broker.registerCompactionInvocation !== 'function' || typeof broker.finishCompactionInvocation !== 'function')
+      throw fail('A privately admitted native compaction operation is required.', 'OPENCLAW_COMPACTION_HELD', 422);
+    const config = validateProvider(rawConfig), sessionKey = controlSessionKey(nativeIdentity);
+    assertCredentialIsolation(config, { instructions }); checkServiceIsolation({ instructions }); checkSignal(signal);
+    await synchronizeModelCapabilities(context.modelCapabilities); await start();
+    const selected = await nativeRpc('sessions.describe', { key: sessionKey, includeDerivedTitles: false, includeLastMessage: false });
+    if (!selected.session?.sessionId) return { ok: true, compacted: false, reason: 'No native conversation exists for this Timechain yet.' };
+    const operationId = randomUUID(), controller = new AbortController();
+    const abort = () => { controller.abort(); void stopChild(); };
+    const timer = setTimeout(abort, requestTimeoutMs);
+    signal?.addEventListener('abort', abort, { once: true });
+    let claim;
+    try {
+      checkSignal(signal);
+      claim = await broker.registerCompactionInvocation({ config, context: { ...context, signal: controller.signal, assertContentIsolation: checkServiceIsolation },
+        sessionKey, sessionId: selected.session.sessionId, operationId, instructions });
+      if (!claim || typeof claim.claimId !== 'string' || claim.sessionKey !== sessionKey)
+        throw fail('The compaction operation was not admitted.', 'OPENCLAW_COMPACTION_HELD', 422);
+      active = { kind: 'compaction', config, context, controller, sessionKey, claimId: claim.claimId };
+      emit(context, 'memory', 'started', 'Reviewing native conversation compaction');
+      // The selected context engine obtains its summary through the admitted
+      // broker operation, never through an unregistered model or tool run.
+      const result = await nativeRpc('sessions.compact', { key: sessionKey }, { timeoutMs: requestTimeoutMs });
+      checkSignal(signal); checkSignal(controller.signal);
+      assertCredentialIsolation(config, result); checkServiceIsolation(result);
+      const safe = redactNativeControl(result, [gatewayToken, proxyToken, broker.token]);
+      emit(context, 'memory', result.compacted ? 'completed' : 'held', result.compacted ? 'Native conversation compacted after PoI review' : 'Native compaction did not change the transcript');
+      return safe;
+    } finally {
+      clearTimeout(timer); signal?.removeEventListener('abort', abort);
+      active = null;
+      if (claim) await broker.finishCompactionInvocation({ claimId: claim.claimId });
+    }
+  }
+  function compact(config, args, context) {
+    const operation = queue.then(() => performCompaction(config, args, context)); queue = operation.catch(() => {}); return operation;
+  }
   async function close() {
-    closed = true; active?.controller.abort(); await stopChild();
+    closed = true; services.close(); active?.controller.abort(); await stopChild();
     await startup?.catch(() => {}); await stopChild();
     if (proxy) { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); proxy = null; }
   }
-  return { start, generate, close, status,
+  return { start, generate, compact, close, status, nodePath,
+    automationRpc: services.automationRpc, subscribeAutomation: services.subscribeAutomation,
+    registerNativeService: services.registerNativeService,
+    configureManagedServices: (patch, options) => serializedControl(() => applyManagedServices(patch, options)),
+    enableManagedAutomation: () => serializedControl(() => applyManagedServices({ cron: { enabled: true } })),
     describeControls: identity => serializedControl(() => controls.describeControls(identity)),
     sessionControls: identity => serializedControl(() => controls.sessionControls(identity)),
     updateControls: request => serializedControl(() => controls.updateControls(request)),

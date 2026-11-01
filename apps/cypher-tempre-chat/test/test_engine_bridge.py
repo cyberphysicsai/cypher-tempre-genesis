@@ -36,6 +36,22 @@ class EngineBridgeTests(unittest.TestCase):
     def head(self):
         return self.call("verify")["head"]["hash"]
 
+    def test_native_summary_source_digest_and_head_are_checked_without_a_chain_write(self):
+        source_text = json.dumps([{"role": "user", "content": "The telescope label is ZXQ48271."}])
+        source = {"kind": "native-transcript", "text": source_text,
+                  "sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest()}
+        before = self.head()
+        result = self.call("evaluate_summary", expectedHead=before, sourceData=source,
+                           **self.exchange(output="The user said the telescope label is ZXQ48271."))
+        self.assertTrue(result["accepted"])
+        self.assertFalse(result["sealed"])
+        self.assertEqual(result["usedRings"], [])
+        self.assertEqual(self.head(), before)
+        for bad in [{**source, "sha256": "0" * 64}, {**source, "extra": True}, {**source, "kind": "canonical-ring"}]:
+            self.assert_code("INVALID_REQUEST", lambda: self.call("evaluate_summary", expectedHead=before,
+                             sourceData=bad, **self.exchange()))
+        self.assertEqual(self.head(), before)
+
     def test_tool_outcomes_are_bounded_verified_and_committed_as_external_observations(self):
         output = json.dumps({"content": "The telescope serial is ZXQ48271."})
         observation = {"name": "read", "callId": "observed-read", "toolSha256": "a" * 64,

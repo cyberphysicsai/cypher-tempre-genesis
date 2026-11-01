@@ -55,7 +55,8 @@ test('native slash preferences are real schema-backed mutations with session rac
   await f.controls.executeCommand({ ...identity, command: '/reason default' });
   assert.equal(f.calls.at(-1)[1].reasoningLevel, null);
   await assert.rejects(f.controls.executeCommand({ ...identity, command: '/queue collect' }), error => error.code === 'OPENCLAW_COMMAND_GUARDED');
-  await assert.rejects(f.controls.executeCommand({ ...identity, command: '/compact custom instructions' }), error => error.code === 'OPENCLAW_COMMAND_GUARDED');
+  assert.deepEqual(await f.controls.executeCommand({ ...identity, command: '/compact custom instructions' }),
+    { kind: 'compaction', sessionKey: f.key, instructions: 'custom instructions' });
 });
 
 test('goal start and resume return only trusted native run plans; pause invokes durable goal RPC', async () => {

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
+import { createHash } from "node:crypto";
 import { Wallet } from "ethers";
 import { createApp, strictReview } from "../server.mjs";
 import { FRUITS, DIMENSIONS } from "../lib/providers.mjs";
@@ -198,6 +199,59 @@ async function allText(root) {
   return text;
 }
 
+function managedNativeFixture({ beforeGate = async () => {} } = {}) {
+  const jobs = new Map(), generated = [], sent = []; let subscriber, broker, methods, lastGate;
+  const requestBroker = async payload => {
+    const response = await fetch(broker.url, { method: 'POST', headers: { authorization: `Bearer ${broker.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ version: 1, runId: 'private-native-fixture', ...payload }) });
+    return { status: response.status, body: await response.json() };
+  };
+  const manager = { nodePath: process.execPath, start: async () => {}, close: async () => {},
+    status: () => ({ backend: 'openclaw', version: '2026.10.9', running: true }),
+    describeControls: async () => ({}), executeCommand: async () => ({}),
+    sessionControls: async identity => ({ sessionKey: 'stable:' + identity.agentId, goal: null }),
+    generate: async (config, args, context) => { generated.push({ config, args, context }); return { text: 'A helpful and truthful answer.', usage: {} }; },
+    automationRpc: async (method, params) => {
+      if (method === 'cron.list') return { jobs: [...jobs.values()], total: jobs.size };
+      if (method === 'cron.add') { const job = { ...params, id: 'native-' + jobs.size }; jobs.set(job.id, job); return job; }
+      if (method === 'cron.update') { Object.assign(jobs.get(params.id), params.patch); return jobs.get(params.id); }
+      if (method === 'cron.get') return jobs.get(params.id);
+      if (method === 'cron.runs') return { entries: [] };
+      throw new Error('Unexpected native scheduler method.');
+    }, subscribeAutomation: callback => { subscriber = callback; return () => { subscriber = null; }; },
+    registerNativeService: registration => { methods = registration.methods; return { close() {}, async request(method, params) {
+      await methods[method](params); await beforeGate(params);
+      lastGate = { op: 'channel_delivery_gate', sessionKey: params.sessionKey, phase: 'message', channel: {
+        channelId: params.channel, accountId: params.accountId, sessionKey: params.sessionKey, to: params.to, text: params.message,
+        candidateSha256: createHash('sha256').update(params.message).digest('hex') } };
+      const gate = await requestBroker(lastGate);
+      if (gate.status !== 200) throw Object.assign(new Error('Private native outgoing review held the send.'), { code: gate.body.code });
+      sent.push(params); return { messageId: 'physical-message-' + sent.length };
+    } }; }, enableManagedAutomation: async () => {}, configureManagedServices: async () => {} };
+  return { manager, generated, sent, factory(options) { broker = options.broker; return manager; },
+    fire(job, at = Date.now()) { subscriber({ event: 'cron', payload: { action: 'finished', status: 'ok', jobId: job.nativeId, runAtMs: at } }); },
+    replayGate: () => requestBroker(lastGate),
+  };
+}
+
+async function waitManaged(f, predicate) {
+  const deadline = Date.now() + 5000;
+  while (!await predicate((await f.request('/api/openclaw')).body.services)) {
+    if (Date.now() > deadline) throw new Error('Managed occurrence did not settle.');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
+async function createDeliveryJob(f) {
+  const channel = await f.request('/api/openclaw/automation/channel', { name: 'Private fixture', channelId: 'fixture', accountId: 'default',
+    conversationId: 'room', allowSenders: ['sender'] });
+  assert.equal(channel.status, 200, JSON.stringify(channel.body));
+  const job = await f.request('/api/openclaw/automation/job', { name: 'Private schedule', prompt: 'Please introduce yourself.',
+    schedule: { kind: 'every', everyMs: 60000 }, channelBindingId: channel.body.id });
+  assert.equal(job.status, 200, JSON.stringify(job.body));
+  return { channel: channel.body, job: job.body };
+}
+
 test('native controls require owner auth, ignore forged run plans and use trusted chain-scoped sessions', async t => {
   const generated = [], commands = [];
   const manager = { start: async () => {}, close: async () => {}, status: () => ({ backend: 'openclaw', running: true, version: '2026.10.9' }),
@@ -226,6 +280,112 @@ test('native controls require owner auth, ignore forged run plans and use truste
   assert.equal(generated[0].context.nativeIdentity.genesisHash, HASH(0));
   assert.equal(generated[0].context.toolAuthority.enabled, false);
   assert.equal(JSON.stringify(native.body).includes('never-persist-this-key'), false);
+});
+test('managed scheduler uses the foreground review/commit pipeline and holds work after provider disconnect', async t => {
+  let subscriber; const jobs = new Map(), generated = [], configured = [];
+  const manager = { nodePath: process.execPath, start: async () => {}, close: async () => {},
+    status: () => ({ backend: 'openclaw', version: '2026.10.9', running: true }),
+    describeControls: async () => ({}), executeCommand: async () => ({}),
+    sessionControls: async () => ({ sessionKey: 'stable', goal: null }),
+    generate: async (_config, args, context) => { generated.push({ args, context }); return { text: 'A helpful and truthful answer.', usage: {} }; },
+    automationRpc: async (method, params) => {
+      if (method === 'cron.list') return { jobs: [...jobs.values()], total: jobs.size };
+      if (method === 'cron.add') { const job = { ...params, id: 'native-' + jobs.size }; jobs.set(job.id, job); return job; }
+      if (method === 'cron.update') { Object.assign(jobs.get(params.id), params.patch); return jobs.get(params.id); }
+      if (method === 'cron.get') return jobs.get(params.id);
+      if (method === 'cron.runs') return { entries: [] };
+      throw new Error('Unexpected native scheduler method.');
+    }, subscribeAutomation: callback => { subscriber = callback; return () => { subscriber = null; }; },
+    registerNativeService: () => ({ close() {}, request: async () => { throw new Error('This no-recipient job must never send.'); } }),
+    enableManagedAutomation: async () => {}, configureManagedServices: async patch => configured.push(patch) };
+  const f = await fixture(t, { openclawFactory: () => manager }); await f.ready();
+  const definition = { name: 'Fixture schedule', prompt: 'Please introduce yourself.', schedule: { kind: 'every', everyMs: 60000 } };
+  const created = await f.request('/api/openclaw/automation/job', definition);
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const event = at => subscriber({ event: 'cron', payload: { action: 'finished', status: 'ok', jobId: created.body.nativeId, runAtMs: at } });
+  const waitFor = async predicate => { const deadline = Date.now() + 3000; while (!await predicate()) { if (Date.now() > deadline) throw new Error('Managed turn did not settle.'); await new Promise(resolve => setTimeout(resolve, 20)); } };
+  event(Date.now());
+  await waitFor(async () => (await f.request('/api/openclaw')).body.services?.occurrences[0]?.status === 'completed');
+  assert.equal(generated.length, 1); assert.equal(f.calls.filter(call => call.op === 'commit').length, 1);
+  assert.equal(generated[0].context.nativeIdentity.agentId, created.body.binding.agentId);
+  assert.ok(f.reviewCalls.length >= 2, 'The schedule definition and answer receive independent review.');
+  const badConfig = await f.request('/api/openclaw/channel/connect', { channelId: 'fixture', accountId: 'default', config: { botToken: 'do-not-persist-fixture-secret' }, credentials: {} });
+  assert.equal(badConfig.status, 400); assert.equal(configured.length, 0);
+  await f.request('/api/provider', { disconnect: true });
+  event(Date.now() + 1);
+  await waitFor(async () => (await f.request('/api/openclaw')).body.services?.occurrences.some(item => item.status === 'held'));
+  assert.equal(generated.length, 1); assert.equal(f.calls.filter(call => call.op === 'commit').length, 1);
+  const paused = await f.request('/api/openclaw/automation/pause', { kind: 'cron', id: created.body.id });
+  assert.equal(paused.status, 200);
+  assert.equal((await allText(f.dataDir)).includes('never-persist-this-key'), false);
+});
+
+test('managed work retains its authorizing client and requires explicit resume after provider rotation', async t => {
+  const native = managedNativeFixture(), f = await fixture(t, { openclawFactory: native.factory }); await f.ready();
+  const created = await f.request('/api/openclaw/automation/job', { name: 'Owner-only schedule', prompt: 'Introduce yourself.',
+    schedule: { kind: 'every', everyMs: 60000 } });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const second = await f.request('/api/pair', { code: 'TEST-CODE' });
+  const otherClient = { authorization: `Bearer ${second.body.token}` };
+  assert.equal((await f.request('/api/provider', { provider: 'openai', model: 'second-client-model', apiKey: 'second-client-key-keep-private' }, otherClient)).status, 200);
+  await f.request('/api/provider', { disconnect: true });
+  native.fire(created.body);
+  await waitManaged(f, services => services?.occurrences.some(item => item.status === 'held'));
+  assert.equal(native.generated.length, 0, 'A different paired client must not silently fund the first client’s automation.');
+  assert.equal((await f.request('/api/provider', { provider: 'openai', model: 'rotated-owner-model', apiKey: 'rotated-owner-key-private' })).status, 200);
+  await waitManaged(f, services => services?.occurrences.some(item => item.status === 'held'));
+  assert.equal(native.generated.length, 0, 'Connecting a new key does not renew background authority.');
+  assert.equal((await f.request('/api/openclaw/automation/wake', {})).status, 200);
+  await waitManaged(f, services => services?.occurrences.some(item => item.status === 'completed'));
+  assert.equal(native.generated.length, 1); assert.equal(native.generated[0].config.model, 'rotated-owner-model');
+  assert.equal(native.generated[0].context.nativeIdentity.agentId, created.body.binding.agentId);
+  assert.equal((await allText(f.dataDir)).includes('second-client-key-keep-private'), false);
+});
+
+test('a PoI-rejected operator wake cannot renew rotated background model authority', async t => {
+  let refuseWake = false;
+  const native = managedNativeFixture(), f = await fixture(t, { openclawFactory: native.factory,
+    review: async (_config, args) => refuseWake && args.candidate.includes('automation.wake') ?
+      { ...goodReview(), approved: false, decision: 'reject' } : goodReview() });
+  await f.ready();
+  const created = await f.request('/api/openclaw/automation/job', { name: 'Reviewed authority', prompt: 'Introduce yourself.',
+    schedule: { kind: 'every', everyMs: 60000 } });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  assert.equal((await f.request('/api/provider', { provider: 'openai', model: 'rotated', apiKey: 'rotated-key-not-automatically-authorized' })).status, 200);
+  refuseWake = true;
+  assert.equal((await f.request('/api/openclaw/automation/wake', {})).status, 422);
+  native.fire(created.body);
+  await waitManaged(f, services => services?.occurrences.some(item => ['held', 'completed'].includes(item.status)));
+  assert.equal(native.generated.length, 0, 'A refused service action must not silently renew background inference authority.');
+});
+
+test('native channel delivery authority is revoked while the SDK is waiting to dispatch', async t => {
+  for (const revocation of ['pause', 'channel', 'provider', 'wallet']) await t.test(revocation, async t => {
+    let release, started; const began = new Promise(resolve => { started = resolve; });
+    const native = managedNativeFixture({ beforeGate: async () => { started(); await new Promise(resolve => { release = resolve; }); } });
+    const f = await fixture(t, { openclawFactory: native.factory }); await f.ready(); const { job, channel } = await createDeliveryJob(f);
+    native.fire(job); await began;
+    const result = ['pause', 'channel'].includes(revocation) ? await f.request('/api/openclaw/automation/pause', { kind: revocation === 'channel' ? 'channel' : 'cron', id: revocation === 'channel' ? channel.id : job.id }) :
+      revocation === 'provider' ? await f.request('/api/provider', { provider: 'openai', model: 'replacement', apiKey: 'replacement-key-stays-private' }) :
+        await f.request('/api/license/logout', {});
+    assert.equal(result.status, 200, JSON.stringify(result.body)); release();
+    await waitManaged(f, services => services?.occurrences.some(item => ['uncertain', 'revoked'].includes(item.status)));
+    assert.equal(native.sent.length, 0, 'A held native send must never reach its transport after revocation.');
+    assert.equal((await native.replayGate()).status, 422, 'Retired delivery authorization cannot be replayed.');
+  });
+});
+
+test('native channel delivery binds the exact recipient and one fresh chain head', async t => {
+  let f, changeHead = false;
+  const native = managedNativeFixture({ beforeGate: async () => { if (changeHead) [...f.chains.values()][0].index++; } });
+  f = await fixture(t, { openclawFactory: native.factory }); await f.ready(); const { job } = await createDeliveryJob(f);
+  const at = Date.now(); native.fire(job, at);
+  await waitManaged(f, services => services?.occurrences.some(item => item.status === 'delivered'));
+  assert.equal(native.sent.length, 1); assert.equal(native.sent[0].to, 'room'); assert.equal(native.sent[0].channel, 'fixture');
+  assert.equal((await native.replayGate()).status, 422, 'An exact outgoing permit is single use.');
+  changeHead = true; native.fire(job, at + 1);
+  await waitManaged(f, services => services?.occurrences.some(item => item.status === 'uncertain'));
+  assert.equal(native.sent.length, 1, 'A changed chain head invalidates the separately reviewed outgoing message.');
 });
 
 test('perspective branches cannot inherit explicit host grants while the selected synthesis can', async t => {

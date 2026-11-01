@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createReviewedContextEngine } from './compaction.mjs';
+import { createNativeCompactionStats, COMPACTION_STATS_METHOD } from './compaction-stats.mjs';
+import { createChannelHooks } from './channels.mjs';
+import { sanitizeOwnedBrowserResult } from './browser-results.mjs';
+import { managedServicesFactory } from './services.mjs';
 
 export const PLUGIN_ID = "cypher-tempre-poi";
 export const PROTOCOL_VERSION = 1;
@@ -100,6 +105,9 @@ function receiptFor(response, candidateSha256, now) {
 /** Testable hook implementation; no raw prompt, output, credential or tool argument is logged. */
 export function createEnforcementHooks(request, options = {}) {
   const clock = options.now || Date.now;
+  const browserPrivateValues = options.browserPrivateValues || (() => Object.entries(process.env)
+    .filter(([key]) => /^CHAINCHAT_(?:GATEWAY_TOKEN|PROVIDER_TOKEN|BROKER_TOKEN|CHANNEL_[A-F0-9]{32}_[A-Z0-9_]+)$/.test(key)).map(([, value]) => value));
+  const browserResult = result => sanitizeOwnedBrowserResult(result, { privateValues: browserPrivateValues() });
   const runs = new Map();
   const keyOf = binding => JSON.stringify([binding.sessionKey, binding.runId]);
   function stateFor(binding) {
@@ -145,7 +153,10 @@ export function createEnforcementHooks(request, options = {}) {
           (state.purpose === "utility" && prepared.toolsAllow.length)) throw new Error(DENIED);
       state.prepared = true;
       state.toolsAllow = new Set(prepared.toolsAllow);
-      return { appendSystemContext: prepared.context, toolsAllow: [...new Set(prepared.toolsAllow)] };
+      // The managed context engine supplies the full prepared instructions on
+      // every model iteration. Keeping them here too would duplicate the route
+      // capability and would leave tool-loop continuation coverage ambiguous.
+      return { appendSystemContext: '', toolsAllow: [...new Set(prepared.toolsAllow)] };
     } catch {
       try { stateFor(bindingFor(event, context)).denied = true; } catch {}
       return { appendSystemContext: DENIED, toolsAllow: [] };
@@ -171,10 +182,22 @@ export function createEnforcementHooks(request, options = {}) {
       const binding = bindingFor(event, context), state = stateFor(binding);
       const callId = event.toolCallId ?? context.toolCallId;
       if (state.denied || !state.prepared || !state.toolsAllow?.has(event.toolName) || !nonempty(callId, 256)) return;
-      const returnedError = event.result?.isError === true || ['error', 'blocked', 'denied'].includes(event.result?.details?.status);
+      const observed = event.toolName === 'browser' && event.result ? browserResult(event.result) : event.result;
+      const returnedError = observed?.isError === true || ['error', 'blocked', 'denied'].includes(observed?.details?.status) ||
+        observed?.details?.ok === false || observed?.details?.success === false || Boolean(observed?.details?.error);
       accept(state, await request('tool_result', binding, { tool: { name: event.toolName, callId },
-        outcome: { success: !event.error && !returnedError, result: event.result ?? null, error: event.error ? String(event.error).slice(0, 1000) : null } }, context.abortSignal));
+        outcome: { success: !event.error && !returnedError, result: observed ?? null, error: event.error ?
+          (event.toolName === 'browser' ? 'The native browser reported an error.' : String(event.error).slice(0, 1000)) : null } }, context.abortSignal));
     } catch { /* A missing observation cannot create an approval or claim successful execution. */ }
+  };
+  const tool_result_persist = (event, context = {}) => {
+    if ((event.toolName ?? context.toolName ?? event.message?.toolName) !== 'browser') return;
+    try { return { message: browserResult(event.message) }; }
+    catch {
+      return { message: { role: 'toolResult', toolCallId: event.toolCallId ?? event.message?.toolCallId,
+        toolName: 'browser', timestamp: event.message?.timestamp ?? clock(), isError: true,
+        content: [{ type: 'text', text: 'The browser result was withheld because its private control details could not be safely reduced. Completion is unconfirmed.' }] } };
+    }
   };
   const before_agent_finalize = async (event, context) => {
     const candidate = event.lastAssistantMessage;
@@ -245,13 +268,36 @@ export function createEnforcementHooks(request, options = {}) {
     } catch { /* Cleanup failure cannot grant execution or delivery. */ }
   };
   const gateway_stop = async () => { runs.clear(); };
-  return { before_agent_run, before_agent_reply, before_prompt_build, before_tool_call, after_tool_call, before_agent_finalize,
+  return { before_agent_run, before_agent_reply, before_prompt_build, before_tool_call, after_tool_call, tool_result_persist, before_agent_finalize,
     reply_payload_sending, message_sending, agent_end, gateway_stop };
 }
 
 export function register(api) {
   const config = api.pluginConfig || {};
-  const hooks = createEnforcementHooks(createBrokerClient(config));
+  const request = createBrokerClient(config);
+  let compactionStats;
+  const stats = () => compactionStats ||= createNativeCompactionStats({
+    store: api.runtime.state.openKeyedStore({ namespace: 'chainchat-native-compaction-targets', retention: 'retained' }),
+    loadSdk: () => import('openclaw/plugin-sdk/agent-sessions') });
+  api.registerGatewayMethod?.(COMPACTION_STATS_METHOD, async ({ params, respond, signal }) => {
+    try { respond(true, await stats().probe(params, signal)); }
+    catch { respond(false, undefined, { code: 'INVALID_REQUEST', message: 'Native compaction metadata is unavailable for this exact session.' }); }
+  }, { scope: 'operator.admin', profileAccess: 'independent' });
+  api.registerTool(managedServicesFactory(request), { name: 'chainchat_automation' });
+  const hooks = createEnforcementHooks(request, { browserPrivateValues: () => [config.brokerToken,
+    ...Object.entries(process.env).filter(([key]) => /^CHAINCHAT_(?:GATEWAY_TOKEN|PROVIDER_TOKEN|BROKER_TOKEN|CHANNEL_[A-F0-9]{32}_[A-Z0-9_]+)$/.test(key)).map(([, value]) => value),
+    ...Object.values(api.config?.browser?.profiles || {}).map(profile => profile?.cdpUrl)].filter(Boolean) });
+  const channels = createChannelHooks(request, { channelIds: () => Object.entries(api.config?.channels || {})
+    .filter(([, value]) => value && value.enabled !== false).map(([id]) => id) });
+  for (const name of ['message_sending', 'reply_payload_sending']) {
+    const ordinary = hooks[name];
+    hooks[name] = async (event, context) => (await channels[name](event, context)) ?? ordinary(event, context);
+  }
+  hooks.before_dispatch = channels.before_dispatch;
+  api.registerContextEngine?.(PLUGIN_ID, async context => createReviewedContextEngine({
+    sdk: await import('openclaw/plugin-sdk/agent-sessions'), request, workspaceDir: context.workspaceDir,
+    targetRegistry: stats(),
+    commitStore: api.runtime.state.openKeyedStore({ namespace: 'chainchat-native-accepted-turns', retention: 'retained' }) }));
   // Each callback's own transport deadline expires before the host can discard
   // its explicit deny/cancel result. The UI transport also requires receipts.
   const timeoutMs = 2 * (config.requestTimeoutMs ?? 60000) + 10000;

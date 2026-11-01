@@ -29,7 +29,7 @@ function fixture(options = {}) {
         receipt: receipt({ candidateSha256: fields.candidateSha256 }) } : {}) });
     return options.transform ? options.transform(op, value) : value;
   };
-  const hooks = createEnforcementHooks(request, { now: () => now });
+  const hooks = createEnforcementHooks(request, { now: () => now, ...options.hookOptions });
   return { hooks, calls, setDenied: value => { denied = value; }, setPurpose: value => { purpose = value; } };
 }
 const prepare = f => f.hooks.before_prompt_build({ prompt: "Please reason carefully." }, binding);
@@ -38,7 +38,7 @@ const outgoing = (f, text = candidate, kind = "final") => f.hooks.reply_payload_
 
 test("plugin admission binds a real prepared run and only exact reviewed final text can leave", async () => {
   const f = fixture();
-  assert.deepEqual(await prepare(f), { appendSystemContext: "Verified native skill and paired chain context.", toolsAllow: [] });
+  assert.deepEqual(await prepare(f), { appendSystemContext: "", toolsAllow: [] });
   assert.deepEqual(await f.hooks.before_agent_run({ prompt: "Please reason carefully." }, binding), { outcome: "pass" });
   assert.deepEqual(await finalize(f), { action: "continue" });
   assert.equal((await outgoing(f)).cancel, false);
@@ -134,6 +134,41 @@ test('tool execution uses the canonical reviewed envelope and rejects unbound ap
   }
 });
 
+test('native browser observations and synchronous transcript persistence remove private control details', async () => {
+  const secret = 'private-browser-secret-fixture-only';
+  const f = fixture({ tools: ['browser'], hookOptions: { browserPrivateValues: () => [secret] } }); await prepare(f);
+  const raw = { content: [{ type: 'text', text: JSON.stringify({ url: 'https://example.com/', cdpUrl: 'http://127.0.0.1:9222',
+    userDataDir: 'C:\\private-browser-profile', echoed: secret, title: 'Observed page' }) }, { type: 'image', data: 'image-fixture-bytes', mimeType: 'image/png' }],
+    details: { targetId: 'owned-target', cdpUrl: 'http://127.0.0.1:9222', profiles: [{ name: 'personal', profilePath: 'C:\\personal' }, { name: 'chainchat-owned' }] } };
+  const event = { toolName: 'browser', toolCallId: 'native-browser-1', params: { action: 'status' }, result: raw };
+  await f.hooks.after_tool_call(event, binding);
+  const observed = f.calls.at(-1); assert.equal(observed.op, 'tool_result');
+  assert.equal(observed.fields.outcome.success, true);
+  const persisted = f.hooks.tool_result_persist({ toolName: 'browser', toolCallId: event.toolCallId,
+    message: { role: 'toolResult', toolName: 'browser', toolCallId: event.toolCallId, ...raw } }, binding);
+  assert.equal(typeof persisted?.then, 'undefined', 'Persistence privacy filtering must be synchronous.');
+  for (const value of [observed.fields.outcome.result, persisted.message]) {
+    const encoded = JSON.stringify(value);
+    for (const privateValue of [secret, '127.0.0.1', 'private-browser-profile', 'personal']) assert.equal(encoded.includes(privateValue), false);
+    assert.equal(value.content[1].data, 'image-fixture-bytes');
+    assert.equal(encoded.includes('Observed page'), true); assert.equal(encoded.includes('owned-target'), true);
+  }
+  assert.equal(f.hooks.tool_result_persist({ toolName: 'read', message: raw }, binding), undefined);
+});
+
+test('malformed browser results cannot become model evidence or raw native exception text', async () => {
+  const f = fixture({ tools: ['browser'] }); await prepare(f);
+  const cyclic = { toolName: 'browser' }; cyclic.self = cyclic;
+  const before = f.calls.length;
+  await f.hooks.after_tool_call({ toolName: 'browser', toolCallId: 'bad-result', result: cyclic }, binding);
+  assert.equal(f.calls.length, before, 'An unreducible observation must not be forwarded.');
+  const reduced = f.hooks.tool_result_persist({ toolName: 'browser', toolCallId: 'bad-result', message: cyclic }, binding);
+  assert.equal(reduced.message.isError, true); assert.match(reduced.message.content[0].text, /Completion is unconfirmed/);
+  await f.hooks.after_tool_call({ toolName: 'browser', toolCallId: 'error-result', error: 'secret local path and token', result: { isError: true, content: [] } }, binding);
+  assert.equal(f.calls.at(-1).fields.outcome.success, false);
+  assert.equal(f.calls.at(-1).fields.outcome.error.includes('secret'), false);
+});
+
 test("utility review and planning must be host-registered and cannot acquire tools or a candidate identity", async () => {
   const f = fixture({ purpose: "utility" }); await prepare(f);
   assert.deepEqual(await finalize(f), { action: "continue" });
@@ -168,12 +203,20 @@ test("delivery blocks unsupported media and survives agent_end only with exact r
 });
 
 test("plugin registers all required blocking and delivery hooks against the public API", () => {
-  const registered = [];
+  const registered = [], tools = [], services = [], methods = [];
   register({ pluginConfig: { brokerUrl: "http://127.0.0.1:18791/private", brokerToken: token },
+    registerTool: (factory, options) => tools.push({ factory, options }),
+    registerService: service => services.push(service),
+    registerGatewayMethod: (name, handler, options) => methods.push({ name, handler, options }),
     on: (name, handler, options) => registered.push({ name, handler, options }) });
   assert.equal(PLUGIN_ID, "cypher-tempre-poi");
+  assert.equal(tools[0].options.name, 'chainchat_automation');
+  assert.equal(tools[0].factory.contextVersion, 2);
+  assert.equal(tools.length, 1);
+  assert.equal(services.length, 0); assert.equal(methods.length, 1);
+  assert.equal(methods[0].name, 'chainchat.compactionStats'); assert.equal(methods[0].options.scope, 'operator.admin');
   for (const required of ["before_agent_reply", "before_prompt_build", "before_tool_call", "before_agent_finalize",
-    "reply_payload_sending", "message_sending", "agent_end", "gateway_stop"])
+    "reply_payload_sending", "message_sending", "tool_result_persist", "after_tool_call", "agent_end", "gateway_stop"])
     assert.ok(registered.some(entry => entry.name === required));
   assert.equal(registered.some(entry => entry.name === 'before_agent_run'), false, 'Native durable goals reject restart-unsafe before_agent_run hooks.');
   assert.ok(registered.every(entry => entry.options.timeoutMs > 120000));

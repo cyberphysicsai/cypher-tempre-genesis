@@ -34,6 +34,13 @@ Linux creates a user application-menu entry. It opens the authenticated local
 chat with OpenClaw and PoI included. Model/API selection, wallet verification and
 fresh-versus-existing chain selection remain explicit user choices.
 
+Optional browser automation can use an existing Chrome, Chromium or Edge
+executable with a fresh owned profile. The **Browser** settings tab also offers
+an explicit managed Chromium setup action; downloads stay under
+`data/browser-runtime/` and use the exact installed Playwright CLI. Setup does
+not run `sudo` or install Linux browser system libraries. Personal browser
+profiles are not imported.
+
 The Python front door waits for the private owned-runtime status and supports
 relaunch without replacing a live matching runtime. It does not report success
 merely because Node was spawned, and it never kills another program to obtain a
@@ -54,7 +61,7 @@ mutations or an arbitrary schema downgrade.
 From the application directory:
 
 ```sh
-python3 installer/build_posix.py --archive /reviewed/cypher-tempre-chat-v0.8.0.zip --output-dir /reviewed/setup --platform all
+python3 installer/build_posix.py --archive /reviewed/cypher-tempre-chat-v0.9.0.zip --output-dir /reviewed/setup --platform all
 ```
 
 The builder reads bootstrap/installer sources and runtime pins from that ZIP,
@@ -71,7 +78,7 @@ only in a synthetic HOME/XDG directory, briefly starts a private local runtime
 with no browser and uses synthetic native-chain data, then authenticates shutdown:
 
 ```sh
-python3 installer/acceptance_posix.py --installer /reviewed/setup/CypherTempre-ChainChat-Setup-0.8.0-linux.tar.gz --work-root /var/tmp/chainchat-acceptance
+python3 installer/acceptance_posix.py --installer /reviewed/setup/CypherTempre-ChainChat-Setup-0.9.0-linux.tar.gz --work-root /var/tmp/chainchat-acceptance
 ```
 
 Use the macOS ZIP path on a macOS runner. Optional `--cache-dir` reuses only

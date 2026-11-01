@@ -637,6 +637,21 @@ def op_evaluate(request):
             "usedRings": exchange["usedRings"], "evidence": exchange["evidence"]}
 
 
+def op_evaluate_summary(request):
+    """Host-selected native transcript data grounds a summary, never ring credit."""
+    source = request.get("sourceData")
+    if not isinstance(source, dict) or set(source) != {"kind", "sha256", "text"} or source["kind"] != "native-transcript":
+        raise BridgeError("INVALID_REQUEST", "A verified native transcript source is required.")
+    if not isinstance(source["text"], str) or len(source["text"].encode("utf-8")) > 1024 * 1024 or hashlib.sha256(source["text"].encode("utf-8")).hexdigest() != source["sha256"]:
+        raise BridgeError("INVALID_REQUEST", "Native transcript digest mismatch.")
+    root = project_root(request)
+    tc, _, _ = verified_chain(root, require_writable=True)
+    check_expected(tc, request)
+    exchange = assess_exchange(root, tc, request, source_evidence=[source["text"]])
+    return {"accepted": True, "sealed": False, "head": compact_head(tc), "verdict": exchange["gate"],
+            "scores": exchange["scores"], "assessment": exchange["assessment"], "usedRings": exchange["usedRings"]}
+
+
 def normalized_perspectives(root, query, outgoing, perspectives):
     if not perspectives:
         return None
@@ -1976,7 +1991,7 @@ def op_search(request):
 
 
 OPERATIONS = {"init": op_init, "inspect": op_inspect, "prepare": op_prepare,
-              "evaluate": op_evaluate, "commit": op_commit, "ingest": op_ingest, "verify": op_verify,
+              "evaluate": op_evaluate, "evaluate_summary": op_evaluate_summary, "commit": op_commit, "ingest": op_ingest, "verify": op_verify,
               "sanitize_source": op_sanitize_source,
               "pack_preview": op_pack_preview, "pack_import": op_pack_import, "pack_export": op_pack_export,
               "runtime_status": op_runtime_status, "dormancy": op_dormancy,

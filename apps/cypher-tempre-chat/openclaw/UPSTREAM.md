@@ -39,6 +39,14 @@ An update is a reviewed release, not an unattended merge of executable code:
    Enabling deferred dispatcher tools requires a separate reviewed adapter.
    Verify native goal completion, deterministic command delivery, reasoning
    capability restoration and model switches across a full app restart.
+   Revalidate the reviewed context-engine contract, retained accepted-turn
+   advancement store, every provider's stripped private route capability,
+   and forced legacy-compaction failure before persistence. Exercise actual
+   native browser tool loops and per-child denial, scheduled signals, channel
+   ingress/delivery revocation, and exact-artifact plugin trust/restore.
+   Keep native browser execution in its upstream plugin owner scope; review the
+   public before-tool, result-persistence and context-engine contracts before
+   adopting a new runtime. Compound calls must not bypass primitive admission.
 4. Run native chain/registry verification and original-skill round trips. No
    upstream update may rewrite old rings or replace the paired chain with an
    unrelated chat-memory format.

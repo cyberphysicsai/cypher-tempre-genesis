@@ -2,6 +2,24 @@
 
 Validation separates deterministic engine behavior, application orchestration and real-model observations. Passing a transport or gate test does not establish equal answer quality across models, perfect security or elimination of hallucinations.
 
+## Managed native services: 0.9.0
+
+The 0.9.0 candidate adds reviewed native browser actions, channel text ingress and delivery, scheduled turns, exact-artifact native-plugin trust and reviewed conversation compaction. The pinned OpenClaw package remains unmodified. All 65 bundled native engine files are byte-identical to independent PoI source commit `1f3b61e8cfadf7116ecaad6c626068fbb972dbff`, and their integrity manifest matches. A current tracked-plus-untracked source check found no retired product terminology. Final archive checks separately verify staged files, file modes, private-state exclusion and artifact hashes.
+
+Native acceptance runs used disposable chains and controlled local provider/transport fixtures, without paid inference, personal chains or real external channel credentials:
+
+- The original native browser tool completed actual reference-based clicking, typing and single-field filling. Tests held low-score, sensitive, changed/stale-target, compound-batch and ungranted JavaScript actions; private subresource requests were blocked and private browser endpoints did not reach the provider. Cross-origin frame references remain held when independent target verification cannot establish them.
+- Native cron emitted a scheduled signal that passed through the full reviewed Timechain pipeline and native channel send into a real local HTTP receiver. Low-score delivery, unregistered native send and duplicate inbound delivery were held. These tests establish the text adapter; they do not validate every third-party channel implementation or rich-media transport.
+- Exact-artifact native-plugin installation, enable/reload, trust changes and revocation were exercised in the actual runtime. Explicitly trusted plugins execute arbitrary code with local OS privileges outside model hooks. PoI admission of their lifecycle and model-invoked tools does not sandbox that code.
+- Native manual compaction persisted only an exact approved source summary; low-fruitage review left transcript and Timechain unchanged. Genuine forced legacy compaction was stopped before provider egress and persisted no compaction row, including after restart. Automatic pressure compaction and its subsequent-turn branch checks remain release checks until their final native acceptance succeeds.
+- All four supported provider protocols passed native Gateway acceptance, including exact receipts and runtime/application restart recovery. The full OpenClaw-backed application also continued a disposable original-skill chain and preserved its historical prefix.
+
+The broad current Python suite passed **102 tests**, with three expected Windows/platform skips (105 total). The broad Node suite passed **380 tests**, with 12 explicit native-runtime/platform skips (392 total); both original-skill reference variables were supplied, while native-runtime environment variables were deliberately absent to keep that suite separate from the actual-runtime acceptance runs above. Final installer, platform CI and deployment checks are recorded when the candidate is frozen; they remain separate release checks.
+
+The browser setup control downloads only the exact Chromium revision associated with the locked Playwright dependency into the owned cache. Tests check all supported platform paths, completion markers and fixed-argument installation. Browser downloads remain optional; the ordinary installation does not silently download or import personal browser profiles.
+
+No new paid-model benchmark was run for these service changes. Semantic review remains fallible, and these fixture results do not establish universal factual accuracy, cross-model benchmark parity or full coverage of arbitrary trusted plugin behavior. See [the managed service contracts](openclaw/MANAGED-SERVICES.md) and [the security boundary](openclaw/SECURITY.md).
+
 ## Automatic installed workflow: 0.7.1
 
 The local frontend previously classified its owner-authorized `/api/launch` request as a holdings-protected mutation. That opened the wallet dialog before any app session existed, preventing the installer's automatic connection. Bootstrap, authenticated resume, discovery and read-only audit requests now bypass that frontend wallet prompt; protected model calls and mutations still require holdings. The local app automatically loads PoI for active Timechain turns; optional hosted-site connection is kept under advanced mode.
@@ -70,7 +88,7 @@ A local browser check with synthetic model transport sealed a real chat ring, di
 
 ## Reproduce locally
 
-Use Node 20+ and Python 3.10+. Point the reference variables at a trusted, independently stored original skill directory containing its native Python modules and registries. The reference is not included in the product.
+Use Node 24.22.1+ within 24.x, or 26.12.1+, and Python 3.10+. Point the reference variables at a trusted, independently stored original skill directory containing its native Python modules and registries. The reference is not included in the product.
 
 ```powershell
 $env:CT_ORIGINAL_SKILL = "C:\\path\\to\\original-skill"
@@ -108,4 +126,4 @@ Model reviews are semantic judgments and remain fallible. A deliberately false a
 
 No ARC-AGI, LongMemEval, Pokemon, robotics or MazeBench result is reproduced by these application tests. Those tasks require their actual environments, datasets, tools, start states, budgets and scoring protocols. Local approved faculty operators do not supply a complete coding, browser, game or robotics agent harness.
 
-Production deployment and real-wallet/live-browser checks are separate from these local test results. The current interoperability changes require an updated local bridge and corresponding public interface; the prior deployed asset checks do not establish that this revision is live.
+Production deployment and real-wallet checks are separate from local fixture results. Each release requires its matching installed runtime and public interface; earlier deployed asset checks do not establish that a later candidate is live.

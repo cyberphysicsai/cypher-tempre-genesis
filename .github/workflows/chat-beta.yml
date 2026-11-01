@@ -28,7 +28,7 @@ jobs:
           echo "CT_OPENCLAW_PACKAGE=$GITHUB_WORKSPACE/apps/cypher-tempre-chat/openclaw/runtime/node_modules/openclaw" >> "$GITHUB_ENV"
           echo "CT_OPENCLAW_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
         working-directory: apps/cypher-tempre-chat
-      - run: npm ci --ignore-scripts && npm run check && npm test && npm run test:engine
+      - run: npm ci --ignore-scripts && npm run check && node --test --test-concurrency=2 test/*.test.mjs && npm run test:engine
         working-directory: apps/cypher-tempre-chat
       - run: node --test dashboard/test/audit-site.test.mjs
       - run: npm ci --ignore-scripts && npm run compile && npm test
