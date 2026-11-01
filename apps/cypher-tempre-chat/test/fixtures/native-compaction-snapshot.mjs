@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export async function nativeCompactionSnapshot({ nodePath, stateDir, sessionKey, packageRoot, sessionTarget }) {
+  if (packageRoot || sessionTarget) assert.ok(packageRoot && sessionTarget, 'A public SDK probe requires the actual trusted native target.');
   const { stdout } = await promisify(execFile)(nodePath, [fileURLToPath(import.meta.url), stateDir, sessionKey,
     ...(packageRoot && sessionTarget ? [JSON.stringify({ packageRoot, sessionTarget })] : [])], {
     windowsHide: true, timeout: 30000, maxBuffer: 1024 * 1024,
@@ -45,7 +46,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const compactions = events.filter(({ event }) => event.type === 'compaction').map(({ row, raw, event }) => {
       const first = events.findIndex(item => item.row.session_id === row.session_id && item.event.id === event.firstKeptEntryId);
       const retained = events.filter((item, index) => first >= 0 && index >= first && item.row.session_id === row.session_id && item.row.seq < row.seq);
-      return { sessionId: row.session_id, seq: row.seq, sha256: createHash('sha256').update(raw).digest('hex'),
+      return { id: event.id, sessionId: row.session_id, seq: row.seq, sha256: createHash('sha256').update(raw).digest('hex'),
         summary: event.summary, firstKeptEntryId: event.firstKeptEntryId, details: event.details,
         retainedUserTurns: retained.filter(item => item.event.type === 'message' && item.event.message?.role === 'user' && item.event.message.excludeFromContext !== true).length,
         retainedAssistantMessages: retained.filter(item => item.event.type === 'message' && item.event.message?.role === 'assistant').length,
@@ -68,12 +69,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     assert.equal(JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8')).version, '2026.10.9');
     const { SessionManager, buildSessionContext } = await import(pathToFileURL(path.join(packageRoot, 'dist/plugin-sdk/agent-sessions.js')).href);
     const manager = await SessionManager.openAsync(sessionTarget, stateDir), branch = manager.getBranch(), messages = buildSessionContext(branch).messages;
-    const persistedBoundary = snapshot.compactions.at(-1);
+    const persistedBoundary = snapshot.compactions.filter(entry => entry.sessionId === currentSessionId).at(-1);
     assert.ok(persistedBoundary?.details?.retainedCompleteTurns >= 2, 'The actual automatic boundary must retain two complete prior native turns.');
     assert.ok(persistedBoundary.retainedUserTurns >= 2 && persistedBoundary.retainedAssistantMessages >= 2);
-    const activeCompactions = branch.filter(entry => entry.type === 'compaction').map(entry => ({ id: entry.id, summary: entry.summary }));
+    const activeCompactions = branch.filter(entry => entry.type === 'compaction');
     const view = JSON.stringify(messages), latest = activeCompactions.at(-1);
-    snapshot.sdk = { activeCompactions, modelViewContainsLatestSummary: !!latest && view.includes(latest.summary),
+    const digest = value => createHash('sha256').update(value || '').digest('hex');
+    const metadata = { expectedBoundaryId: persistedBoundary.id, expectedFirstKeptEntryId: persistedBoundary.firstKeptEntryId,
+      activeCompactions: activeCompactions.map(entry => ({ id: entry.id, firstKeptEntryId: entry.firstKeptEntryId, summarySha256: digest(entry.summary) })),
+      messageRoles: messages.map(message => message.role), expectedSummarySha256: digest(persistedBoundary.summary) };
+    assert.equal(latest?.id, persistedBoundary.id, 'The current SDK branch must retain the actual latest persisted boundary: ' + JSON.stringify(metadata));
+    assert.equal(latest.firstKeptEntryId, persistedBoundary.firstKeptEntryId);
+    assert.equal(latest.summary, persistedBoundary.summary);
+    snapshot.sdk = { ...metadata, modelViewContainsLatestSummary: messages.some(message => message.role === 'compactionSummary' && message.summary === persistedBoundary.summary),
       modelViewHasOldSourcePadding: view.includes('source-padding'), modelViewHasPendingMarker: view.includes('CT_PENDING_ONLY_CURRENT_BOUNDARY'),
       messageCount: messages.length };
   }

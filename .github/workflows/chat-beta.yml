@@ -28,6 +28,10 @@ jobs:
           echo "CT_OPENCLAW_PACKAGE=$GITHUB_WORKSPACE/apps/cypher-tempre-chat/openclaw/runtime/node_modules/openclaw" >> "$GITHUB_ENV"
           echo "CT_OPENCLAW_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
         working-directory: apps/cypher-tempre-chat
+      - name: Install the locked isolated browser for native action acceptance
+        run: |
+          node --input-type=commonjs -e 'const r=require("node:module").createRequire(process.env.CT_OPENCLAW_PACKAGE+"/package.json"); const p=require("node:path"); require("node:child_process").execFileSync(process.execPath,[p.join(p.dirname(r.resolve("playwright-core/package.json")),"cli.js"),"install","--with-deps","chromium"],{stdio:"inherit"}); require("node:fs").appendFileSync(process.env.GITHUB_ENV,"CT_BROWSER_EXECUTABLE="+r("playwright-core").chromium.executablePath()+"\n");'
+        working-directory: apps/cypher-tempre-chat
       - run: npm ci --ignore-scripts && npm run check && node --test --test-concurrency=2 test/*.test.mjs && npm run test:engine
         working-directory: apps/cypher-tempre-chat
       - run: node --test dashboard/test/audit-site.test.mjs

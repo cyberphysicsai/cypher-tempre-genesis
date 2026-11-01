@@ -20,6 +20,22 @@ test('real native compaction persists only an exact PoI-approved summary and pre
 }, async t => {
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ct-cmp-')));
   const root = path.join(directory, 'chain'), stateDir = path.join(directory, 'native');
+  const pluginPath = path.join(directory, 'fixture-plugin');
+  await fs.cp(fileURLToPath(new URL('../openclaw/plugin', import.meta.url)), pluginPath, { recursive: true });
+  const indexFile = path.join(pluginPath, 'index.mjs'), indexSource = await fs.readFile(indexFile, 'utf8');
+  const targetFixture = indexSource.replace('export function register(api) {', `export function register(api) {
+    api.registerGatewayMethod('chainchat.fixtureSessionTarget', async ({ params, respond }) => {
+      if (!params || Object.keys(params).length !== 2 ||
+          !/^agent:main:chainchat-control:[a-f0-9]{64}$/.test(params.sessionKey || '') ||
+          typeof params.sessionId !== 'string' || !params.sessionId || params.sessionId.length > 512)
+        throw new Error('Invalid disposable fixture target.');
+      const key = createHash('sha256').update(params.sessionKey + '\\0' + params.sessionId).digest('hex');
+      const target = await api.runtime.state.openKeyedStore({ namespace: 'chainchat-native-compaction-targets', retention: 'retained' }).lookup(key);
+      if (!target || target.sessionKey !== params.sessionKey || target.sessionId !== params.sessionId || target.agentId !== 'main')
+        throw new Error('Missing disposable fixture target.');
+      respond(true, target);
+    }, { scope: 'operator.admin', profileAccess: 'independent' });`);
+  assert.notEqual(targetFixture, indexSource); await fs.writeFile(indexFile, targetFixture);
   const fixtures = path.join(directory, 'fixtures'), readFile = path.join(fixtures, 'approved.txt');
   await fs.mkdir(fixtures); await fs.writeFile(readFile, 'Fixture: blue.');
   await engine({ op: 'init', root, name: 'NativeCompactionFixture' });
@@ -55,11 +71,14 @@ test('real native compaction persists only an exact PoI-approved summary and pre
       rationale: 'Synthetic local fixture summary preserves the exact observed greeting and its user request.' }) });
   await broker.start();
   const create = modelContextTokens => createOpenClawGateway({ stateDir, packageRoot, nodePath, broker, modelContextTokens,
-    pluginPath: fileURLToPath(new URL('../openclaw/plugin', import.meta.url)),
+    pluginPath,
     onDiagnostic: line => diagnostics.push(line) });
   let manager = create();
   const registerHistory = () => manager.registerNativeService({ id: 'fixture-history', methods: { 'chat.history': params => {
     assert.equal(params.sessionKey, sessionKey); return { sessionKey, limit: 100 };
+  }, 'chainchat.fixtureSessionTarget': params => {
+    assert.equal(params.sessionKey, sessionKey); assert.equal(typeof params.sessionId, 'string');
+    return { sessionKey, sessionId: params.sessionId };
   } } });
   let history = registerHistory();
   t.after(async () => {
@@ -121,13 +140,16 @@ test('real native compaction persists only an exact PoI-approved summary and pre
     assert.ok(summaries.length > automaticBefore, 'Normal native chat must trigger reviewed automatic compaction under context pressure.');
     assert.ok(summaries.slice(automaticBefore).every(item => !JSON.stringify(item.sourceMessages).includes(pendingMarker)),
       'The current admitted user input must remain outside every compaction summary source.');
-    const persistedAutomatic = await nativeCompactionSnapshot({ nodePath, stateDir, sessionKey, packageRoot, sessionTarget: accepted.result.sessionTarget });
+    const currentSessionId = (await manager.sessionControls(identity)).session.sessionId;
+    const sessionTarget = await history.request('chainchat.fixtureSessionTarget', { sessionKey, sessionId: currentSessionId });
+    const persistedAutomatic = await nativeCompactionSnapshot({ nodePath, stateDir, sessionKey, packageRoot, sessionTarget });
     assert.ok(persistedAutomatic.compactions.length > persistedAccepted.compactions.length, 'Automatic pressure must persist a real reviewed SQLite compaction entry.');
     assert.ok(persistedAutomatic.compactions.every(item => [summary, toolSummary].includes(item.summary) && item.details.reviewed === true));
     assert.ok(summaries.slice(automaticBefore).some(item => item.sourceMessages.some(message => message.role === 'toolResult')),
       'The actual automatic summary source must preserve the older native tool/result record.');
     assert.ok(persistedAutomatic.recentUserInputs.some(input => input.includes(pendingMarker)), 'The admitted current input must survive native compaction and accepted append.');
-    assert.equal(persistedAutomatic.sdk.modelViewContainsLatestSummary, true, 'The new summary must remain on the actual current SDK branch after the next assistant append.');
+    assert.equal(persistedAutomatic.sdk.modelViewContainsLatestSummary, true,
+      'The new summary must remain on the actual current SDK branch after the next assistant append: ' + JSON.stringify(persistedAutomatic.sdk));
     assert.equal(persistedAutomatic.sdk.modelViewHasOldSourcePadding, false, 'The old summarized source must not remain in the effective native model view.');
     assert.equal(persistedAutomatic.sdk.modelViewHasPendingMarker, true);
     for (const prior of persistedBefore.sourceEvents) assert.deepEqual(persistedAutomatic.sourceEvents.find(item => item.sessionId === prior.sessionId && item.seq === prior.seq), prior,
@@ -135,7 +157,7 @@ test('real native compaction persists only an exact PoI-approved summary and pre
     const nextInput = 'Please say hello. Follow-up after reviewed compaction.';
     assert.equal((await manager.generate(config, { messages: [{ role: 'user', content: nextInput }], maxTokens: 128,
       nativeControl: { kind: 'message', sessionKey } }, context(nextInput))).text, answer, 'A later accepted native turn must append without a stale-parent fork.');
-    const afterFollowup = await nativeCompactionSnapshot({ nodePath, stateDir, sessionKey, packageRoot, sessionTarget: accepted.result.sessionTarget });
+    const afterFollowup = await nativeCompactionSnapshot({ nodePath, stateDir, sessionKey, packageRoot, sessionTarget });
     assert.equal(afterFollowup.sdk.modelViewContainsLatestSummary, true);
     assert.equal(afterFollowup.sdk.modelViewHasOldSourcePadding, false);
     assert.equal(diagnostics.some(line => /degraded to "legacy"|context-engine.*quarantin/i.test(line)), false,
