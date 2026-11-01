@@ -8,7 +8,22 @@
 .native-card { padding: 25px; margin: 18px 0; border: 1px solid var(--line-light); background: var(--panel); }
 .native-card h2 { font-size: 16px; margin: 0 0 16px; }
 .native-card p, #nativeConnection { line-height: 1.9; font-size: 11px; color: var(--muted); }
-.native-card textarea, .native-card input[type="text"], .native-card input[type="search"] { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-light); padding: 14px; line-height: 1.9; font-size: 11px; }
+.native-card textarea, .native-card input:not([type="checkbox"]), .native-card select { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-light); padding: 14px; line-height: 1.9; font-size: 11px; font-family: inherit; }
+.native-card select option { background: var(--panel); color: var(--text); }
+.native-service-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.native-service-grid > .native-card { margin: 0 0 18px; min-width: 0; }
+.native-service-list { display: grid; gap: 12px; }
+.native-service-row { border: 1px solid var(--line); padding: 15px; overflow-wrap: anywhere; }
+.native-service-row h3 { margin: 0 0 10px; font-size: 12px; line-height: 1.8; }
+.native-service-row p { margin: 7px 0; font-size: 10px; }
+.native-service-row pre { max-height: 240px; }
+.native-service-row .native-actions { margin-top: 12px; }
+.native-service-badge { display: inline-block; border: 1px solid var(--line-light); padding: 4px 8px; font-size: 9px; color: var(--text); }
+.native-service-badge[data-state="held"], .native-service-badge[data-state="uncertain"] { border-style: dashed; }
+.native-credential-rows { display: grid; gap: 10px; margin-bottom: 18px; }
+.native-credential-row { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(180px, 2fr) auto; gap: 12px; align-items: end; }
+.native-credential-row .field { margin: 0; }
+#nativeServicesStatus { font-size: 10px; line-height: 1.9; color: var(--muted); }
 .native-card pre { padding: 14px; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 10px; line-height: 1.9; background: var(--bg); border: 1px solid var(--line); max-height: 480px; overflow: auto; }
 .native-card summary { cursor: pointer; padding: 14px 0; font-size: 11px; }
 .native-check { display: flex; align-items: center; gap: 12px; margin: 15px 0; font-size: 11px; line-height: 1.8; }
@@ -22,7 +37,11 @@
 .native-schema-field strong { font-size: 11px; display: block; margin-bottom: 6px; }
 .native-schema-field p { font-size: 9px; margin: 0; }
 .native-settings-button { border: 1px solid var(--line-light); }
+#nativePluginsMount form { display: grid; gap: 13px; }
+#nativePluginsMount label { font-size: 10px; line-height: 1.8; }
+#nativePluginsMount select { color: var(--text); background: var(--panel-2); border: 1px solid var(--line-light); padding: 13px; width: 100%; }
+#nativePluginsMount button, #nativeBrowserMount button { margin-top: 12px; padding: 13px; border: 1px solid var(--line-light); }
 .platform-downloads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
 .platform-downloads a { text-align: center; padding: 17px 10px; font-size: 11px; display: block; }
 .platform-downloads small { display: block; font-size: 7px; line-height: 1.8; margin-top: 10px; }
-@media(max-width: 700px) { .native-workspace { padding: 20px 14px; } .native-card { padding: 17px; } .native-tabs button { font-size: 9px; padding: 11px 8px; } .platform-downloads { grid-template-columns: 1fr; } }
+@media(max-width: 700px) { .native-workspace { padding: 20px 14px; } .native-card { padding: 17px; } .native-tabs button { font-size: 9px; padding: 11px 8px; } .platform-downloads, .native-service-grid, .native-credential-row { grid-template-columns: 1fr; } }
