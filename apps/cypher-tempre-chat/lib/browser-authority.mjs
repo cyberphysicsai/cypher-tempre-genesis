@@ -6,6 +6,7 @@ import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { discoverBrowserExecutable, BROWSER_INSTALL_GUIDANCE } from './browser-discovery.mjs';
+import { launchOwnedBrowser } from './browser-launcher.mjs';
 export { expandBrowserActions } from '../openclaw/plugin/browser-actions.mjs';
 
 const fail = message => Object.assign(new Error(message), { code: 'BROWSER_AUTHORITY_DENIED', status: 403 });
@@ -46,7 +47,8 @@ function hostName(value) {
  * localhost/private-network opt-in and always verifies/pins public DNS.
  */
 export async function createBrowserAuthority({ directory, packageRoot, cacheDirectory, executablePath, chromium: suppliedChromium, ownerId,
-  grant, assertCurrent, authorizeAction, inspectNativeTarget, onEvent = () => {}, operatorGrant = {}, protectedRoots = [], testTransport } = {}) {
+  grant, assertCurrent, authorizeAction, inspectNativeTarget, onEvent = () => {}, operatorGrant = {}, protectedRoots = [], testTransport,
+  launchBrowser = launchOwnedBrowser } = {}) {
   if (typeof assertCurrent !== 'function' || typeof authorizeAction !== 'function' || !path.isAbsolute(directory || '') ||
       typeof ownerId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(ownerId)) throw fail('A private owned browser directory and action authority are required.');
   if (inspectNativeTarget !== undefined && typeof inspectNativeTarget !== 'function') throw fail('Native reference inspection must be a private callback.');
@@ -58,7 +60,9 @@ export async function createBrowserAuthority({ directory, packageRoot, cacheDire
   const fixture = testTransport;
   if (fixture && (!process.env.NODE_TEST_CONTEXT || !plain(fixture) || Object.keys(fixture).some(key => key !== 'fixtures') || !plain(fixture.fixtures))) throw fail('Private-network injection is available only inside the Node test runner.');
   const lookup = dns.lookup;
-  let closed = false, context = null, proxy = null, cdpUrl = null, starting = null;
+  if (launchBrowser !== launchOwnedBrowser && !process.env.NODE_TEST_CONTEXT) throw fail('A test browser launcher is available only inside the Node test runner.');
+  let closed = false, context = null, proxy = null, cdpUrl = null, starting = null, transport = null;
+  const privateValues = new Set();
   const sockets = new Set(), pages = new Map(), references = new Map(), dialogs = new Map(), network = [];
   let sequence = Promise.resolve(), pageNumber = 0;
   const report = (status, label) => { try { onEvent({ status, label }); } catch {} };
@@ -85,6 +89,7 @@ export async function createBrowserAuthority({ directory, packageRoot, cacheDire
   function track(socket) { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); socket.on('error', () => {}); return socket; }
   async function startProxy() {
     const credentials = randomBytes(24).toString('hex'), password = randomBytes(24).toString('hex');
+    privateValues.add(credentials); privateValues.add(password);
     const expectedAuth = `Basic ${Buffer.from(`${credentials}:${password}`).toString('base64')}`;
     proxy = http.createServer(async (request, response) => {
       try {
@@ -143,22 +148,19 @@ export async function createBrowserAuthority({ directory, packageRoot, cacheDire
       const selectedExecutable = executablePath || await discoverBrowserExecutable({ cacheDirectory, packageRoot });
       if (!selectedExecutable) throw Object.assign(new Error(BROWSER_INSTALL_GUIDANCE), { code: 'BROWSER_NOT_INSTALLED', status: 409 });
       const browserProxy = await startProxy();
-      // Reserve the CDP port, then launch only this new non-default profile.
-      const reservation = net.createServer(); await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
-      const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
       const downloadsPath = path.join(directory, 'downloads'); await fs.mkdir(downloadsPath, { recursive: true, mode: 0o700 });
-      context = await chromium.launchPersistentContext(path.join(directory, 'profile'), {
-        executablePath: selectedExecutable, headless: true, chromiumSandbox: true, proxy: browserProxy,
-        serviceWorkers: 'block', acceptDownloads: true, downloadsPath, permissions: [], viewport: { width: 1280, height: 800 },
-        args: [`--remote-debugging-address=127.0.0.1`, `--remote-debugging-port=${port}`, '--disable-quic', '--disable-extensions',
-          '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-breakpad', '--no-first-run',
-          '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
-          '--disable-features=WebTransport,WebTransportDeveloperMode,WebRtcHideLocalIpsWithMdns'],
-      });
+      transport = await launchBrowser({ directory, executablePath: selectedExecutable, chromium, packageRoot,
+        proxy: browserProxy, assertCurrent: current, downloadsPath });
+      context = transport.context; cdpUrl = transport.cdpUrl; privateValues.add(cdpUrl);
+      for (const value of transport.redactionSecrets?.() || []) privateValues.add(value);
       const denyUnproxiedProtocols = () => {
         for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'WebTransport']) {
           try { Object.defineProperty(globalThis, name, { value: undefined, configurable: false, writable: false }); } catch {}
         }
+        // This owned context never equips page-provided service workers. The
+        // proxy independently contains worker traffic even if a page probes
+        // an alternative browser API or a retained profile has older state.
+        try { Object.defineProperty(Navigator.prototype, 'serviceWorker', { value: undefined, configurable: false, writable: false }); } catch {}
       };
       await context.addInitScript(denyUnproxiedProtocols);
       await Promise.all(context.pages().map(page => page.evaluate(denyUnproxiedProtocols)));
@@ -175,7 +177,6 @@ export async function createBrowserAuthority({ directory, packageRoot, cacheDire
       });
       context.on('page', registerPage); context.pages().forEach(registerPage);
       context.once('close', () => { context = null; cdpUrl = null; if (!closed) void close(); });
-      cdpUrl = `http://127.0.0.1:${port}`;
       report('ready', 'Owned browser started with proxy and per-request network containment');
       return { profile: OWNED_BROWSER_PROFILE, cdpUrl };
     })();
@@ -227,6 +228,15 @@ export async function createBrowserAuthority({ directory, packageRoot, cacheDire
       finally { await client.detach().catch(() => {}); }
     }
     const targets = [];
+    const activatesLink = ['click', 'clickCoords'].includes(act.kind) || act.kind === 'press' && /(?:^|\+)(?:Enter|Space| )$/.test(act.key || '');
+    const checkLinkDestination = (info, observedUrl) => {
+      if (!activatesLink || !info.href?.trim() || info.href.trim().startsWith('#')) return;
+      let destination; try { destination = new URL(info.href, observedUrl); }
+      catch { throw fail('The observed link destination is invalid.'); }
+      // Browser grants do not authorize launching OS protocol handlers or
+      // JavaScript/file destinations. Buttons without href remain unchanged.
+      checkedUrl(destination.href);
+    };
     if (params.action === 'act' && !['wait', 'resize', 'evaluate', 'close'].includes(act.kind)) {
       const selectedId = act.targetId || params.targetId;
       if (act.targetId && params.targetId && act.targetId !== params.targetId) throw fail('Browser target identifiers must agree.');
@@ -268,10 +278,11 @@ export async function createBrowserAuthority({ directory, packageRoot, cacheDire
       }
       if (!elements.length && !nativeTargets.length) throw fail('The native browser action needs an exact current element.');
       for (const element of elements) {
-        const info = await describeElement(element); targets.push({ url: selected.url, ...info });
+        const info = await describeElement(element); checkLinkDestination(info, selected.url); targets.push({ url: selected.url, ...info });
         if (!operator.credentials && (sensitive.test(JSON.stringify(info)) || info.credentialForm) || !operator.payments && payment.test(JSON.stringify(info))) throw fail('This native element requires a sensitive-action operator handoff.');
       }
       for (const info of nativeTargets) {
+        checkLinkDestination(info, selected.url);
         if (!operator.credentials && (sensitive.test(JSON.stringify(info)) || info.credentialForm) || !operator.payments && payment.test(JSON.stringify(info))) throw fail('This native element requires a sensitive-action operator handoff.');
         targets.push(info);
       }
@@ -360,10 +371,12 @@ export async function createBrowserAuthority({ directory, packageRoot, cacheDire
     if (closed) return; closed = true;
     for (const socket of sockets) socket.destroy();
     await context?.close().catch(() => {}); context = null;
+    await transport?.close().catch(() => {}); transport = null;
     if (proxy) { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); proxy = null; }
   }
   return { start, inspectAction,
     async assertActionUnchanged(input, fingerprint) { const current = await inspectAction(input); if (current.context.fingerprint !== fingerprint) throw fail('The native browser target changed during review.'); return current; },
     pauseNetwork() { for (const socket of sockets) socket.destroy(); },
-    execute, close, describe: () => ({ profile: OWNED_BROWSER_PROFILE, isolated: true, running: !!context, closed, networkHosts: [...hosts], network: [...network] }) };
+    execute, close, redactionSecrets: () => [...privateValues],
+    describe: () => ({ profile: OWNED_BROWSER_PROFILE, isolated: true, running: !!context, closed, networkHosts: [...hosts], network: [...network] }) };
 }

@@ -20,7 +20,10 @@ sequence. Outcomes, rather than approvals alone, ground subsequent responses.
 The owned process uses an authenticated loopback proxy with DNS resolution and
 public-address checks on every connection. Redirects, frames and subresources
 remain inside the hostname grant. Network access is paused between admitted
-invocations. Credential fields and payment or wallet interactions require
+invocations. Both automation clients use a private, capability-authenticated CDP
+relay. The parent answers only Basic-auth challenges from the exact owned proxy;
+it never supplies that credential to website login challenges. The browser child
+receives only the OS environment it needs. Credential fields and payment or wallet interactions require
 additional explicit grants. Model-supplied JavaScript requires all three
 evaluation, credential and payment acknowledgments because arbitrary page code
 cannot be safely restricted by checking its words. The private metadata-only
@@ -97,7 +100,11 @@ Denied/stale summaries leave the native transcript and Timechain unchanged.
 
 Accepted native-turn advancement has a retained, atomic idempotency receipt.
 Private model-route capabilities are stripped before requests reach the provider;
-unregistered legacy summary calls cannot fall back to unreviewed generation.
+unregistered summary calls cannot authorize generation. The parent checks the
+actual mandatory engine at startup, before native work and before every provider
+forward. Factory and context faults latch a held engine instead of allowing a
+legacy writer. An unexpected accepted-turn commit fault stops the owned Gateway
+before upstream recovery can write a fallback; no success receipt is fabricated.
 
 ## Native plugins
 

@@ -41,7 +41,10 @@ An update is a reviewed release, not an unattended merge of executable code:
    capability restoration and model switches across a full app restart.
    Revalidate the reviewed context-engine contract, retained accepted-turn
    advancement store, every provider's stripped private route capability,
-   and forced legacy-compaction failure before persistence. Exercise actual
+   and actual factory-fault denial before any deterministic legacy write.
+   Verify the guarded factory health and commit fail-stop contract, and both
+   automation clients' proxy-only authentication without origin credential leaks.
+   Exercise actual
    native browser tool loops and per-child denial, scheduled signals, channel
    ingress/delivery revocation, and exact-artifact plugin trust/restore.
    Keep native browser execution in its upstream plugin owner scope; review the

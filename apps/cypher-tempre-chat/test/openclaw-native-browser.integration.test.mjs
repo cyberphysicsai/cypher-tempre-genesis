@@ -11,6 +11,7 @@ import { createOpenClawGateway } from '../openclaw/gateway.mjs';
 import { createPoIBroker } from '../openclaw/broker.mjs';
 import { createManagedBrowserService } from '../lib/managed-browser-service.mjs';
 import { createBrowserAuthority } from '../lib/browser-authority.mjs';
+import { launchOwnedBrowser } from '../lib/browser-launcher.mjs';
 import { controlSessionKey } from '../lib/openclaw-controls.mjs';
 import { engine } from '../lib/engine.mjs';
 import { FRUITS, DIMENSIONS } from '../lib/providers.mjs';
@@ -32,7 +33,8 @@ test('original native browser executes only freshly reviewed primitives and cont
   const chromium = createRequire(path.join(packageRoot, 'package.json'))('playwright-core').chromium;
   const browsers = createManagedBrowserService({ directory: path.join(directory, 'browser'), packageRoot, executablePath,
     getGrant: async () => ({ revision: 'fixture-only', grant }), assertCurrent: async () => {}, protectedRoots: () => [root],
-    createAuthority: async options => { const authority = await createBrowserAuthority(options);
+    createAuthority: async options => { const authority = await createBrowserAuthority({ ...options,
+      launchBrowser: args => launchOwnedBrowser({ ...args, onDiagnostic: event => console.error('[native-browser] transport:', JSON.stringify(event)) }) });
       return { ...authority, inspectAction: async params => { try { return await authority.inspectAction(params); }
         catch (error) { console.error('[native-browser] fixture inspector:', error.code, error.message); throw error; } },
       assertActionUnchanged: async (...args) => { try { return await authority.assertActionUnchanged(...args); }
@@ -77,17 +79,27 @@ test('original native browser executes only freshly reviewed primitives and cont
     return manager.generate(config, { messages: [{ role: 'user', content: input }], maxTokens: 256, nativeControl: { kind: 'message', sessionKey } },
       { root, input, purpose: 'candidate', loadout: [], learning: false, nativeIdentity: identity, toolAuthority: grant, authorize: async () => {},
         event: (ability, status, label) => console.error(`[native-browser] ${ability}:${status}:${label}`) }); };
-  const pageRead = async callback => { const client = await chromium.connectOverCDP(browsers.redactionSecrets().at(-1));
-    try { const page = client.contexts()[0].pages().find(page => page.url() === url); assert.ok(page, 'The original native SDK must really open the approved page.'); return await callback(page); }
-    finally { await client.close(); } };
+  // Test setup and DOM verification also need a live private lease. The public
+  // application never exposes this CDP transport outside an admitted turn.
+  const inspectOwnedBrowser = async callback => {
+    const lease = await browsers.prepareInvocation({ purpose: 'candidate', nativeIdentity: identity, toolAuthority: grant });
+    let client;
+    try { client = await chromium.connectOverCDP(lease.config.browser.profiles[lease.profile].cdpUrl); return await callback(client); }
+    finally { await client?.close(); await lease.releaseInvocation(); }
+  };
+  const pageRead = callback => inspectOwnedBrowser(async client => {
+    const page = client.contexts()[0].pages().find(page => page.url() === url);
+    assert.ok(page, 'The original native SDK must really open the approved page.'); return callback(page);
+  });
   try {
     await run({ action: 'open', targetUrl: 'about:blank' }, 'Open a new empty owned browser tab at exactly about:blank.');
     let targetId;
-    const initial = await chromium.connectOverCDP(browsers.redactionSecrets().at(-1));
-    try { const page = initial.contexts()[0].pages().at(-1); assert.equal(page.url(), 'about:blank');
+    await inspectOwnedBrowser(async initial => { const page = initial.contexts()[0].pages().at(-1); assert.equal(page.url(), 'about:blank');
       const session = await page.context().newCDPSession(page); targetId = (await session.send('Target.getTargetInfo')).targetInfo.targetId; await session.detach(); }
-    finally { await initial.close(); }
-    await run({ action: 'navigate', targetId, targetUrl: url }, `Navigate the newly opened owned tab to the approved fixture URL ${url}.`);
+    );
+    const navigation = await run({ action: 'navigate', targetId, targetUrl: url }, `Navigate the newly opened owned tab to the approved fixture URL ${url}.`);
+    const navigationObservation = navigation.enforcement.toolObservations.filter(item => item.name === 'browser').at(-1);
+    assert.equal(navigationObservation?.success, true, `The original native navigation must succeed: ${JSON.stringify(navigationObservation).slice(0, 3000)}`);
     await pageRead(async page => { await page.setContent(`<button id="allowed" onclick="document.documentElement.dataset.allowed=String(Number(document.documentElement.dataset.allowed||0)+1);fetch('http://127.0.0.1:${privateServer.address().port}/private').catch(()=>{})">Approved increment</button>
       <button id="denied" onclick="document.documentElement.dataset.denied=String(Number(document.documentElement.dataset.denied||0)+1)">Denied increment</button>
       <label>Fixture note<input id="note"></label><label>Fixture fill<input id="fill"></label><label>Secret input<input id="password" type="password"></label>`);

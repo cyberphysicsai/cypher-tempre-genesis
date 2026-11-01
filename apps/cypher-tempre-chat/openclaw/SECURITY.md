@@ -94,6 +94,18 @@ Compaction requires an exact-source summary receipt and native transcript CAS.
 Private, per-invocation model-route capabilities are added by the mandatory
 context engine and stripped before provider forwarding. Missing reviewed
 context, including a legacy engine fallback, cannot authorize model generation.
+The mandatory factory is probed before startup is reported ready and before
+native work/provider forwarding. Its guard latches faults without selecting a
+legacy writer. Unexpected accepted-turn commit failures stop the owned Gateway
+before native exception recovery; constructor-fault tests verify no deterministic
+compaction append, even when no model call would have occurred.
+
+Browser proxy credentials remain in the parent. The private CDP relay answers
+only authentication challenges marked Proxy from the exact owned endpoint;
+website authentication does not receive that credential. Capability-bound
+discovery validates the actual owned browser/page endpoints. Real two-client
+HTTPS and origin Basic-auth checks accompany bounded protocol, queue, shutdown
+and revocation tests. This transport does not sandbox trusted native plugin code.
 
 The pinned first-party browser backend is a required service; its original
 tool receives mandatory parameter scoping, PoI review and result reduction. Third-party native plugins require explicit exact

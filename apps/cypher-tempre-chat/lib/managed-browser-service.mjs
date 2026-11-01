@@ -66,7 +66,8 @@ export function createManagedBrowserService({ directory, packageRoot, cacheDirec
       const leaseId = randomUUID(); entry.active = { leaseId, context };
       let endpoint;
       try { endpoint = await entry.authority.start(); } catch (error) { await closeEntry(key); throw error; }
-      privateEndpoints.add(endpoint.cdpUrl);
+      for (const value of entry.authority.redactionSecrets?.() || []) privateEndpoints.add(value);
+      privateEndpoints.delete(endpoint.cdpUrl); privateEndpoints.add(endpoint.cdpUrl);
       const live = async () => { if (entry.active?.leaseId !== leaseId) throw denied('This browser invocation lease expired.'); await entry.check(); };
       const release = async () => {
         if (entry.active?.leaseId === leaseId) { entry.active = null; entry.authority.pauseNetwork?.(); }

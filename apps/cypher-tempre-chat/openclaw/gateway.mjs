@@ -286,6 +286,9 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       }
       if (request.method !== "POST" || !current || current.controller.signal.aborted)
         throw fail("No admitted local model invocation.", "OPENCLAW_PROXY_INACTIVE", 409);
+      await assertEnforcementHealthy({ duringStartup: true });
+      if (current !== active || current.controller.signal.aborted)
+        throw fail('The model invocation ended before forwarding.', 'REQUEST_CANCELLED', 499);
       const raw = await collect(request), received = JSON.parse(raw.toString("utf8"));
       let decoded;
       try { decoded = consumeModelRouteCapability(received, current.config.provider, current.modelRouteCapability); }
@@ -319,7 +322,10 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
   async function start() {
     if (closed) throw fail("This OpenClaw manager is closed.", "OPENCLAW_CLOSED");
     if (startup) return startup;
-    if (child && child.exitCode === null && child.signalCode === null) return status();
+    if (child && child.exitCode === null && child.signalCode === null) {
+      await assertEnforcementHealthy({ duringStartup: true });
+      return status();
+    }
     startup = (async () => {
       await stopping;
       await initializeModelCapabilities();
@@ -423,16 +429,21 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
           if (!readiness.ok || (await readiness.json()).ready !== true) throw fail("Agent readiness is pending.", "OPENCLAW_PENDING");
           const response = await fetchImpl(`http://127.0.0.1:${port}/v1/models`, { headers: { authorization: `Bearer ${gatewayToken}` },
             signal: AbortSignal.timeout(1500), redirect: "error" });
-          if (response.ok) { const result = await response.json(); if (result.data?.some(value => value.id === "openclaw/default" || value.id === "openclaw/main")) return status(); }
-        } catch {}
+          if (response.ok) { const result = await response.json(); if (result.data?.some(value => value.id === "openclaw/default" || value.id === "openclaw/main")) {
+            await assertEnforcementHealthy({ duringStartup: true });
+            return status();
+          } }
+        } catch (error) {
+          if (['OPENCLAW_ENFORCEMENT_UNHEALTHY', 'OPENCLAW_STOP_FAILED'].includes(error.code)) throw error;
+        }
         await new Promise(resolve => setTimeout(resolve, 200));
       }
       throw fail("The local OpenClaw gateway did not become ready in time.", "OPENCLAW_START_TIMEOUT");
     })().catch(async error => { await stopChild(); throw error; }).finally(() => { startup = null; });
     return startup;
   }
-  async function nativeConnectionReady() {
-    await start();
+  async function nativeConnectionReady({ duringStartup = false } = {}) {
+    if (!duringStartup) await start();
     if (nativeConnection) return nativeConnection;
     nativeConnection = (async () => {
       const { GatewayClient } = await import(pathToFileURL(path.join(upstream, 'dist/plugin-sdk/gateway-runtime.js')).href);
@@ -585,6 +596,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     await stopChild();
   }
   async function nativeTurn(params, controller, { allowEmptyFinal = false } = {}) {
+    await assertEnforcementHealthy();
     const client = await nativeConnectionReady();
     let expectedRun = params.idempotencyKey, settled = false, done, acknowledged = false, bufferedText = '';
     const earlyEvents = [];
@@ -616,7 +628,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         // by a final frame with no message. Buffer privately until terminal and
         // require the broker's exact candidate/control receipt before release.
         const candidate = finalText?.trim() ? finalText : bufferedText;
-        if (!candidate?.trim() && !allowEmptyFinal) { settled = true; done.reject(fail('The native goal turn returned no final text.', 'OPENCLAW_EMPTY_RESPONSE')); }
+        if (!candidate?.trim() && !allowEmptyFinal) { settled = true; done.reject(fail('OpenClaw ended this turn without an approved final reply. Native preflight or output policy may have held the request. No unreviewed text was released.', 'OPENCLAW_EMPTY_RESPONSE')); }
         else { settled = true; done.resolve({ text: candidate, usage: payload.message?.usage || {} }); }
       }
     };
@@ -639,6 +651,26 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     } finally { nativeEvents.delete(listener); controller.signal.removeEventListener('abort', aborted);
       await client.request('sessions.messages.unsubscribe', { key: params.sessionKey, subscriptionId: 'chainchat-active-turn' }).catch(() => {});
       if (active) { active.nativeRun = false; active.nativeClose = null; } }
+  }
+  async function assertEnforcementHealthy({ duringStartup = false } = {}) {
+    try {
+      const owned = child;
+      if (!owned || owned.exitCode !== null || owned.signalCode !== null)
+        throw fail('No owned context engine is running.', 'OPENCLAW_ENFORCEMENT_UNHEALTHY', 503);
+      const client = await nativeConnectionReady({ duringStartup });
+      const result = await client.request('chainchat.enforcementHealth', {});
+      if (owned !== child || owned.exitCode !== null || owned.signalCode !== null ||
+          result?.version !== 1 || result.pluginId !== 'cypher-tempre-poi' || result.engineId !== 'cypher-tempre-poi' || result.healthy !== true)
+        throw fail('The mandatory context engine is not healthy.', 'OPENCLAW_ENFORCEMENT_UNHEALTHY', 503);
+    } catch {
+      // Provider-route capabilities alone cannot stop a native deterministic
+      // fallback from rewriting its transcript. Validate the actual mandatory
+      // factory before entering any chat/compaction lifecycle, and fail-stop
+      // this exact owned process if its guard is missing or latched unhealthy.
+      try { await stopChild({ force: true }); }
+      finally { active?.controller.abort(); }
+      throw fail('The mandatory Proof of Interaction runtime is unavailable. This turn was held before native fallback; restart the local app after inspecting its runtime.', 'OPENCLAW_ENFORCEMENT_UNHEALTHY', 503);
+    }
   }
   async function perform(config, args, context) {
     if (!args || !Array.isArray(args.messages) || !args.messages.length || args.messages.length > 200 ||
@@ -668,7 +700,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     // adapter exists; allowedHostnames would otherwise trust private addresses.
     const desiredBrowserHosts = [];
     if (JSON.stringify(desiredBrowserHosts) !== JSON.stringify(browserHosts)) { browserHosts = desiredBrowserHosts; await stopChild(); }
-    checkSignal(args.signal); await start(); checkSignal(args.signal);
+    checkSignal(args.signal); await start(); await assertEnforcementHealthy(); checkSignal(args.signal);
     const invocationId = randomUUID();
     const modelRouteCapability = secret();
     const native = args.nativeControl;
@@ -789,7 +821,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       throw fail('A privately admitted native compaction operation is required.', 'OPENCLAW_COMPACTION_HELD', 422);
     const config = validateProvider(rawConfig), sessionKey = controlSessionKey(nativeIdentity);
     assertCredentialIsolation(config, { instructions }); checkServiceIsolation({ instructions }); checkSignal(signal);
-    await synchronizeModelCapabilities(context.modelCapabilities); await start();
+    await synchronizeModelCapabilities(context.modelCapabilities); await start(); await assertEnforcementHealthy();
     const selected = await nativeRpc('sessions.describe', { key: sessionKey, includeDerivedTitles: false, includeLastMessage: false });
     if (!selected.session?.sessionId) return { ok: true, compacted: false, reason: 'No native conversation exists for this Timechain yet.' };
     const operationId = randomUUID(), controller = new AbortController();

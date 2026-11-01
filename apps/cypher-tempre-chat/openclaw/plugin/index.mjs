@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReviewedContextEngine } from './compaction.mjs';
 import { createNativeCompactionStats, COMPACTION_STATS_METHOD } from './compaction-stats.mjs';
+import { createGuardedContextFactory, ENFORCEMENT_HEALTH_METHOD } from './context-guard.mjs';
 import { createChannelHooks } from './channels.mjs';
 import { sanitizeOwnedBrowserResult } from './browser-results.mjs';
 import { managedServicesFactory } from './services.mjs';
@@ -294,10 +295,17 @@ export function register(api) {
     hooks[name] = async (event, context) => (await channels[name](event, context)) ?? ordinary(event, context);
   }
   hooks.message_received = channels.message_received;
-  api.registerContextEngine?.(PLUGIN_ID, async context => createReviewedContextEngine({
-    sdk: await import('openclaw/plugin-sdk/agent-sessions'), request, workspaceDir: context.workspaceDir,
-    targetRegistry: stats(),
-    commitStore: api.runtime.state.openKeyedStore({ namespace: 'chainchat-native-accepted-turns', retention: 'retained' }) }));
+  const guardedContext = createGuardedContextFactory({ context: { workspaceDir: api.config?.agents?.defaults?.workspace },
+    load: async context => createReviewedContextEngine({
+      sdk: await import('openclaw/plugin-sdk/agent-sessions'), request, workspaceDir: context.workspaceDir,
+      targetRegistry: stats(),
+      commitStore: api.runtime.state.openKeyedStore({ namespace: 'chainchat-native-accepted-turns', retention: 'retained' }) }),
+    onCriticalFault: () => process.exit(78) });
+  api.registerGatewayMethod?.(ENFORCEMENT_HEALTH_METHOD, async ({ params, respond }) => {
+    try { respond(true, await guardedContext.probe(params)); }
+    catch { respond(false, undefined, { code: 'INVALID_REQUEST', message: 'The mandatory context health request must be empty.' }); }
+  }, { scope: 'operator.admin', profileAccess: 'independent' });
+  api.registerContextEngine?.(PLUGIN_ID, guardedContext.factory);
   // Each callback's own transport deadline expires before the host can discard
   // its explicit deny/cancel result. The UI transport also requires receipts.
   const timeoutMs = 2 * (config.requestTimeoutMs ?? 60000) + 10000;

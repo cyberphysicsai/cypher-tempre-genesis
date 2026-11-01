@@ -213,8 +213,9 @@ test("plugin registers all required blocking and delivery hooks against the publ
   assert.equal(tools[0].options.name, 'chainchat_automation');
   assert.equal(tools[0].factory.contextVersion, 2);
   assert.equal(tools.length, 1);
-  assert.equal(services.length, 0); assert.equal(methods.length, 1);
+  assert.equal(services.length, 0); assert.equal(methods.length, 2);
   assert.equal(methods[0].name, 'chainchat.compactionStats'); assert.equal(methods[0].options.scope, 'operator.admin');
+  assert.equal(methods[1].name, 'chainchat.enforcementHealth'); assert.equal(methods[1].options.scope, 'operator.admin');
   for (const required of ["before_agent_reply", "before_prompt_build", "before_tool_call", "before_agent_finalize",
     "reply_payload_sending", "message_sending", "tool_result_persist", "after_tool_call", "agent_end", "gateway_stop"])
     assert.ok(registered.some(entry => entry.name === required));
