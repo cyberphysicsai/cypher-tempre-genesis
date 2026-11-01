@@ -2,7 +2,8 @@
   "id": "cypher-tempre-poi",
   "name": "Cypher Tempre Proof of Interaction",
   "description": "Trusted local turn admission, native context, action review and candidate-bound output receipts.",
-  "version": "0.7.0",
+  "version": "0.9.0",
+  "contracts": { "tools": ["chainchat_automation"] },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

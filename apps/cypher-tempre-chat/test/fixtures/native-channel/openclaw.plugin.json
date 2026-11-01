@@ -1,0 +1,1 @@
+{"id":"chainchat-fixture","name":"ChainChat local native test channel","channels":["chainchat-fixture"],"configSchema":{"type":"object","additionalProperties":false,"required":["sinkUrl"],"properties":{"sinkUrl":{"type":"string"}}},"channelConfigs":{"chainchat-fixture":{"schema":{"type":"object","additionalProperties":false,"properties":{"enabled":{"type":"boolean"}}}}}}

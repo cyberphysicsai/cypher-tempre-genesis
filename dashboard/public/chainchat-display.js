@@ -2,7 +2,7 @@ export function supportedBridgeVersion(version) {
   if (typeof version !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) return false;
   const value = version.split(".").map(Number);
   if (!value.every(Number.isSafeInteger)) return false;
-  const minimum = [0, 8, 0];
+  const minimum = [0, 9, 0];
   for (let i = 0; i < minimum.length; i++) {
     if (value[i] > minimum[i]) return true;
     if (value[i] < minimum[i]) return false;
@@ -34,6 +34,7 @@ export function requiresHoldings(path, data) {
   if (path === "/api/openclaw/tools" && data?.enabled === false) return false;
   if (path === "/api/openclaw/command" && /^\/(?:stop|goal\s+pause)\s*$/i.test(data?.command || '')) return false;
   if (path === "/api/cancel") return false;
+  if (['/api/openclaw/automation/pause', '/api/openclaw/plugins/disable', '/api/openclaw/plugins/uninstall', '/api/openclaw/plugins/preview'].includes(path)) return false;
   if (path === "/api/cognition" && data?.mode === "dormant" && data.confirm === true &&
       Object.keys(data).every(key => ["mode", "confirm"].includes(key))) return false;
   if (["/api/pair", "/api/launch", "/api/local-resume", "/api/unpair", "/api/agents/pair", "/api/agents/select",

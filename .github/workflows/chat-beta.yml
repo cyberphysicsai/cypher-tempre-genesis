@@ -28,11 +28,51 @@ jobs:
           echo "CT_OPENCLAW_PACKAGE=$GITHUB_WORKSPACE/apps/cypher-tempre-chat/openclaw/runtime/node_modules/openclaw" >> "$GITHUB_ENV"
           echo "CT_OPENCLAW_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
         working-directory: apps/cypher-tempre-chat
-      - run: npm ci --ignore-scripts && npm run check && npm test && npm run test:engine
+      - name: Install the locked isolated browser for native action acceptance
+        run: |
+          node --input-type=commonjs -e 'const r=require("node:module").createRequire(process.env.CT_OPENCLAW_PACKAGE+"/package.json"); const p=require("node:path"); require("node:child_process").execFileSync(process.execPath,[p.join(p.dirname(r.resolve("playwright-core/package.json")),"cli.js"),"install","--with-deps","chromium"],{stdio:"inherit"}); require("node:fs").appendFileSync(process.env.GITHUB_ENV,"CT_BROWSER_EXECUTABLE="+r("playwright-core").chromium.executablePath()+"\n");'
+        working-directory: apps/cypher-tempre-chat
+      - name: Allow sandbox user namespaces only for the exact CI browser
+        id: browser_sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ubuntu 23.10+ restricts user namespaces for downloaded Chromium.
+          # Keep Chromium's sandbox enabled; grant only this exact executable.
+          # https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
+          browser="$(realpath -- "$CT_BROWSER_EXECUTABLE")"
+          test -x "$browser"
+          [[ "$browser" =~ ^/[A-Za-z0-9_./-]+$ ]]
+          restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ ! -r "$restriction" ]] || [[ "$(cat "$restriction")" != 1 ]]; then
+            echo "No AppArmor namespace exception is needed on this runner."
+            exit 0
+          fi
+          profile=/etc/apparmor.d/chainchat-ci-chromium
+          if sudo test -e "$profile"; then
+            echo "::error::Refusing to replace an existing AppArmor profile."
+            exit 1
+          fi
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile chainchat-ci-chromium "%s" flags=(unconfined) {\n  userns,\n}\n' "$browser" | sudo tee "$profile" >/dev/null
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+          sudo apparmor_parser -a "$profile"
+      - name: Exercise browser containment and fallback denial before the full suite
+        run: npm ci --ignore-scripts && npm run check && node --test --test-concurrency=1 test/openclaw-native-browser.integration.test.mjs test/openclaw-legacy-compaction.integration.test.mjs
+        working-directory: apps/cypher-tempre-chat
+      - run: npm test && npm run test:engine
         working-directory: apps/cypher-tempre-chat
       - run: node --test dashboard/test/audit-site.test.mjs
       - run: npm ci --ignore-scripts && npm run compile && npm test
         working-directory: apps/cypher-tempre-chat/contracts
+      - name: Remove the temporary CI browser namespace exception
+        if: always() && steps.browser_sandbox.outputs.installed == 'true'
+        shell: bash
+        run: |
+          profile=/etc/apparmor.d/chainchat-ci-chromium
+          result=0
+          sudo apparmor_parser -R "$profile" || result=$?
+          sudo rm -- "$profile"
+          exit "$result"
   windows-installer:
     runs-on: windows-latest
     steps:

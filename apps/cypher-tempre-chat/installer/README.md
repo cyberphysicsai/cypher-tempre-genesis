@@ -8,6 +8,17 @@ Linux tar.gz contains an executable `.sh`, with an optional direct `.run` file.
 Normal OS confirmation/executable-file policies still apply. macOS signing and
 notarization are not claimed.
 
+Browser automation uses a separate ChainChat profile. Existing Chrome, Chromium
+or Edge binaries are discovered from fixed local installation paths; personal
+browser profiles are never adopted. If none is available, open **Settings →
+Browser → Set up managed Chromium** after connecting your model and Timechain.
+That explicit action runs the installed, lock-matched Playwright CLI to download
+its selected Chromium revision into private `data/browser-runtime/` storage.
+It does not install system packages or request administrator access. Linux still
+needs the browser's normal system libraries; install those through your usual OS
+administration process if the browser cannot start. Browser setup is optional
+and separate from installing the local chat runtime.
+
 ## Windows x64
 
 The Windows x64 setup executable installs ChainChat for the current user. It
@@ -60,7 +71,7 @@ beside the executable.
 Build on Windows after producing the sanitized Git-based application ZIP:
 
 ```powershell
-python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.8.0.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.8.0-windows-x64.exe
+python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.9.0.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.9.0-windows-x64.exe
 ```
 
 The .NET Framework compiler consumes the C# source, Windows manifest and font
@@ -79,7 +90,7 @@ Use a dedicated empty test directory, suppress launch/shortcuts, and capture the
 result without touching the current user's actual installation:
 
 ```powershell
-.\CypherTempre-ChainChat-Setup-0.8.0-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
+.\CypherTempre-ChainChat-Setup-0.9.0-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
 ```
 
 `--cache-dir` may name a directory containing the exact official Node/CPython ZIP

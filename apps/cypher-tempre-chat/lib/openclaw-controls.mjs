@@ -18,6 +18,7 @@ export const CONTROL_GUARDS = Object.freeze({
   browser: 'Browser configuration requires an explicit host-tool grant; isolation and network admission remain managed.',
   'browser.ssrfPolicy': 'Requested-navigation network policy is derived from the current explicit host grant.',
   'browser.profiles.openclaw': 'The model uses an isolated managed browser profile, never an imported signed-in profile.',
+  'browser.profiles.chainchat-owned': 'The owned browser endpoint and network containment are private managed-service capabilities.',
   'browser.evaluateEnabled': 'The navigation grant does not authorize arbitrary browser JavaScript.',
   'browser.executablePath': 'Custom executables require a reviewed execution adapter.',
   'browser.extraArgs': 'Managed browser process isolation cannot be overridden.',
@@ -37,6 +38,7 @@ export const CONTROL_GUARDS = Object.freeze({
   'agents.defaults.agentDir': 'Private agent state belongs to this installed runtime.',
   'agents.defaults.model': 'Choose the connected provider and model through the BYOK selector.',
   'agents.defaults.heartbeat': 'Unattended model runs require a managed admission adapter.',
+  'agents.defaults.compaction.memoryFlush': 'Native pre-compaction file writes require their own reviewed action adapter; the Timechain remains the managed memory source.',
 });
 const protectedRoots = Object.keys(CONTROL_GUARDS);
 const credentialKey = /^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passphrase|secret|client[_-]?secret|credential|credentials|authorization|auth[_-]?token|broker[_-]?token)$/i;
@@ -62,7 +64,7 @@ export const CONTROL_COMMANDS = Object.freeze([
   ['tools', 'Inspect native effective tool policy and current managed action authority.', 'system'],
   ['queue', 'Read or set the selected native session queue policy.', 'native'],
   ['context', 'Read the actual native context assembly report: list/detail/map/json.', 'native'],
-  ['compact', 'Model compaction requires a managed summary admission adapter.', 'guarded'],
+  ['compact', 'Compact the selected native conversation after exact-summary PoI review; retain two recent complete turns.', 'native'],
   ['new', 'Reset native conversation context; the Timechain is preserved.', 'native'],
   ['reset', 'Reset native conversation context; the Timechain is preserved.', 'native'],
   ['stop', 'Cancel the current ChainChat operation.', 'host'],
@@ -71,7 +73,7 @@ export const CONTROL_COMMANDS = Object.freeze([
   ['bash', 'External shell commands require a scoped host-tool grant.', 'guarded'],
   ['exec', 'External execution remains unavailable without a scoped local grant.', 'guarded'],
   ['elevated', 'This distribution does not silently elevate host permissions.', 'guarded'],
-  ['plugins', 'Plugin installation requires a separate reviewed runtime release.', 'guarded'],
+  ['plugins', 'Use Trusted native plugins in OpenClaw settings for exact-artifact installation, activation and native capability consent.', 'guarded'],
   ['restart', 'Use the installed launcher to restart the owned runtime.', 'guarded'],
   ['update', 'Use a reviewed ChainChat update to preserve its enforcement contract.', 'guarded'],
 ].map(([name, description, mode]) => Object.freeze({ name: '/' + name, description, mode })));
@@ -84,10 +86,11 @@ export function controlSessionKey({ agentId, genesisHash }) {
 export function redactNativeControl(value, secrets = []) {
   const walk = (item, depth = 0) => {
     if (depth > 40) return '[bounded]';
-    if (typeof item === 'string') return secrets.filter(Boolean).reduce((out, secret) => out.split(secret).join('[private]'), item).slice(0, 200000);
+    if (typeof item === 'string') return secrets.filter(Boolean).reduce((out, secret) => out.split(secret).join('[private]'), item)
+      .replace(/\[CHAINCHAT_PRIVATE_MODEL_ROUTE:[a-f0-9]{64}\]/g, '[private model admission]').slice(0, 200000);
     if (Array.isArray(item)) return item.slice(0, 20000).map(child => walk(child, depth + 1));
     if (item && typeof item === 'object') return Object.fromEntries(Object.entries(item).map(([key, child]) =>
-      [key, credentialKey.test(key) && typeof child === 'string' ? '[managed private value]' : walk(child, depth + 1)]));
+      [key, (credentialKey.test(key) || key === 'cdpUrl') && typeof child === 'string' ? '[managed private value]' : walk(child, depth + 1)]));
     return item;
   };
   return walk(value);
@@ -179,6 +182,10 @@ export function createNativeControls({ rpc, getRuntime, readOverlay, saveOverlay
     const known = CONTROL_COMMANDS.find(item => item.name === '/' + name);
     if (!known || known.mode === 'guarded') throw fail(known?.description || 'This native command is not exposed by the managed chat.', 'OPENCLAW_COMMAND_GUARDED', 403);
     const target = await session(identity);
+    if (name === 'compact') {
+      if (Buffer.byteLength(text) > 16000) throw fail('Compaction focus must fit within 16,000 bytes.');
+      return { kind: 'compaction', sessionKey: target.key, instructions: text };
+    }
     if (name === 'models') return { kind: 'system', text: JSON.stringify(await rpc('models.list', { sessionKey: target.key, preparedOnly: true, includeDetails: true, includeProviderCapabilities: true }), null, 2) };
     if (name === 'tools') return { kind: 'system', text: JSON.stringify({ native: await rpc('tools.effective', { sessionKey: target.key }), managedAuthority: getRuntime().hostTools }, null, 2) };
     if (name === 'status') return { kind: 'system', text: JSON.stringify({ runtime: getRuntime(), session: target.entry }, null, 2), session: target.entry };

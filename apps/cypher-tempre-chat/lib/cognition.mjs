@@ -84,7 +84,11 @@ export const CAPABILITIES = Object.freeze([
   { id: "authored", name: "Exact-source approved native Python operators", status: "operator", control: "Explicit local CLI approval; bounded process with user OS permissions" },
   { id: "recovery", name: "Encoding recovery, registry restoration and trust re-anchoring", status: "operator", control: "Bundled native CLI; explicit reviewed recovery" },
   { id: "consensus", name: "Witness administration and task-chain identity links", status: "operator", control: "Bundled native CLI; existing attestations are verified" },
-  { id: "external", name: "Coding tools, browser, game or robotics environments", status: "external", control: "Requires a separate environment adapter; no arbitrary command executor" },
+  { id: "browser", name: "Owned browser with per-action PoI review", status: "operator", control: "OpenClaw settings; exact public hosts and explicit sensitive-action grants" },
+  { id: "automation", name: "Bound channels and native schedules", status: "operator", control: "Channels & schedules; live owner/provider authorization" },
+  { id: "plugins", name: "Explicitly trusted native plugin lifecycle", status: "operator", control: "Exact artifact trust; native code runs outside model hooks" },
+  { id: "compaction", name: "Reviewed native transcript compaction", status: "integrated", control: "/compact and native context pressure" },
+  { id: "external", name: "Game and robotics environments", status: "external", control: "Requires the corresponding environment adapter" },
 ]);
 
 const SHAPES = new Set(["narrow", "relative", "aggregate", "interval", "ordering", "update"]);

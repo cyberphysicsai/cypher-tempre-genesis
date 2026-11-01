@@ -5,10 +5,10 @@ import net from 'node:net';
 import { createHash } from 'node:crypto';
 
 // This catalogue is deliberately concrete. A new upstream tool is not a grant.
-export const SUPPORTED_HOST_TOOLS = Object.freeze(['read', 'write', 'edit', 'web_fetch', 'browser', 'exec', 'process']);
+export const SUPPORTED_HOST_TOOLS = Object.freeze(['read', 'write', 'edit', 'web_fetch', 'browser', 'exec', 'process', 'chainchat_automation']);
 const KNOWN = new Set(SUPPORTED_HOST_TOOLS);
 const EXECUTION = new Set(['exec', 'process']);
-const KEYS = ['enabled', 'tools', 'roots', 'networkHosts', 'allowExecution', 'acknowledged'];
+const KEYS = ['enabled', 'tools', 'roots', 'networkHosts', 'allowExecution', 'acknowledged', 'browserCapabilities'];
 const denied = message => Object.assign(new Error(message), { code: 'HOST_TOOL_DENIED', status: 403 });
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 const inside = (root, target) => { const relative = path.relative(root, target); return !relative || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative); };
@@ -64,20 +64,27 @@ async function protectedPaths(roots) {
 }
 
 /** Validate a human-owned grant before persisting or registering a run. */
-export async function validateToolAuthority(grant = {}, { protectedRoots = [] } = {}) {
+export async function validateToolAuthority(grant = {}, { protectedRoots = [], managedBrowser = false, pluginTools = [] } = {}) {
   if (!plain(grant) || Object.keys(grant).some(key => !KEYS.includes(key))) throw denied('Invalid host-tool authority.');
   for (const key of ['enabled', 'allowExecution', 'acknowledged']) if (grant[key] !== undefined && typeof grant[key] !== 'boolean') throw denied('Invalid host-tool authority flag.');
-  if (!strings(grant.tools ?? [], 7, 64) || !strings(grant.roots ?? [], 32, 32768) || !strings(grant.networkHosts ?? [], 32, 253)) throw denied('Host-tool authority exceeds its bounds.');
+  if (!strings(grant.tools ?? [], 100, 128) || !strings(grant.roots ?? [], 32, 32768) || !strings(grant.networkHosts ?? [], 32, 253) ||
+      !strings(pluginTools, 100, 128)) throw denied('Host-tool authority exceeds its bounds.');
   const tools = unique(grant.tools ?? []);
-  if (tools.some(name => !KNOWN.has(name))) throw denied('An unknown tool cannot be granted.');
+  if (tools.some(name => !KNOWN.has(name) && !pluginTools.includes(name))) throw denied('An unknown tool cannot be granted.');
   const enabled = grant.enabled === true, allowExecution = grant.allowExecution === true, acknowledged = grant.acknowledged === true;
   if (enabled && !acknowledged) throw denied('Explicit local acknowledgement is required to enable host tools.');
-  if (enabled && tools.includes('browser')) throw denied('Browser grants require a managed network adapter; requested-host checks alone cannot safely contain Chromium network access.');
+  if (enabled && tools.includes('browser') && !managedBrowser) throw denied('Browser grants require a managed network adapter; requested-host checks alone cannot safely contain Chromium network access.');
+  const browserCapabilities = grant.browserCapabilities || {};
+  if (!plain(browserCapabilities) || Object.entries(browserCapabilities).some(([key, value]) => !['evaluate', 'credentials', 'payments'].includes(key) || typeof value !== 'boolean')) throw denied('Invalid explicit browser capability grant.');
+  if (enabled && tools.includes('browser') && browserCapabilities.evaluate === true &&
+      (browserCapabilities.credentials !== true || browserCapabilities.payments !== true))
+    throw denied('Model-written page scripts need both credential and payment acknowledgements because arbitrary JavaScript cannot be confined by field checks.');
   if (enabled && tools.some(name => EXECUTION.has(name)) && !allowExecution) throw denied('Execution tools require a separate operating-system execution grant.');
   const roots = unique(await Promise.all((grant.roots ?? []).map(canonicalDirectory)));
   const protectedReal = await protectedPaths(protectedRoots);
   if (roots.some(root => protectedReal.some(protectedRoot => inside(protectedRoot, root)))) throw denied('Application and Timechain files cannot be tool roots.');
-  return { enabled, tools, roots, networkHosts: unique((grant.networkHosts ?? []).map(hostname)), allowExecution, acknowledged };
+  return { enabled, tools, roots, networkHosts: unique((grant.networkHosts ?? []).map(hostname)), allowExecution, acknowledged,
+    ...(Object.keys(browserCapabilities).length ? { browserCapabilities: structuredClone(browserCapabilities) } : {}) };
 }
 
 export function toolAuthorityFingerprint(grant) {
@@ -125,8 +132,8 @@ async function publicUrl(value, hosts, lookup) {
  * Network checks constrain the requested destination. Upstream DNS/redirect SSRF
  * protection must remain enabled as well. Exec is broad OS power, not a sandbox.
  */
-export async function authorizeToolCall(grant, tool, { protectedRoots = [], lookup = dns.lookup } = {}) {
-  const authority = await validateToolAuthority(grant, { protectedRoots });
+export async function authorizeToolCall(grant, tool, { protectedRoots = [], lookup = dns.lookup, managedBrowser = false, pluginTools = [] } = {}) {
+  const authority = await validateToolAuthority(grant, { protectedRoots, managedBrowser, pluginTools });
   if (JSON.stringify(authority.roots) !== JSON.stringify(grant?.roots ?? [])) throw denied('A granted directory changed its canonical location.');
   if (!authority.enabled || !authority.acknowledged || !plain(tool) || typeof tool.name !== 'string' ||
       !authority.tools.includes(tool.name) || typeof tool.callId !== 'string' || !tool.callId || tool.callId.length > 256) throw denied('No current local grant permits this tool call.');

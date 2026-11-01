@@ -6,8 +6,15 @@ test("pairing requires the current ChainChat runtime", () => {
   for (const old of [undefined, null, "", "0.3.0", "0.4.0", "0.4.1", "0.4.3", "0.4.999", "0.5.0", "0.5.1", "0.5.999", "0.6.0", "0.6.1", "0.6.999", "0.7.0", "0.7.0-beta", "garbage", "0.07.0", "0.4.9007199254740993"])
     assert.equal(supportedBridgeVersion(old), false);
   assert.equal(supportedBridgeVersion("0.7.1"), false);
-  for (const current of ["0.8.0", "1.0.0"])
+  assert.equal(supportedBridgeVersion("0.8.999"), false);
+  for (const current of ["0.9.0", "1.0.0"])
     assert.equal(supportedBridgeVersion(current), true);
+});
+test('owner revocation and read-only plugin preview do not require a wallet or model call', () => {
+  for (const path of ['/api/openclaw/automation/pause', '/api/openclaw/plugins/disable', '/api/openclaw/plugins/uninstall', '/api/openclaw/plugins/preview'])
+    assert.equal(requiresHoldings(path, {}), false);
+  for (const path of ['/api/openclaw/plugins/enable', '/api/openclaw/plugins/install', '/api/openclaw/automation/resume'])
+    assert.equal(requiresHoldings(path, {}), true);
 });
 
 test("current block height is the last sealed index, including genesis zero", () => {

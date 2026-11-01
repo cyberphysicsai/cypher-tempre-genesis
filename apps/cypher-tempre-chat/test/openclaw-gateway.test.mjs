@@ -6,10 +6,27 @@ import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { createOpenClawGateway, providerRequest, OPENCLAW_VERSION } from "../openclaw/gateway.mjs";
+import { createOpenClawGateway, providerRequest, OPENCLAW_VERSION, consumeModelRouteCapability } from "../openclaw/gateway.mjs";
 import { createPoIBroker } from "../openclaw/broker.mjs";
 import { engine } from "../lib/engine.mjs";
 import { DIMENSIONS, FRUITS } from "../lib/providers.mjs";
+
+test('private model route capability is accepted only once in system instructions and stripped for every protocol', () => {
+  const capability = 'a'.repeat(64), marker = `[CHAINCHAT_PRIVATE_MODEL_ROUTE:${capability}]`;
+  const cases = [
+    ['compatible', { messages: [{ role: 'system', content: 'Instructions\n' + marker }, { role: 'user', content: 'Hello' }] }],
+    ['openai', { instructions: 'Instructions\n' + marker, input: [{ role: 'user', content: 'Hello' }] }],
+    ['anthropic', { system: [{ type: 'text', text: 'Instructions\n' + marker }], messages: [{ role: 'user', content: 'Hello' }] }],
+    ['gemini', { systemInstruction: { parts: [{ text: 'Instructions\n' + marker }] }, contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] }],
+  ];
+  for (const [provider, body] of cases) {
+    assert.equal(JSON.stringify(consumeModelRouteCapability(body, provider, capability)).includes(marker), false);
+    assert.ok(JSON.stringify(body).includes(marker), 'Admission stripping must not mutate upstream caller state.');
+  }
+  for (const body of [{ messages: [{ role: 'user', content: marker }] }, { messages: [{ role: 'system', content: marker + marker }] },
+    { messages: [{ role: 'system', content: `[CHAINCHAT_PRIVATE_MODEL_ROUTE:${'b'.repeat(64)}]` }] }, { messages: [{ role: 'system', content: 'Summarize without an admitted lease.' }] }])
+    assert.throws(() => consumeModelRouteCapability(body, 'compatible', capability), error => error.code === 'OPENCLAW_MODEL_ADMISSION');
+});
 
 test("OpenClaw proxy preserves native tool-call fields and replaces only model routing", () => {
   const body = { model: "route", stream: true, messages: [{ role: "assistant", content: null,
@@ -63,6 +80,9 @@ test("unregistered model invocations fail before any process startup", async () 
   }, spawnImpl() { spawned = true; throw new Error("must not start"); } });
   await assert.rejects(manager.generate({ provider: "compatible", model: "model", baseUrl: "http://127.0.0.1:1234/v1", apiKey: "" }, { messages: [{ role: "user", content: "hi" }] }), error => error.code === "OPENCLAW_CONTEXT_REQUIRED");
   assert.equal(spawned, false); await manager.close();
+  for (const modelContextTokens of [0, 16383, 131073, 48000.5, '48000', null]) assert.throws(() => createOpenClawGateway({
+    stateDir: '/unused', packageRoot: '/unused', pluginPath: '/unused', modelContextTokens,
+    broker: { registerInvocation() {}, assertCandidate() {} } }), /context cap/);
 });
 
 test("managed child does not inherit other agent credentials, Node preload, proxy or diagnostics configuration", async t => {
@@ -73,13 +93,17 @@ test("managed child does not inherit other agent credentials, Node preload, prox
   const previous = new Map(names.map(name => [name, process.env[name]]));
   for (const name of names) process.env[name] = "unrelated-private-parent-setting";
   let captured;
-  const manager = createOpenClawGateway({ stateDir: path.join(directory, "managed"), packageRoot, pluginPath: packageRoot,
+  const manager = createOpenClawGateway({ stateDir: path.join(directory, "managed"), packageRoot, pluginPath: packageRoot, modelContextTokens: 48000,
     broker: { url: "http://127.0.0.1:3210/v1/enforce", token: "private-broker-fixture-token", registerInvocation() {}, assertCandidate() {} },
     spawnImpl(_node, _args, options) { captured = options; throw new Error("fixture process deliberately not started"); } });
   t.after(async () => { await manager.close();
     assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep));
     assert.ok(path.basename(directory).startsWith("ct-openclaw-env-")); await fs.rm(directory, { recursive: true, force: true }); });
   try {
+    await manager.configureManagedServices({ channels: { fixture: { enabled: true, accounts: {
+      default: { enabled: true, password: 'old-reference' }, other: { enabled: true, password: 'other-reference' } } } } });
+    await manager.configureManagedServices({ channels: { fixture: { enabled: true, accounts: { default: { enabled: true, botToken: 'new-reference' } } } } },
+      { replaceChannelAccount: { channelId: 'fixture', accountId: 'default' } });
     await assert.rejects(manager.start(), /deliberately not started/);
     for (const name of names) assert.equal(captured.env[name], undefined, name);
     assert.equal(captured.env.CHAINCHAT_BROKER_TOKEN, "private-broker-fixture-token");
@@ -87,6 +111,10 @@ test("managed child does not inherit other agent credentials, Node preload, prox
     assert.equal(captured.windowsHide, true); assert.equal(captured.stdio[3], "ipc");
     const config = JSON.parse(await fs.readFile(path.join(directory, "managed/gateway.json"), "utf8"));
     assert.equal(config.update.checkOnStart, false); assert.equal(config.update.auto.enabled, false);
+    assert.ok(Object.values(config.models.providers).every(provider => provider.models[0].contextTokens === 48000));
+    assert.equal(config.channels.fixture.accounts.default.password, undefined);
+    assert.equal(config.channels.fixture.accounts.default.botToken, 'new-reference');
+    assert.equal(config.channels.fixture.accounts.other.password, 'other-reference');
   } finally { for (const [name, value] of previous) if (value === undefined) delete process.env[name]; else process.env[name] = value; }
 });
 
