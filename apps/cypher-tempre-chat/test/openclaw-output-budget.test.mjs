@@ -57,3 +57,39 @@ test('native adapters retain explicit provider truncation and never treat tool c
   assert.throws(() => assertProviderCompletion('gemini', Buffer.from(JSON.stringify([{ candidates: [{ finishReason: 'MAX_TOKENS' }] }]))),
     error => error.code === 'PROVIDER_INCOMPLETE');
 });
+
+test('native provider failures and content holds are never classified as recoverable truncation', () => {
+  const cases = [
+    ['openai', { type: 'response.failed', response: { status: 'failed', error: { code: 'invalid_api_key', message: 'PRIVATE auth details' } } }, 'PROVIDER_HTTP_ERROR'],
+    ['openai', { type: 'response.failed', response: { status: 'failed', error: { code: 'rate_limit_exceeded', message: 'PRIVATE quota details' } } }, 'PROVIDER_RATE_LIMIT'],
+    ['openai', { type: 'response.failed', response: { status: 'failed', error: { code: 'unknown_fault', message: 'PRIVATE failure details' } } }, 'PROVIDER_INVALID_RESPONSE'],
+    ['openai', { type: 'error', code: 'invalid_api_key', message: 'PRIVATE auth details' }, 'PROVIDER_HTTP_ERROR'],
+    ['openai', { status: 'cancelled' }, 'PROVIDER_INVALID_RESPONSE'],
+    ['openai', { status: 'incomplete', incomplete_details: { reason: 'unknown' } }, 'PROVIDER_INVALID_RESPONSE'],
+    ['openai', { type: 'response.incomplete', response: { status: 'incomplete', incomplete_details: { reason: 'content_filter' } } }, 'PROVIDER_CONTENT_HELD'],
+    ['openai', { type: 'response.refusal.delta', delta: 'PRIVATE refusal' }, 'PROVIDER_CONTENT_HELD'],
+    ['compatible', { choices: [{ finish_reason: 'stop', message: { refusal: 'PRIVATE refusal' } }] }, 'PROVIDER_CONTENT_HELD'],
+    ['compatible', { choices: [{ delta: { refusal: 'PRIVATE refusal' } }] }, 'PROVIDER_CONTENT_HELD'],
+    ['compatible', { choices: [{ finish_reason: 'unknown_stop' }] }, 'PROVIDER_INVALID_RESPONSE'],
+    ['anthropic', { type: 'message_delta', delta: { stop_reason: 'refusal' } }, 'PROVIDER_CONTENT_HELD'],
+    ['anthropic', { stop_reason: 'unknown_stop' }, 'PROVIDER_INVALID_RESPONSE'],
+    ['anthropic', { type: 'error', error: { type: 'rate_limit_error', message: 'PRIVATE quota details' } }, 'PROVIDER_RATE_LIMIT'],
+    ['gemini', { candidates: [{ finishReason: 'SAFETY' }] }, 'PROVIDER_CONTENT_HELD'],
+    ['gemini', { promptFeedback: { blockReason: 'SAFETY' } }, 'PROVIDER_CONTENT_HELD'],
+    ['gemini', { candidates: [{ finishReason: 'UNKNOWN' }] }, 'PROVIDER_INVALID_RESPONSE'],
+    ['gemini', { error: { code: 403, status: 'PERMISSION_DENIED', message: 'PRIVATE permission details' } }, 'PROVIDER_HTTP_ERROR'],
+  ];
+  for (const [protocol, response, code] of cases) {
+    for (const wire of [JSON.stringify(response), 'data: ' + JSON.stringify(response) + '\n\n'])
+      assert.throws(() => assertProviderCompletion(protocol, Buffer.from(wire)),
+        error => error.code === code && error.code !== 'PROVIDER_INCOMPLETE' && error.stage === 'generation' && !error.message.includes('PRIVATE'), protocol + ':' + code);
+  }
+  for (const [protocol, response] of [
+    ['openai', { type: 'response.in_progress', response: { status: 'in_progress' } }],
+    ['openai', { status: 'completed', output: [{ type: 'function_call', name: 'fixture' }] }],
+    ['compatible', { choices: [{ finish_reason: 'tool_calls' }] }],
+    ['anthropic', { delta: { stop_reason: 'tool_use' } }],
+    ['gemini', { candidates: [{ finishReason: 'STOP', content: { parts: [{ functionCall: { name: 'fixture' } }] } }] }],
+  ]) assert.doesNotThrow(() => assertProviderCompletion(protocol, Buffer.from(JSON.stringify(response))),
+    'Native guarded tool execution must remain available: ' + protocol);
+});

@@ -333,17 +333,27 @@ function usageNumbers(usage) {
 
 function extractText(provider, data, preserveRawText = false) {
   let text, usage;
-  if (!data || typeof data !== "object" || data.error)
-    throw new ProviderError(
-      "The provider returned an error response.",
-      "PROVIDER_INVALID_RESPONSE",
-    );
+  const held = () => { throw new ProviderError("The provider held this response under its content policy.", "PROVIDER_CONTENT_HELD", 422); };
+  const incomplete = () => { throw new ProviderError("The provider did not finish a complete response.", "PROVIDER_INCOMPLETE"); };
+  const invalidResponse = () => { throw new ProviderError("The provider returned an invalid or unsuccessful response.", "PROVIDER_INVALID_RESPONSE"); };
+  const toolCall = () => { throw new ProviderError("Tool execution is not available in this chat.", "PROVIDER_TOOL_CALL"); };
+  const providerFailure = error => {
+    const codes = [error?.code, error?.type, error?.status].map(value => String(value ?? "").toLowerCase());
+    if (codes.some(code => ["429", "rate_limit_exceeded", "rate_limit_error", "rate_limit", "quota_exceeded", "insufficient_quota", "resource_exhausted"].includes(code)))
+      throw new ProviderError("The provider rate limit or quota was reached.", "PROVIDER_RATE_LIMIT", 429);
+    if (codes.some(code => ["401", "403", "invalid_api_key", "api_key_invalid", "authentication_error", "invalid_authentication", "unauthorized", "permission_denied", "access_denied"].includes(code)))
+      throw new ProviderError("The provider rejected the model request.", "PROVIDER_HTTP_ERROR");
+    invalidResponse();
+  };
+  if (!data || typeof data !== "object" || Array.isArray(data)) invalidResponse();
+  if (data.error) providerFailure(data.error);
   if (provider === "openai") {
-    if (data.status && data.status !== "completed")
-      throw new ProviderError(
-        "Generation did not finish. Try a smaller request or a larger output allowance.",
-        "PROVIDER_INCOMPLETE",
-      );
+    if (Array.isArray(data.output) && data.output.some(item => item?.type === "message" && Array.isArray(item.content) && item.content.some(part => part?.type === "refusal"))) held();
+    if (data.incomplete_details?.reason === "content_filter") held();
+    if (data.status === "failed") providerFailure(data.error);
+    if (data.status === "incomplete" && [undefined, null, "max_output_tokens"].includes(data.incomplete_details?.reason)) incomplete();
+    if (data.status != null && data.status !== "completed") invalidResponse();
+    if (Array.isArray(data.output) && data.output.some(item => typeof item?.type === "string" && item.type.endsWith("_call"))) toolCall();
     text = Array.isArray(data.output)
       ? data.output
           .filter(
@@ -360,32 +370,17 @@ function extractText(provider, data, preserveRawText = false) {
     usage = data.usage;
   } else if (provider === "compatible") {
     const choice = data.choices?.[0];
-    if (choice?.finish_reason && choice.finish_reason !== "stop")
-      throw new ProviderError(
-        "Generation did not finish with a complete text response.",
-        "PROVIDER_INCOMPLETE",
-      );
-    if (choice?.message?.tool_calls?.length || choice?.message?.function_call)
-      throw new ProviderError(
-        "Tool execution is not available in this chat.",
-        "PROVIDER_TOOL_CALL",
-      );
+    if (choice?.finish_reason === "content_filter" || choice?.message?.refusal) held();
+    if (["tool_calls", "function_call"].includes(choice?.finish_reason) || choice?.message?.tool_calls?.length || choice?.message?.function_call) toolCall();
+    if (choice?.finish_reason === "length") incomplete();
+    if (choice?.finish_reason != null && choice.finish_reason !== "stop") invalidResponse();
     text = choice?.message?.content;
     usage = data.usage;
   } else if (provider === "anthropic") {
-    if (
-      data.stop_reason &&
-      !["end_turn", "stop_sequence"].includes(data.stop_reason)
-    )
-      throw new ProviderError(
-        "Generation did not finish with a complete text response.",
-        "PROVIDER_INCOMPLETE",
-      );
-    if (data.content?.some((part) => part.type === "tool_use"))
-      throw new ProviderError(
-        "Tool execution is not available in this chat.",
-        "PROVIDER_TOOL_CALL",
-      );
+    if (data.stop_reason === "refusal" || Array.isArray(data.content) && data.content.some(part => part?.type === "refusal")) held();
+    if (data.stop_reason === "tool_use" || Array.isArray(data.content) && data.content.some(part => part?.type === "tool_use")) toolCall();
+    if (data.stop_reason === "max_tokens") incomplete();
+    if (data.stop_reason != null && !["end_turn", "stop_sequence"].includes(data.stop_reason)) invalidResponse();
     text = Array.isArray(data.content)
       ? data.content
           .filter(
@@ -397,16 +392,10 @@ function extractText(provider, data, preserveRawText = false) {
     usage = data.usage;
   } else {
     const candidate = data.candidates?.[0];
-    if (candidate?.finishReason && candidate.finishReason !== "STOP")
-      throw new ProviderError(
-        "The provider held or did not complete this response.",
-        "PROVIDER_INCOMPLETE",
-      );
-    if (candidate?.content?.parts?.some((part) => part.functionCall))
-      throw new ProviderError(
-        "Tool execution is not available in this chat.",
-        "PROVIDER_TOOL_CALL",
-      );
+    if (data.promptFeedback?.blockReason || ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT"].includes(candidate?.finishReason)) held();
+    if (Array.isArray(candidate?.content?.parts) && candidate.content.parts.some(part => part?.functionCall)) toolCall();
+    if (candidate?.finishReason === "MAX_TOKENS") incomplete();
+    if (candidate?.finishReason != null && candidate.finishReason !== "STOP") invalidResponse();
     text = Array.isArray(candidate?.content?.parts)
       ? candidate.content.parts
           .filter((part) => !part.thought && typeof part.text === "string")

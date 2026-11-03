@@ -21,7 +21,7 @@ const [{ createApp }, { DIMENSIONS, FRUITS }, { engine }] = await Promise.all([
 ]);
 const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ct-active-review-diagnosis-')));
 const calls = [], diagnostics = [];
-let format = 'bare', providerCap = null, truncatePlanner = false, app, bearer;
+let format = 'bare', providerCap = null, truncatePlanner = false, holdPlanner = false, app, bearer;
 const answer = 'Hello! I am Cypher Tempre. I can help you explore ideas carefully and acknowledge uncertainty.';
 const plan = JSON.stringify({ queries: ['greeting'], entities: [], shapes: ['narrow'], rings: [], useReplay: false,
   labels: { senses: [], modalities: [] } });
@@ -48,13 +48,13 @@ const upstream = http.createServer(async (req, res) => {
   const content = isReview ? (format === 'fenced' ? '```json\n' + assessmentText + '\n```' : assessmentText) : isPlanner ? plan : answer;
   if (!body.stream) {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ id: 'local-fixture', choices: [{ message: { role: 'assistant', content }, finish_reason: isPlanner && truncatePlanner ? 'length' : 'stop' }],
+    res.end(JSON.stringify({ id: 'local-fixture', choices: [{ message: { role: 'assistant', content }, finish_reason: isPlanner && holdPlanner ? 'content_filter' : isPlanner && truncatePlanner ? 'length' : 'stop' }],
       usage: { prompt_tokens: 120, completion_tokens: 180, total_tokens: 300 } }));
     return;
   }
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.write(`data: ${JSON.stringify({ id: 'local-fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] })}\n\n`);
-  res.write(`data: ${JSON.stringify({ id: 'local-fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0, delta: {}, finish_reason: isPlanner && truncatePlanner ? 'length' : 'stop' }], usage: { prompt_tokens: 120, completion_tokens: 180, total_tokens: 300 } })}\n\n`);
+  res.write(`data: ${JSON.stringify({ id: 'local-fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0, delta: {}, finish_reason: isPlanner && holdPlanner ? 'content_filter' : isPlanner && truncatePlanner ? 'length' : 'stop' }], usage: { prompt_tokens: 120, completion_tokens: 180, total_tokens: 300 } })}\n\n`);
   res.end('data: [DONE]\n\n');
 });
 upstream.listen(0, '127.0.0.1'); await once(upstream, 'listening');
@@ -80,7 +80,7 @@ try {
     baseUrl: `http://127.0.0.1:${upstream.address().port}/v1` })).status, 200);
   const state = await call('/api/state');
   for (const key of ['learning', 'semanticRecall', 'autoRoute', 'autoSprout']) assert.equal(state.body.cognition[key], true, key);
-  for (const scenario of ['active-valid', 'active-fenced-review', 'paused-same-provider', 'active-provider-cap', 'paused-provider-cap', 'active-invalid-evidence', 'active-low-score', 'active-truncated-planner']) {
+  for (const scenario of ['active-valid', 'active-fenced-review', 'paused-same-provider', 'active-provider-cap', 'paused-provider-cap', 'active-invalid-evidence', 'active-low-score', 'active-truncated-planner', 'active-provider-policy-hold']) {
     if (scenario === 'active-fenced-review') format = 'fenced';
     if (scenario === 'active-provider-cap') {
       format = 'bare'; providerCap = 4096;
@@ -91,6 +91,7 @@ try {
       assert.equal((await call('/api/cognition', { mode: 'active', confirm: true })).status, 200);
     }
     if (scenario === 'active-truncated-planner') { format = 'bare'; truncatePlanner = true; }
+    if (scenario === 'active-provider-policy-hold') { format = 'bare'; truncatePlanner = false; holdPlanner = true; }
     if (scenario.startsWith('paused-')) assert.equal((await call('/api/cognition', { mode: 'dormant', confirm: true })).status, 200);
     const start = calls.length, response = await call('/api/chat', { message: 'Please introduce yourself' });
     const result = { scenario, status: response.status, code: response.body.code ?? null, stage: response.body.stage ?? null,
@@ -116,6 +117,10 @@ try {
   assert.equal(results[7].status, 200, 'An incomplete optional planner must fall back to verified native retrieval.');
   assert.equal(results[7].answerReleased, true);
   assert.ok(results[7].calls.some(call => call.kind === 'planner'));
+  assert.equal(results[8].status, 422); assert.equal(results[8].code, 'PROVIDER_CONTENT_HELD');
+  assert.equal(results[8].stage, 'memory-planning');
+  assert.equal(results[8].answerReleased, false);
+  assert.ok(results[8].calls.every(call => call.kind === 'planner'), 'Provider policy holds cannot use the optional planner fallback.');
   const selected = app.store.agents[0];
   assert.equal((await engine({ op: 'verify', root: selected.root })).verified, true);
 } finally {

@@ -424,7 +424,8 @@ export async function createApp(options = {}) {
     let rawResult;
     try { rawResult = trace?.running ? await trace.step("model", "Model inference", action) : await action(); }
     catch (error) {
-      error.stage ||= errorStage(error, args.chainchatPurpose === 'utility' ? 'memory-planning' : 'generation');
+      if (args.chainchatPurpose === 'utility') error.stage = 'memory-planning';
+      else error.stage ||= errorStage(error, 'generation');
       throw error;
     }
     await requireHoldings();

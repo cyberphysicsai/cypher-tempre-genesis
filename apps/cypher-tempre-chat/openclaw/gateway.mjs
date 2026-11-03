@@ -131,28 +131,57 @@ function inspectResponse(config, buffer) {
 // Keep the provider's explicit stop condition across the native adapter. Some
 // adapters otherwise turn a token-limited stream into a normal final reply.
 export function assertProviderCompletion(provider, buffer) {
+  const termination = code => { throw Object.assign(fail(
+    code === 'PROVIDER_INCOMPLETE' ? 'The provider did not finish a complete response.'
+      : code === 'PROVIDER_CONTENT_HELD' ? 'The provider held the model response.'
+      : code === 'PROVIDER_RATE_LIMIT' ? 'The provider rate limit or quota was reached.'
+      : code === 'PROVIDER_HTTP_ERROR' ? 'The provider rejected the model request.'
+      : 'The provider returned an invalid or unsuccessful response.', code,
+    code === 'PROVIDER_RATE_LIMIT' ? 429 : code === 'PROVIDER_CONTENT_HELD' ? 422 : 502), { stage: 'generation' }); };
+  const providerFailure = error => {
+    const codes = [error?.code, error?.type, error?.status].map(value => String(value ?? '').toLowerCase());
+    if (codes.some(code => ['429', 'rate_limit_exceeded', 'rate_limit_error', 'rate_limit', 'quota_exceeded', 'insufficient_quota', 'resource_exhausted'].includes(code))) termination('PROVIDER_RATE_LIMIT');
+    if (codes.some(code => ['401', '403', 'invalid_api_key', 'api_key_invalid', 'authentication_error', 'invalid_authentication', 'unauthorized', 'permission_denied', 'access_denied'].includes(code))) termination('PROVIDER_HTTP_ERROR');
+    termination('PROVIDER_INVALID_RESPONSE');
+  };
   for (const value of providerRecords(buffer)) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     let incomplete = false, held = false;
+    if (value.error || value.type === 'error') providerFailure(value.error || value);
     if (provider === 'compatible') {
-      const reasons = (Array.isArray(value.choices) ? value.choices : []).map(choice => choice?.finish_reason);
-      incomplete = reasons.includes('length'); held = reasons.includes('content_filter');
+      const choices = Array.isArray(value.choices) ? value.choices : [];
+      const reasons = choices.map(choice => choice?.finish_reason);
+      held = reasons.includes('content_filter') || choices.some(choice => choice?.message?.refusal || choice?.delta?.refusal);
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (reasons.some(reason => reason != null && !['stop', 'length', 'tool_calls', 'function_call'].includes(reason))) termination('PROVIDER_INVALID_RESPONSE');
+      incomplete = reasons.includes('length');
     } else if (provider === 'openai') {
       const result = value.response || value;
+      if (result.error || result.status === 'failed' || value.type === 'response.failed') providerFailure(result.error);
       const reason = result.incomplete_details?.reason;
-      held = reason === 'content_filter';
-      incomplete = !held && (result.status === 'incomplete' || value.type === 'response.incomplete' ||
-        result.status === 'failed' || value.type === 'response.failed');
+      held = reason === 'content_filter' || value.type === 'response.refusal.delta' || value.type === 'response.refusal.done' ||
+        (Array.isArray(result.output) && result.output.some(item => Array.isArray(item?.content) && item.content.some(part => part?.type === 'refusal')));
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (result.status != null && !['queued', 'in_progress', 'completed', 'incomplete'].includes(result.status)) termination('PROVIDER_INVALID_RESPONSE');
+      if (result.status === 'incomplete' || value.type === 'response.incomplete') {
+        if (![undefined, null, 'max_output_tokens'].includes(reason)) termination('PROVIDER_INVALID_RESPONSE');
+        incomplete = true;
+      }
     } else if (provider === 'anthropic') {
       const reason = value.delta?.stop_reason || value.stop_reason;
-      incomplete = reason === 'max_tokens'; held = reason === 'refusal';
+      held = reason === 'refusal' || value.content_block?.type === 'refusal' ||
+        (Array.isArray(value.content) && value.content.some(part => part?.type === 'refusal'));
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (reason != null && !['end_turn', 'stop_sequence', 'max_tokens', 'tool_use', 'pause_turn'].includes(reason)) termination('PROVIDER_INVALID_RESPONSE');
+      incomplete = reason === 'max_tokens';
     } else if (provider === 'gemini') {
       const reasons = (Array.isArray(value.candidates) ? value.candidates : []).map(candidate => candidate?.finishReason);
+      held = !!value.promptFeedback?.blockReason || reasons.some(reason => ['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY', 'IMAGE_PROHIBITED_CONTENT'].includes(reason));
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (reasons.some(reason => reason != null && !['STOP', 'MAX_TOKENS'].includes(reason))) termination('PROVIDER_INVALID_RESPONSE');
       incomplete = reasons.includes('MAX_TOKENS');
-      held = !!value.promptFeedback?.blockReason || reasons.some(reason => ['SAFETY', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII'].includes(reason));
     }
-    if (held) throw Object.assign(fail('The provider held the model response.', 'PROVIDER_CONTENT_HELD', 422), { stage: 'generation' });
-    if (incomplete) throw Object.assign(fail('The provider did not finish a complete response.', 'PROVIDER_INCOMPLETE'), { stage: 'generation' });
+    if (incomplete) termination('PROVIDER_INCOMPLETE');
   }
 }
 

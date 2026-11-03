@@ -8,6 +8,8 @@ const messages = Object.freeze({
   PROVIDER_INCOMPLETE: 'The model response was incomplete. Check the output limit and retry.',
   PROVIDER_NO_TEXT: 'The model did not return a complete text answer.',
   PROVIDER_CONTENT_HELD: 'The model provider held this response under its content policy.',
+  PROVIDER_INVALID_RESPONSE: 'The provider returned an invalid or failed response. Check the model connection.',
+  PROVIDER_TOOL_CALL: 'The model requested a tool for a text-only request. No action was executed.',
   PROVIDER_CREDENTIAL_REFLECTION: 'A response containing a private credential was withheld.',
   GATE_INVALID_REVIEW: 'The model did not return a complete valid review. No answer was released.',
   GATE_INVALID_EVIDENCE: 'The model review did not identify valid evidence. No answer was released.',

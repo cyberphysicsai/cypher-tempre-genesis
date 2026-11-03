@@ -145,7 +145,7 @@ test('an incomplete optional plan uses one bounded native query and leaves a vis
 });
 
 test('planner fallback never hides admission, credentials, auth, cancellation or native integrity failures', async () => {
-  for (const code of ['PROVIDER_HTTP_ERROR', 'PROVIDER_CREDENTIAL_REFLECTION', 'REQUEST_CANCELLED', 'LICENSE_REVOKED',
+  for (const code of ['PROVIDER_HTTP_ERROR', 'PROVIDER_RATE_LIMIT', 'PROVIDER_INVALID_RESPONSE', 'PROVIDER_CONTENT_HELD', 'PROVIDER_TOOL_CALL', 'PROVIDER_CREDENTIAL_REFLECTION', 'REQUEST_CANCELLED', 'LICENSE_REVOKED',
     'OPENCLAW_ENFORCEMENT_UNHEALTHY', 'INTEGRITY_FAILED', 'COVENANT_REJECTED']) {
     let calls = 0;
     await assert.rejects(enrichPrepared({ ...memoryArgs(),
@@ -162,4 +162,62 @@ test('planner fallback never hides admission, credentials, auth, cancellation or
     model: async () => { controller.abort(); throw Object.assign(new Error('Incomplete'), { code: 'PROVIDER_INCOMPLETE' }); },
     engine: async () => { nativeCalls++; } }), { code: 'CANCELLED' });
   assert.equal(nativeCalls, 0);
+});
+
+test('provider errors, policy holds, unknown stops and direct tool requests never become review retries or planner fallbacks', async t => {
+  const visible = JSON.stringify(good());
+  const cases = [
+    ['openai', { status: 'failed', error: { code: 'invalid_api_key', message: 'PRIVATE synthetic failure' } }, 'PROVIDER_HTTP_ERROR'],
+    ['openai', { status: 'failed', error: { code: 'rate_limit_exceeded', message: 'PRIVATE synthetic failure' } }, 'PROVIDER_RATE_LIMIT'],
+    ['openai', { status: 'failed', error: { code: 'unknown_fault', message: 'PRIVATE synthetic failure' } }, 'PROVIDER_INVALID_RESPONSE'],
+    ['openai', { status: 'cancelled' }, 'PROVIDER_INVALID_RESPONSE'],
+    ['openai', { status: 'incomplete', incomplete_details: { reason: 'unknown_reason' } }, 'PROVIDER_INVALID_RESPONSE'],
+    ['openai', { status: 'incomplete', incomplete_details: { reason: 'content_filter' } }, 'PROVIDER_CONTENT_HELD'],
+    ['openai', { status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal: 'PRIVATE synthetic refusal' }] }] }, 'PROVIDER_CONTENT_HELD'],
+    ['openai', { status: 'completed', output: [{ type: 'function_call', name: 'fixture' }] }, 'PROVIDER_TOOL_CALL'],
+    ['compatible', answer(visible, 'content_filter'), 'PROVIDER_CONTENT_HELD'],
+    ['compatible', { choices: [{ finish_reason: 'stop', message: { content: visible, refusal: 'PRIVATE synthetic refusal' } }] }, 'PROVIDER_CONTENT_HELD'],
+    ['compatible', answer(visible, 'unknown_stop'), 'PROVIDER_INVALID_RESPONSE'],
+    ['compatible', answer(visible, ''), 'PROVIDER_INVALID_RESPONSE'],
+    ['compatible', answer(visible, 'tool_calls'), 'PROVIDER_TOOL_CALL'],
+    ['anthropic', { stop_reason: 'refusal', content: [{ type: 'text', text: visible }] }, 'PROVIDER_CONTENT_HELD'],
+    ['anthropic', { stop_reason: 'unknown_stop', content: [{ type: 'text', text: visible }] }, 'PROVIDER_INVALID_RESPONSE'],
+    ['anthropic', { stop_reason: false, content: [{ type: 'text', text: visible }] }, 'PROVIDER_INVALID_RESPONSE'],
+    ['anthropic', { stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'fixture' }] }, 'PROVIDER_TOOL_CALL'],
+    ['gemini', { candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: visible }] } }] }, 'PROVIDER_CONTENT_HELD'],
+    ['gemini', { promptFeedback: { blockReason: 'SAFETY' } }, 'PROVIDER_CONTENT_HELD'],
+    ['gemini', { candidates: [{ finishReason: 'UNKNOWN', content: { parts: [{ text: visible }] } }] }, 'PROVIDER_INVALID_RESPONSE'],
+    ['gemini', { candidates: [{ finishReason: 'STOP', content: { parts: [{ functionCall: { name: 'fixture' } }] } }] }, 'PROVIDER_TOOL_CALL'],
+  ];
+  let payload, calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return new Response(JSON.stringify(payload)); });
+  for (const [protocol, response, code] of cases) {
+    payload = response;
+    const config = { provider: protocol, model: 'fixture', baseUrl: 'http://127.0.0.1:9999/v1' };
+    const check = error => error.code === code && !error.message.includes('PRIVATE');
+    await assert.rejects(generate(config, { messages: [{ role: 'user', content: 'Hello' }] }), check, protocol + ':' + code);
+    const before = calls;
+    await assert.rejects(review(config, args()), error => check(error) && error.stage === 'review', protocol + ':review:' + code);
+    assert.equal(calls, before + 1, 'An explicit provider failure/hold must not trigger a fresh review.');
+    let nativeCalls = 0;
+    await assert.rejects(enrichPrepared({ ...memoryArgs(), config,
+      model: (_config, request) => generate(config, request), engine: async () => { nativeCalls++; } }),
+      error => check(error) && error.stage === 'memory-planning', protocol + ':planner:' + code);
+    assert.equal(nativeCalls, 0, 'No native fallback may hide a provider failure/hold.');
+  }
+});
+
+test('only actual token-limited direct responses remain eligible for incomplete handling', async t => {
+  let payload;
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(payload)));
+  for (const [protocol, response] of [
+    ['compatible', answer('Partial.', 'length')],
+    ['openai', { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }],
+    ['anthropic', { stop_reason: 'max_tokens', content: [{ type: 'text', text: 'Partial.' }] }],
+    ['gemini', { candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'Partial.' }] } }] }],
+  ]) {
+    payload = response;
+    await assert.rejects(generate({ provider: protocol, model: 'fixture', baseUrl: 'http://127.0.0.1:9999/v1' },
+      { messages: [{ role: 'user', content: 'Hello' }] }), { code: 'PROVIDER_INCOMPLETE' });
+  }
 });
