@@ -2,20 +2,28 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { resolveBrowserRuntime, discoverManagedBrowserExecutable, BROWSER_INSTALL_GUIDANCE } from './browser-discovery.mjs';
+import { resolveBrowserRuntime, discoverManagedBrowserExecutable, discoverBrowserExecutable, BROWSER_INSTALL_GUIDANCE } from './browser-discovery.mjs';
 
 const failure = (message, code = 'BROWSER_BOOTSTRAP_FAILED') => Object.assign(new Error(message), { code, status: 409 });
 const ENVIRONMENT = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'SSL_CERT_FILE', 'SSL_CERT_DIR']);
 
-export function createBrowserBootstrap({ cacheDirectory, packageRoot, nodePath = process.execPath, environment = process.env } = {}) {
+export function createBrowserBootstrap({ cacheDirectory, packageRoot, nodePath = process.execPath, environment = process.env,
+  discoverBrowser = discoverBrowserExecutable } = {}) {
   if (!path.isAbsolute(cacheDirectory || '') || !path.isAbsolute(packageRoot || '') || !path.isAbsolute(nodePath || ''))
     throw failure('Browser setup requires private absolute installation paths.');
   let installing = null, child = null, closed = false, lastFailure = null;
   async function status() {
     const runtime = await resolveBrowserRuntime({ packageRoot });
     const installed = !!await discoverManagedBrowserExecutable({ cacheDirectory, packageRoot });
-    return { state: installing ? 'installing' : installed ? 'installed' : lastFailure ? 'failed' : 'not-installed',
-      version: runtime.version, revision: runtime.revision, ...(installed ? {} : { guidance: BROWSER_INSTALL_GUIDANCE }),
+    // Report the same read-only system discovery used at launch, rather than
+    // describing an absent managed download as an absent usable browser.
+    const systemAvailable = !installed && !!await discoverBrowser({ cacheDirectory, packageRoot, env: environment });
+    return { state: installing ? 'installing' : installed ? 'installed' : systemAvailable ? 'available' : lastFailure ? 'failed' : 'not-installed',
+      version: runtime.version, revision: runtime.revision,
+      ...(installed || systemAvailable ? { browserSource: installed ? 'managed' : 'system' } : {}),
+      ...(installed ? {} : { guidance: systemAvailable
+        ? 'A supported system browser is available for ChainChat’s separate owned profile. Managed Chromium setup is optional; personal browser data is not imported.'
+        : BROWSER_INSTALL_GUIDANCE }),
       ...(lastFailure ? { code: lastFailure } : {}) };
   }
   async function install() {

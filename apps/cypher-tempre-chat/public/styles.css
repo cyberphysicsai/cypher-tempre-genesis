@@ -396,6 +396,15 @@ p {
 .text-button:hover {
   color: var(--accent);
 }
+.chat-error-meta {
+  align-items: center;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.chat-error-meta .text-button { padding: 3px 0; }
+.model-limits { margin: 14px 0; }
+.model-limits summary { cursor: pointer; font-size: 11px; }
+#loadoutRepairNotice { margin: 10px 0; overflow-wrap: anywhere; }
 .text-button svg {
   width: 13px;
   height: 13px;

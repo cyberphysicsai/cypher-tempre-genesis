@@ -2,21 +2,41 @@
   "id": "cypher-tempre-poi",
   "name": "Cypher Tempre Proof of Interaction",
   "description": "Trusted local turn admission, native context, action review and candidate-bound output receipts.",
-  "version": "0.9.0",
-  "contracts": { "tools": ["chainchat_automation"] },
+  "version": "0.9.1",
+  "contracts": {
+    "tools": [
+      "chainchat_automation"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["brokerUrl"],
+    "required": [
+      "brokerUrl"
+    ],
     "properties": {
-      "brokerUrl": {"type": "string"},
-      "brokerTokenEnv": {"type": "string"},
-      "brokerToken": {"type": "string"},
-      "requestTimeoutMs": {"type": "integer", "minimum": 100, "maximum": 60000}
+      "brokerUrl": {
+        "type": "string"
+      },
+      "brokerTokenEnv": {
+        "type": "string"
+      },
+      "brokerToken": {
+        "type": "string"
+      },
+      "requestTimeoutMs": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 60000
+      }
     }
   },
   "uiHints": {
-    "brokerToken": {"sensitive": true},
-    "brokerTokenEnv": {"label": "Private broker credential environment variable"}
+    "brokerToken": {
+      "sensitive": true
+    },
+    "brokerTokenEnv": {
+      "label": "Private broker credential environment variable"
+    }
   }
 }

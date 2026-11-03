@@ -773,10 +773,10 @@ test("credentials remain in session memory and model switches preserve the chain
   );
 });
 
-test("perspective orchestration scopes the larger Muse allowance while synthesis and ordinary chat keep their limits", async (t) => {
+test("perspectives, synthesis and ordinary chat use the model-appropriate output allowance", async (t) => {
   for (const [model, expected] of [
     ["muse-spark-1.3-contributor", 8192],
-    ["generic-model", 2048],
+    ["generic-model", 4096],
   ]) {
     const f = await fixture(t);
     await f.ready();
@@ -807,7 +807,7 @@ test("perspective orchestration scopes the larger Muse allowance while synthesis
     assert.equal(reply.status, 200, JSON.stringify(reply.body));
     assert.deepEqual(
       f.modelCalls.map((call) => call.args.maxTokens),
-      [expected, expected, expected, 4096],
+      [expected, expected, expected, expected],
     );
     assert.equal(reply.body.message.perspectives.length, 3);
     assert.equal(
@@ -819,7 +819,7 @@ test("perspective orchestration scopes the larger Muse allowance while synthesis
         .status,
       200,
     );
-    assert.equal(f.modelCalls.at(-1).args.maxTokens, 4096);
+    assert.equal(f.modelCalls.at(-1).args.maxTokens, expected);
   }
 });
 

@@ -8,6 +8,7 @@ import { validateToolAuthority, authorizeToolCall } from '../lib/tool-authority.
 import { createCompactionBroker } from './compaction-broker.mjs';
 import { validateManagedServiceTool } from '../lib/managed-service-tools.mjs';
 import { ownedBrowserProfilesResult } from './plugin/browser-results.mjs';
+import { safeInvocationError, invocationError } from '../lib/runtime-errors.mjs';
 
 const sha = text => createHash('sha256').update(text, 'utf8').digest('hex');
 const failure = (message, code = 'OPENCLAW_ENFORCEMENT') => Object.assign(new Error(message), { code, status: 422 });
@@ -313,15 +314,17 @@ export function createPoIBroker({ engine, review, generateSummary, channelIngres
         recentConversation: (prepared.recentHistory || []).flatMap(e => [{ role: 'user', content: e.input }, { role: 'assistant', content: e.output }]).slice(-12), signal: claim.context.signal,
       })) : review(claim.config, { input: claim.context.input, candidate: request.candidate, covenant: prepared.genesis.covenant,
         trustedAgentContext: prepared.trustedAgentContext, availableEvidence: prepared.availableEvidence || [], toolObservations: observations(claim), recentConversation: [], signal: claim.context.signal }));
-      if (!assessment?.approved) throw failure('The OpenClaw candidate did not pass covenant review.', 'COVENANT_REJECTED');
+      if (!assessment?.approved) throw Object.assign(failure('The OpenClaw candidate did not pass covenant review.', 'COVENANT_REJECTED'), {
+        stage: 'review', gate: { approved: false, scores: assessment?.scores, fruits: assessment?.fruits || assessment?.fruitages } });
       const evaluated = await native(claim, { op: 'evaluate', root: claim.context.root, expectedHead: prepared.head.hash,
         input: claim.context.input, output: request.candidate, scores: assessment.scores, assessment,
         toolObservations: observations(claim),
         usedRings: assessment.usedRings || [], loadout: claim.context.loadout, learning: false });
-      if (evaluated.accepted !== true || evaluated.verdict?.decision !== 'SEAL') throw failure('The native gate withheld the OpenClaw candidate.', 'POI_REJECTED');
+      if (evaluated.accepted !== true || evaluated.verdict?.decision !== 'SEAL') throw Object.assign(failure('The native gate withheld the OpenClaw candidate.', 'POI_REJECTED'), { stage: 'native-review' });
       event(claim, 'gate', 'completed', 'OpenClaw candidate passed native PoI review');
     }
     claim.finalized = true;
+    claim.error = null;
     claim.receipt = { candidateSha256, expectedHead: claim.inspected.head.hash, genesisHash: claim.inspected.genesis.hash,
       toolObservations: observations(claim), toolCallCount: [...claim.toolCalls.values()].filter(call => call.allowed).length,
       reviewed: true, issuedAt: new Date(now()).toISOString(), expiresAt: new Date(claim.expiresAt).toISOString() };
@@ -335,8 +338,10 @@ export function createPoIBroker({ engine, review, generateSummary, channelIngres
           !/^[a-f0-9]{64}$/.test(claim.context.modelRouteCapability || '')) throw failure('No private managed model context is active.');
       // This correlation is not a native agent run ID and grants no tool or
       // candidate authority. Only native admission may bind claim.runId.
-      await authorize(claim); const prepared = await prepare(claim);
-      return { ...response(claim, { context: prepared.context }), binding: { sessionKey: request.sessionKey, runId: request.runId } };
+      try {
+        await authorize(claim); const prepared = await prepare(claim);
+        return { ...response(claim, { context: prepared.context }), binding: { sessionKey: request.sessionKey, runId: request.runId } };
+      } catch (error) { claim.error = safeInvocationError(error, 'chain-preparation'); throw error; }
     }
     if (request?.version === 1 && request.op === 'managed_service_execute') {
       const claim = bySession.get(request.sessionKey), call = claim?.toolCalls.get(request.runId);
@@ -365,8 +370,18 @@ export function createPoIBroker({ engine, review, generateSummary, channelIngres
     if (!request || request.version !== 1 || !['admit', 'prepare', 'finalize', 'tool', 'tool_result', 'outgoing', 'end'].includes(request.op)) throw failure('Unknown enforcement operation.');
     const claim = lookup(request); await authorize(claim);
     if (request.op === 'admit') return response(claim);
-    if (request.op === 'prepare') { const prepared = await prepare(claim); return response(claim, { context: prepared.context, toolsAllow: prepared.toolsAllow }); }
-    if (request.op === 'finalize') return finalize(claim, request);
+    if (request.op === 'prepare' || request.op === 'finalize') {
+      try {
+        if (request.op === 'finalize') return await finalize(claim, request);
+        const prepared = await prepare(claim);
+        return response(claim, { context: prepared.context, toolsAllow: prepared.toolsAllow });
+      } catch (error) {
+        // Keep only fixed diagnostics in the parent. The child receives no
+        // candidate/reviewer text, credentials or arbitrary error contents.
+        claim.error = safeInvocationError(error, request.op === 'prepare' ? 'chain-preparation' : 'review');
+        throw error;
+      }
+    }
     if (request.op === 'tool') {
       return reviewTool(claim, request);
     }
@@ -413,8 +428,10 @@ export function createPoIBroker({ engine, review, generateSummary, channelIngres
     finishCompactionInvocation: compactions.finishCompactionInvocation,
     async start() { if (url) return; await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); }); url = `http://127.0.0.1:${server.address().port}/v1/enforce`; },
     async assertCandidate({ claimId, candidate }) { const claim = claims.get(claimId); if (!claim) throw failure('Missing invocation receipt.'); await authorize(claim);
+      if (claim.error) throw invocationError(claim.error);
       if (!bounded(candidate) || !claim.finalized || claim.receipt?.candidateSha256 !== sha(candidate)) throw failure('The Gateway returned content without a matching PoI receipt.');
       return { ...claim.receipt, purpose: claim.purpose, commitOwner: 'chainchat' }; },
+    invocationError({ claimId }) { return claims.get(claimId)?.error || null; },
     finishInvocation({ claimId }) { const claim = claims.get(claimId); if (claim) bySession.delete(claim.sessionKey); claims.delete(claimId); },
     assertControlResult({ claimId, candidate }) { const control = liveControl(controls.get(claimId));
       const receipt = bounded(candidate, 128 * 1024) ? control.receipts.get(sha(candidate)) : null;
