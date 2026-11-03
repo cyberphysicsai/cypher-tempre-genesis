@@ -10,10 +10,49 @@ export const defaultSettings = () => ({
   archetypes: [],
   continuum: { enabled: false, mode: "turn", targetBytes: 65536 },
 });
-export const defaultLoadout = () => ({
+const preferredLoadout = () => ({
   modalities: ["2", "5", "37"],
   senses: ["5", "10", "84"],
 });
+const loadoutKinds = [["modalities", "modality"], ["senses", "sense"]];
+
+/** Native inspection is the authority for available equipment. This only
+ * changes app-side selections; it never rewrites a faculty or chain record. */
+export function reconcileLoadout(loadout, faculties = []) {
+  const next = {}, removed = {};
+  let changed = !loadout || typeof loadout !== "object" || Array.isArray(loadout);
+  for (const [field, kind] of loadoutKinds) {
+    const available = new Map();
+    for (const faculty of Array.isArray(faculties) ? faculties : []) {
+      // Native dormant faculties may be deliberately equipped for a turn.
+      // Their operator still needs its independent local approval. Dormancy
+      // excludes automatic defaults below, not an explicit valid selection.
+      if (!faculty || faculty.kind !== kind || faculty.equippable === false ||
+          !["string", "number"].includes(typeof faculty.id)) continue;
+      const id = String(faculty.id), key = `${kind}:${id}`;
+      if (!id || faculty.key !== undefined && faculty.key !== key) continue;
+      available.set(id, key); available.set(key, key);
+    }
+    const previous = Array.isArray(loadout?.[field]) ? loadout[field] : [];
+    if (!Array.isArray(loadout?.[field])) changed = true;
+    const selected = new Set(); next[field] = []; removed[field] = [];
+    for (const id of previous) {
+      const key = typeof id === "string" ? available.get(id) : undefined;
+      if (key && !selected.has(key)) { selected.add(key); next[field].push(id); }
+      else {
+        changed = true;
+        if (!key && typeof id === "string") removed[field].push(id);
+      }
+    }
+  }
+  return { loadout: next, removed, changed };
+}
+
+// Preferred base faculties are selected only when this native catalogue
+// actually offers them. New grown/imported faculties remain unequipped.
+export const defaultLoadout = (faculties = []) => reconcileLoadout(preferredLoadout(),
+  (Array.isArray(faculties) ? faculties : []).filter(faculty => faculty && faculty.dormant !== true &&
+    (faculty.source === undefined || faculty.source === "base"))).loadout;
 export function validateSettings(input, previous = defaultSettings()) {
   const value = {
     ...previous,
@@ -82,7 +121,7 @@ export class StateStore {
   async save() {
     await writeJSON(this.file, this.agents);
   }
-  async add(root, name, owned) {
+  async add(root, name, owned, faculties) {
     const normalized = (value) =>
       process.platform === "win32"
         ? path.resolve(value).toLowerCase()
@@ -96,7 +135,8 @@ export class StateStore {
       name,
       root: path.resolve(root),
       owned,
-      loadout: defaultLoadout(),
+      loadout: defaultLoadout(faculties),
+      ...(!Array.isArray(faculties) ? { loadoutDefaultsPending: true } : {}),
       settings: defaultSettings(),
       cognition: defaultCognition(),
     };

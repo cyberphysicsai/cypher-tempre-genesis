@@ -7,7 +7,8 @@ test("pairing requires the current ChainChat runtime", () => {
     assert.equal(supportedBridgeVersion(old), false);
   assert.equal(supportedBridgeVersion("0.7.1"), false);
   assert.equal(supportedBridgeVersion("0.8.999"), false);
-  for (const current of ["0.9.0", "1.0.0"])
+  assert.equal(supportedBridgeVersion("0.9.0"), false);
+  for (const current of ["0.9.1", "1.0.0"])
     assert.equal(supportedBridgeVersion(current), true);
 });
 test('owner revocation and read-only plugin preview do not require a wallet or model call', () => {

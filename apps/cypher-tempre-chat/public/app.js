@@ -23,6 +23,7 @@ import {
 import { connectLocalSession, clearLocalResume, localTabStorage } from "./local-session.js";
 import { createAuditParent } from "./audit-parent.js";
 import { initOpenClawSettings } from "./openclaw-settings.js";
+import { chatFailure, providerLimits, loadoutRepairNotice } from "./chat-errors.js";
 const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
@@ -67,6 +68,7 @@ let draftPerspectives = 5,
 const conversations = new Map();
 let packPreviewState = null,
   previewGeneration = 0;
+let loadoutResetTarget = null;
 const exportSelection = new Set();
 let runtimeActivity = null, activityReceivedAt = 0, activityPolling = false,
   cognitionBusy = false, stoppingBusy = false, lifecycleSelection = null, capabilities = [];
@@ -263,6 +265,7 @@ async function api(path, data, options = {}) {
         : result.error?.message || "The request could not be completed.",
     );
     error.code = result.code;
+    error.stage = result.stage;
     error.gate = result.gate;
     error.pluginNotice = result.pluginNotice;
     if (response.status === 401 && path !== "/api/pair" &&
@@ -356,6 +359,7 @@ function applyState(result) {
   if (incomingId && incomingId !== agentId()) {
     delete state.faculties;
     delete state.operatorCompatibility;
+    delete state.loadoutRepair;
     state.cognition = { ...DEFAULT_COGNITION };
     lifecycleSelection = null;
     runtimeActivity = null;
@@ -927,6 +931,10 @@ function renderState() {
     renderConversation();
   }
   if (reconcilePending()) renderConversation();
+  const repairNotice = loadoutRepairNotice(state.loadoutRepair);
+  $("loadoutRepairNotice").textContent = repairNotice;
+  $("loadoutRepairNotice").classList.toggle("hidden", !repairNotice);
+  $("clearLoadout").disabled = !token || !state.agent || requestBusy;
   if ($("exchangeDialog").open) renderExportFaculties();
   if (state.gate?.threshold)
     $("thresholdNote").textContent =
@@ -952,7 +960,7 @@ function renderConversation() {
         "span",
         "",
         message.held
-          ? "RESPONSE HELD"
+          ? message.failure?.title || "RESPONSE HELD"
           : message.control ? "OPENCLAW CONTROL"
           : message.role === "user"
             ? "YOU"
@@ -960,6 +968,21 @@ function renderConversation() {
       ),
     );
     node.append(label, messageBody(message));
+    if (message.held && message.failure) {
+      const diagnostic = el("div", "message-meta chat-error-meta");
+      diagnostic.append(el("code", "", message.failure.code), el("span", "", `Stage: ${message.failure.stageLabel}`));
+      if (message.failure.action && message.failure.actionLabel) {
+        const recover = el("button", "text-button", message.failure.actionLabel);
+        recover.type = "button";
+        recover.addEventListener("click", () => recoverChatFailure(message.failure.action));
+        diagnostic.append(recover);
+      }
+      node.append(diagnostic);
+    }
+    if (message.held && message.gate) {
+      const review = covenantReview(message.gate);
+      if (review) node.append(review);
+    }
     if (message.role === "assistant" && !message.held) {
       const meta = el("div", "message-meta");
       const ring = message.ring;
@@ -1071,6 +1094,35 @@ function addMessage(message) {
   conversations.get(id).push(message);
   renderConversation();
 }
+function recoverChatFailure(action) {
+  if (requestBusy) { toast("Wait for the current operation to finish."); return; }
+  if (action === "model") requirePair(openModel);
+  else if (action === "continuum") { openContinuum(); $("flushContinuum").focus(); }
+  else if (action === "loadout") requireAgent(openClearLoadout);
+  else if (action === "inspect") $("historyButton").click();
+  else if (action === "native") requirePair(() => nativePanel.open());
+  else if (action === "holdings") $("licenseButton").click();
+}
+function openClearLoadout() {
+  if (requestBusy) { toast("Wait for the current turn before changing equipment."); return; }
+  loadoutResetTarget = { token, agent: agentId() };
+  openDialog("clearLoadoutDialog");
+}
+$("clearLoadout").addEventListener("click", () => requireAgent(openClearLoadout));
+$("clearLoadoutDialog").addEventListener("close", () => { loadoutResetTarget = null; });
+$("clearLoadoutForm").addEventListener("submit", event => {
+  event.preventDefault();
+  runForm(event.currentTarget, async () => {
+    if (!loadoutResetTarget || loadoutResetTarget.token !== token || loadoutResetTarget.agent !== agentId() || requestBusy)
+      throw new Error("The selected agent or session changed. Open this confirmation again.");
+    const result = await api("/api/loadout/reset", { confirm: true });
+    state.loadout = result.loadout || result.state?.loadout || { modalities: [], senses: [] };
+    applyState(result);
+    await refreshState();
+    closeDialog("clearLoadoutDialog");
+    toast("Equipment cleared. Available faculties can be equipped again.");
+  });
+});
 async function selectAgent(id) {
   if (requestBusy) {
     toast("Wait for your active turn to finish before switching agents.");
@@ -1189,6 +1241,8 @@ $("disconnectModel").addEventListener("click", async () => {
     $("modelId").value = "";
     $("baseUrl").value = "";
     $("reasoningCapable").checked = false;
+    $("modelContextWindow").value = "";
+    $("modelOutputLimit").value = "";
     renderState();
     closeDialog("modelDialog");
     toast("Model disconnected. Its key was cleared from app memory.");
@@ -1205,7 +1259,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.9.0 or newer to use this interface. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.9.1 or newer to use this interface. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -1292,6 +1346,8 @@ function openModel() {
   $("modelId").value = provider.model || "";
   $("baseUrl").value = provider.baseUrl || "";
   $("reasoningCapable").checked = provider.reasoningCapable === true;
+  $("modelContextWindow").value = provider.contextWindow ?? "";
+  $("modelOutputLimit").value = provider.maxOutputTokens ?? "";
   $("apiKey").value = "";
   updateProviderPlaceholder();
   renderHoldingsControls();
@@ -1317,19 +1373,23 @@ $("provider").addEventListener("change", () => {
   $("baseUrl").value = "";
   $("modelId").value = "";
   $("reasoningCapable").checked = false;
+  $("modelContextWindow").value = "";
+  $("modelOutputLimit").value = "";
   updateProviderPlaceholder();
 });
 $("modelForm").addEventListener("submit", (event) => {
   event.preventDefault();
   runForm(event.currentTarget, async () => {
-    const data = {
-      provider: $("provider").value,
-      model: $("modelId").value.trim(),
-      baseUrl: $("baseUrl").value.trim() || $("baseUrl").placeholder,
-      reasoningCapable: $("reasoningCapable").checked,
-      apiKey: $("apiKey").value,
-    };
+    let data;
     try {
+      data = {
+        provider: $("provider").value,
+        model: $("modelId").value.trim(),
+        baseUrl: $("baseUrl").value.trim() || $("baseUrl").placeholder,
+        reasoningCapable: $("reasoningCapable").checked,
+        apiKey: $("apiKey").value,
+        ...providerLimits({ contextWindow: $("modelContextWindow").value, maxOutputTokens: $("modelOutputLimit").value }),
+      };
       const result = await api("/api/provider", data);
       state.provider = result.provider ||
         result.state?.provider || {
@@ -1342,7 +1402,7 @@ $("modelForm").addEventListener("submit", (event) => {
       toast("Model configured. Your Timechain stays the same.");
     } finally {
       $("apiKey").value = "";
-      data.apiKey = "";
+      if (data) data.apiKey = "";
     }
   });
 });
@@ -1427,19 +1487,16 @@ $("chatForm").addEventListener("submit", async (event) => {
     );
   } catch (error) {
     if (token !== chatSession || agentId() !== chatAgent) return;
+    const failure = chatFailure(error);
     addMessage({
       role: "assistant",
       held: true,
-      content:
-        error.name === "AbortError"
-          ? "The model request was cancelled."
-          : error.message,
+      content: failure.message,
+      failure,
       gate: error.gate,
     });
     activity(
-      error.gate
-        ? "The proposed response was held by the alignment gate."
-        : turnMode === "dormant" ? "The plain model request did not complete. Your Timechain remains paused." : "The request was not completed. No unreviewed answer was released.",
+      `${failure.title} · ${failure.code} · ${failure.stageLabel}`,
       "error",
     );
   } finally {

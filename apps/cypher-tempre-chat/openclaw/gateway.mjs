@@ -14,6 +14,7 @@ import { validateProvider, assertCredentialIsolation } from "../lib/providers.mj
 import { createNativeControls, readControlOverlay, mergeControlOverlay, validateControlPatch, NATIVE_PREFERENCES, controlSessionKey, redactNativeControl } from "../lib/openclaw-controls.mjs";
 import { createPrivateNativeServices } from '../lib/openclaw-services.mjs';
 import { createNativeBrowserInspector } from '../lib/native-browser-inspection.mjs';
+import { safeInvocationError, invocationError } from '../lib/runtime-errors.mjs';
 
 export const OPENCLAW_VERSION = "2026.10.9";
 const MAX_BYTES = 24 * 1024 * 1024;
@@ -108,11 +109,79 @@ async function operatorIdentity(directory) {
   catch (error) { if (error.code === 'EEXIST') return read(); throw error; }
 }
 function redactError() { return fail("The selected model failed inside the local OpenClaw runtime. No model text was released.", "OPENCLAW_MODEL_FAILED"); }
+function* providerRecords(buffer) {
+  const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
+  try { const value = JSON.parse(text); if (Array.isArray(value)) yield* value; else yield value; return; } catch {}
+  let data = [];
+  const parse = value => { try { return JSON.parse(value); } catch { return undefined; } };
+  for (const line of text.split(/\r\n|\r|\n/)) {
+    if (line === '') {
+      if (data.length) { const value = parse(data.join('\n')); if (Array.isArray(value)) yield* value; else if (value !== undefined) yield value; }
+      data = [];
+    } else if (line === 'data') data.push('');
+    else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+  }
+  if (data.length) { const value = parse(data.join('\n')); if (Array.isArray(value)) yield* value; else if (value !== undefined) yield value; }
+}
 function inspectResponse(config, buffer) {
   const text = buffer.toString("utf8"); assertCredentialIsolation(config, text);
-  try { assertCredentialIsolation(config, JSON.parse(text)); } catch (error) { if (error.code === "PROVIDER_CREDENTIAL_REFLECTION") throw error; }
-  for (const line of text.split(/\r?\n/)) if (line.startsWith("data:")) {
-    try { assertCredentialIsolation(config, JSON.parse(line.slice(5).trim())); } catch (error) { if (error.code === "PROVIDER_CREDENTIAL_REFLECTION") throw error; }
+  for (const record of providerRecords(buffer)) assertCredentialIsolation(config, record);
+}
+
+// Keep the provider's explicit stop condition across the native adapter. Some
+// adapters otherwise turn a token-limited stream into a normal final reply.
+export function assertProviderCompletion(provider, buffer) {
+  const termination = code => { throw Object.assign(fail(
+    code === 'PROVIDER_INCOMPLETE' ? 'The provider did not finish a complete response.'
+      : code === 'PROVIDER_CONTENT_HELD' ? 'The provider held the model response.'
+      : code === 'PROVIDER_RATE_LIMIT' ? 'The provider rate limit or quota was reached.'
+      : code === 'PROVIDER_HTTP_ERROR' ? 'The provider rejected the model request.'
+      : 'The provider returned an invalid or unsuccessful response.', code,
+    code === 'PROVIDER_RATE_LIMIT' ? 429 : code === 'PROVIDER_CONTENT_HELD' ? 422 : 502), { stage: 'generation' }); };
+  const providerFailure = error => {
+    const codes = [error?.code, error?.type, error?.status].map(value => String(value ?? '').toLowerCase());
+    if (codes.some(code => ['429', 'rate_limit_exceeded', 'rate_limit_error', 'rate_limit', 'quota_exceeded', 'insufficient_quota', 'resource_exhausted'].includes(code))) termination('PROVIDER_RATE_LIMIT');
+    if (codes.some(code => ['401', '403', 'invalid_api_key', 'api_key_invalid', 'authentication_error', 'invalid_authentication', 'unauthorized', 'permission_denied', 'access_denied'].includes(code))) termination('PROVIDER_HTTP_ERROR');
+    termination('PROVIDER_INVALID_RESPONSE');
+  };
+  for (const value of providerRecords(buffer)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    let incomplete = false, held = false;
+    if (value.error || value.type === 'error') providerFailure(value.error || value);
+    if (provider === 'compatible') {
+      const choices = Array.isArray(value.choices) ? value.choices : [];
+      const reasons = choices.map(choice => choice?.finish_reason);
+      held = reasons.includes('content_filter') || choices.some(choice => choice?.message?.refusal || choice?.delta?.refusal);
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (reasons.some(reason => reason != null && !['stop', 'length', 'tool_calls', 'function_call'].includes(reason))) termination('PROVIDER_INVALID_RESPONSE');
+      incomplete = reasons.includes('length');
+    } else if (provider === 'openai') {
+      const result = value.response || value;
+      if (result.error || result.status === 'failed' || value.type === 'response.failed') providerFailure(result.error);
+      const reason = result.incomplete_details?.reason;
+      held = reason === 'content_filter' || value.type === 'response.refusal.delta' || value.type === 'response.refusal.done' ||
+        (Array.isArray(result.output) && result.output.some(item => Array.isArray(item?.content) && item.content.some(part => part?.type === 'refusal')));
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (result.status != null && !['queued', 'in_progress', 'completed', 'incomplete'].includes(result.status)) termination('PROVIDER_INVALID_RESPONSE');
+      if (result.status === 'incomplete' || value.type === 'response.incomplete') {
+        if (![undefined, null, 'max_output_tokens'].includes(reason)) termination('PROVIDER_INVALID_RESPONSE');
+        incomplete = true;
+      }
+    } else if (provider === 'anthropic') {
+      const reason = value.delta?.stop_reason || value.stop_reason;
+      held = reason === 'refusal' || value.content_block?.type === 'refusal' ||
+        (Array.isArray(value.content) && value.content.some(part => part?.type === 'refusal'));
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (reason != null && !['end_turn', 'stop_sequence', 'max_tokens', 'tool_use', 'pause_turn'].includes(reason)) termination('PROVIDER_INVALID_RESPONSE');
+      incomplete = reason === 'max_tokens';
+    } else if (provider === 'gemini') {
+      const reasons = (Array.isArray(value.candidates) ? value.candidates : []).map(candidate => candidate?.finishReason);
+      held = !!value.promptFeedback?.blockReason || reasons.some(reason => ['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY', 'IMAGE_PROHIBITED_CONTENT'].includes(reason));
+      if (held) termination('PROVIDER_CONTENT_HELD');
+      if (reasons.some(reason => reason != null && !['STOP', 'MAX_TOKENS'].includes(reason))) termination('PROVIDER_INVALID_RESPONSE');
+      incomplete = reasons.includes('MAX_TOKENS');
+    }
+    if (incomplete) termination('PROVIDER_INCOMPLETE');
   }
 }
 
@@ -150,7 +219,7 @@ export function consumeModelRouteCapability(body, provider, capability) {
 }
 
 /** Resolve only model protocol paths, never an arbitrary request URL. */
-export function providerRequest(config, incomingPath, body, { openCodeSession } = {}) {
+export function providerRequest(config, incomingPath, body, { openCodeSession, maxTokens } = {}) {
   if (typeof incomingPath !== "string" || !incomingPath.startsWith("/") || incomingPath.startsWith("//"))
     throw fail("Unsupported local provider route.", "OPENCLAW_PROXY_ROUTE", 404);
   config = validateProvider(config);
@@ -171,8 +240,45 @@ export function providerRequest(config, incomingPath, body, { openCodeSession } 
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) throw fail("Invalid local provider request.", "OPENCLAW_PROXY_REQUEST", 400);
   assertCredentialIsolation(config, body);
-  const clean = { ...body };
+  const clean = structuredClone(body);
   if (config.provider === "gemini") delete clean.model; else clean.model = config.model;
+  // Native chat.send may otherwise select the model catalogue ceiling instead
+  // of the caller's per-turn allowance. Enforce the private admitted budget at
+  // every provider forward, including later tool-loop calls.
+  if (maxTokens !== undefined || config.maxOutputTokens !== undefined) {
+    const ceiling = Math.min(maxTokens ?? 32768, config.maxOutputTokens ?? 32768);
+    if (!Number.isSafeInteger(ceiling) || ceiling < 1 || ceiling > 32768)
+      throw Object.assign(fail('The admitted output allowance is invalid.', 'OPENCLAW_OUTPUT_BUDGET', 422), { stage: 'generation' });
+    const cap = (object, key) => {
+      const value = object[key];
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 1))
+        throw Object.assign(fail('The native output allowance is invalid.', 'OPENCLAW_OUTPUT_BUDGET', 422), { stage: 'generation' });
+      object[key] = Math.min(value ?? ceiling, ceiling);
+    };
+    if (config.provider === 'openai') cap(clean, 'max_output_tokens');
+    else if (config.provider === 'anthropic') cap(clean, 'max_tokens');
+    else if (config.provider === 'gemini') {
+      const invalid = () => Object.assign(fail('The native output configuration is ambiguous or invalid.', 'OPENCLAW_OUTPUT_BUDGET', 422), { stage: 'generation' });
+      if (clean.generation_config !== undefined) {
+        if (clean.generationConfig !== undefined) throw invalid();
+        clean.generationConfig = clean.generation_config; delete clean.generation_config;
+      }
+      clean.generationConfig ??= {};
+      if (typeof clean.generationConfig !== 'object' || Array.isArray(clean.generationConfig)) throw invalid();
+      const settings = clean.generationConfig;
+      if (settings.max_output_tokens !== undefined) {
+        if (!Number.isSafeInteger(settings.max_output_tokens) || settings.max_output_tokens < 1) throw invalid();
+        if (settings.maxOutputTokens !== undefined && (!Number.isSafeInteger(settings.maxOutputTokens) || settings.maxOutputTokens < 1)) throw invalid();
+        settings.maxOutputTokens = Math.min(settings.maxOutputTokens ?? settings.max_output_tokens, settings.max_output_tokens);
+        delete settings.max_output_tokens;
+      }
+      cap(settings, 'maxOutputTokens');
+    } else {
+      const usesCompletion = Object.hasOwn(clean, 'max_completion_tokens');
+      cap(clean, usesCompletion ? 'max_completion_tokens' : 'max_tokens');
+      if (usesCompletion && Object.hasOwn(clean, 'max_tokens')) cap(clean, 'max_tokens');
+    }
+  }
   const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
   const endpoint = new URL(config.baseUrl);
   if (endpoint.protocol === "https:" && endpoint.hostname === "opencode.ai" && !endpoint.port &&
@@ -205,6 +311,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
   let gatewayToken = secret(), proxyToken = secret(), closed = false;
   let identity = null, nativeClient = null, nativeConnection = null, lastConfiguration = null, pendingOverlay = null;
   let browserHosts = [], reasoningCapable = false, capabilitiesInitialized = false;
+  let contextWindow = modelContextTokens || 131072, outputCeiling = 32768;
   let managedServices = {};
   let lastServiceEnvironmentHash = null;
   const nativeEvents = new Set();
@@ -272,6 +379,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
   }
   async function handleProxy(request, response) {
     const current = active;
+    let admitted = false;
     try {
       if (request.headers.origin || !isLoopback(request.socket.remoteAddress) || !authorized(request.headers.authorization ||
           (request.headers["x-api-key"] ? `Bearer ${request.headers["x-api-key"]}` : request.headers["x-goog-api-key"] ? `Bearer ${request.headers["x-goog-api-key"]}` :
@@ -300,18 +408,42 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         throw error;
       }
       checkServiceIsolation(decoded);
-      const upstreamRequest = providerRequest(current.config, request.url, decoded, { openCodeSession: current.openCodeSession });
+      admitted = true;
+      const upstreamRequest = providerRequest(current.config, request.url, decoded, {
+        openCodeSession: current.openCodeSession, maxTokens: current.args.maxTokens || 4096 });
+      if (current.config.contextWindow !== undefined) {
+        // This is a bounded UTF-8 estimate, not a provider-specific tokenizer.
+        // It catches plainly oversized first turns before a remote rejection.
+        const inputEstimate = Math.ceil(Buffer.byteLength(JSON.stringify(upstreamRequest.body), 'utf8') / 3);
+        const output = Math.min(current.args.maxTokens || 4096, current.config.maxOutputTokens || 32768);
+        if (inputEstimate + output > current.config.contextWindow)
+          throw Object.assign(fail('The active request exceeds the configured model context window.', 'OPENCLAW_CONTEXT_BUDGET', 422), { stage: 'context' });
+      }
       if (current !== active) throw fail("The model invocation ended.", "REQUEST_CANCELLED", 499);
       emit(current.context, "model", "started", "OpenClaw provider inference");
-      const result = await fetchImpl(upstreamRequest.url, { method: "POST", headers: upstreamRequest.headers,
-        body: JSON.stringify(upstreamRequest.body), redirect: "error", signal: current.controller.signal });
-      if (!result.ok) throw redactError();
+      let result;
+      try { result = await fetchImpl(upstreamRequest.url, { method: "POST", headers: upstreamRequest.headers,
+        body: JSON.stringify(upstreamRequest.body), redirect: "error", signal: current.controller.signal }); }
+      catch (error) {
+        if (current.controller.signal.aborted) throw error;
+        throw Object.assign(fail('The provider connection failed.', 'PROVIDER_CONNECTION_ERROR'), { stage: 'generation' });
+      }
+      if (!result.ok) {
+        await result.body?.cancel();
+        throw Object.assign(fail(result.status === 429 ? 'The provider rate limit or quota was reached.'
+          : 'The provider rejected the model request. Check its model, endpoint and limits.',
+          result.status === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_HTTP_ERROR', result.status === 429 ? 429 : 502), { stage: 'generation' });
+      }
       const payload = await collect(result.body); inspectResponse(current.config, payload); checkServiceIsolation(payload.toString('utf8'));
+      assertProviderCompletion(current.config.provider, payload);
       if (current !== active || current.controller.signal.aborted) throw fail("The model invocation ended.", "REQUEST_CANCELLED", 499);
+      current.providerError = null;
       emit(current.context, "model", "completed", "OpenClaw provider inference");
       response.writeHead(200, { "content-type": String(result.headers.get("content-type") || "application/json"), "cache-control": "no-store" });
       response.end(payload);
     } catch (error) {
+      if (admitted && current === active && !current.providerError)
+        current.providerError = safeInvocationError(error, 'generation');
       onDiagnostic?.(`[chainchat] private model request held code=${/^[A-Z0-9_]+$/.test(error.code || '') ? error.code : 'PROVIDER_FAILED'}${error.admissionCounts ? ` systemMarkers=${error.admissionCounts.system} totalMarkers=${error.admissionCounts.total}` : ''}\n`);
       emit(current?.context, "model", "held", "OpenClaw provider held");
       if (!response.headersSent) response.writeHead(Number.isInteger(error.status) ? error.status : 502,
@@ -360,7 +492,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       const providers = Object.fromEntries(Object.values(PROVIDERS).map(value => [value.id, {
         baseUrl: `http://127.0.0.1:${proxyPort}${value.prefix}`, apiKey: "${CHAINCHAT_PROVIDER_TOKEN}", api: value.api,
         authHeader: true, models: [{ id: "route", name: "User selected model (in-memory transport)", api: value.api,
-          reasoning: reasoningCapable, input: ["text"], contextWindow: 131072, maxTokens: 32768,
+          reasoning: reasoningCapable, input: ["text"], contextWindow, maxTokens: Math.min(outputCeiling, contextWindow - 1),
           ...(modelContextTokens !== undefined ? { contextTokens: modelContextTokens } : {}),
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
       }]));
@@ -582,17 +714,31 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1 || stat.size > 1000 || process.platform !== 'win32' && (stat.mode & 0o077))
         throw fail('The private model capability setting requires local inspection.', 'OPENCLAW_CONFIG_REJECTED');
       const value = JSON.parse(await fs.readFile(file, 'utf8'));
-      if (value.version !== 1 || typeof value.reasoning !== 'boolean') throw fail('The saved model capability setting is invalid.', 'OPENCLAW_CONFIG_REJECTED');
+      if (![1, 2].includes(value.version) || typeof value.reasoning !== 'boolean' || value.version === 2 &&
+          (!Number.isSafeInteger(value.contextWindow) || value.contextWindow < 4096 || value.contextWindow > 2097152 ||
+           !Number.isSafeInteger(value.maxOutputTokens) || value.maxOutputTokens < 128 || value.maxOutputTokens > 32768))
+        throw fail('The saved model capability setting is invalid.', 'OPENCLAW_CONFIG_REJECTED');
       reasoningCapable = value.reasoning;
+      if (value.version === 2) {
+        contextWindow = Math.min(value.contextWindow, modelContextTokens || 2097152);
+        outputCeiling = value.maxOutputTokens;
+      }
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     capabilitiesInitialized = true;
   }
   async function synchronizeModelCapabilities(capabilities) {
     await initializeModelCapabilities();
-    if (typeof capabilities?.reasoning !== 'boolean' || capabilities.reasoning === reasoningCapable) return;
-    reasoningCapable = capabilities.reasoning;
+    const nextReasoning = typeof capabilities?.reasoning === 'boolean' ? capabilities.reasoning : reasoningCapable;
+    const nextContext = Math.min(capabilities?.contextWindow ?? contextWindow, modelContextTokens || 2097152);
+    const nextOutput = capabilities?.maxOutputTokens ?? outputCeiling;
+    if (!Number.isSafeInteger(nextContext) || nextContext < 4096 || nextContext > 2097152 ||
+        !Number.isSafeInteger(nextOutput) || nextOutput < 128 || nextOutput > 32768)
+      throw fail('The selected model limits are invalid.', 'OPENCLAW_CONFIG_REJECTED');
+    if (nextReasoning === reasoningCapable && nextContext === contextWindow && nextOutput === outputCeiling) return;
+    reasoningCapable = nextReasoning; contextWindow = nextContext; outputCeiling = nextOutput;
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    await atomicJson(path.join(directory, 'model-capabilities.json'), { version: 1, reasoning: reasoningCapable });
+    await atomicJson(path.join(directory, 'model-capabilities.json'), { version: 2, reasoning: reasoningCapable,
+      contextWindow, maxOutputTokens: outputCeiling });
     await stopChild();
   }
   async function nativeTurn(params, controller, { allowEmptyFinal = false } = {}) {
@@ -684,7 +830,8 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     config = validateProvider(config); assertCredentialIsolation(config, args); checkServiceIsolation(args);
     if (!providerSessions.has(rawConfig)) providerSessions.set(rawConfig, randomUUID());
     const openCodeSession = providerSessions.get(rawConfig);
-    await synchronizeModelCapabilities(context.modelCapabilities);
+    await synchronizeModelCapabilities({ ...context.modelCapabilities,
+      contextWindow: config.contextWindow ?? (modelContextTokens || 131072), maxOutputTokens: config.maxOutputTokens ?? 32768 });
     let browserInvocation = null;
     try {
     const inspectNativeTarget = createNativeBrowserInspector({ rpc: nativeRpc, assertIsolation: checkServiceIsolation,
@@ -737,8 +884,8 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     if (native && context.purpose === 'candidate' && context.nativeIdentity && selected?.entry?.sessionId &&
         typeof broker.estimateInvocation === 'function') {
       const estimate = await broker.estimateInvocation({ config, args, context: registeredContext, sessionKey, invocationId });
-      const reserve = 12000 + (args.maxTokens || 4096) + Math.ceil(Buffer.byteLength(args.messages.at(-1).content, 'utf8') / 4);
-      const limit = Math.floor((modelContextTokens || 131072) * 0.80);
+      const reserve = 12000 + Math.min(args.maxTokens || 4096, config.maxOutputTokens || 32768) + Math.ceil(Buffer.byteLength(args.messages.at(-1).content, 'utf8') / 4);
+      const limit = Math.floor(contextWindow * 0.80);
       const readStats = async () => {
         const result = await nativeRpc('chainchat.compactionStats', { sessionKey, sessionId: selected.entry.sessionId });
         if (result?.version !== 1 || typeof result.known !== 'boolean' || result.known &&
@@ -769,7 +916,8 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     if (!claim || typeof claim.claimId !== "string" || claim.sessionKey !== sessionKey)
       throw fail("The local enforcement broker refused the invocation.", "OPENCLAW_ADMISSION_FAILED", 422);
     const abort = () => { controller.abort(); void stopChild(); };
-    const timer = setTimeout(abort, requestTimeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; abort(); }, requestTimeoutMs);
     args.signal?.addEventListener("abort", abort, { once: true });
     active = { config, args, context, controller, claimId: claim.claimId, sessionKey, openCodeSession, modelRouteCapability };
     let responseComplete = false;
@@ -801,8 +949,14 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       return { text: candidate, enforcement, usage: { input: result.usage?.prompt_tokens || 0, output: result.usage?.completion_tokens || 0 },
         runtime: { backend: "openclaw", version: OPENCLAW_VERSION, invocationId } };
     } catch (error) {
+      const providerError = active?.providerError;
+      const brokerError = await broker.invocationError?.({ claimId: claim.claimId });
       controller.abort(); if (!responseComplete) await stopChild();
       if (args.signal?.aborted) throw fail("The OpenClaw run was cancelled.", "REQUEST_CANCELLED", 499);
+      await context.authorize?.();
+      if (timedOut) throw Object.assign(fail('The provider did not complete the native turn in time.', 'PROVIDER_TIMEOUT', 504), { stage: 'generation' });
+      const specific = invocationError(providerError || brokerError);
+      if (specific) throw specific;
       throw error;
     } finally {
       clearTimeout(timer); args.signal?.removeEventListener("abort", abort); active = null;
@@ -821,7 +975,9 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       throw fail('A privately admitted native compaction operation is required.', 'OPENCLAW_COMPACTION_HELD', 422);
     const config = validateProvider(rawConfig), sessionKey = controlSessionKey(nativeIdentity);
     assertCredentialIsolation(config, { instructions }); checkServiceIsolation({ instructions }); checkSignal(signal);
-    await synchronizeModelCapabilities(context.modelCapabilities); await start(); await assertEnforcementHealthy();
+    await synchronizeModelCapabilities({ ...context.modelCapabilities,
+      contextWindow: config.contextWindow ?? (modelContextTokens || 131072), maxOutputTokens: config.maxOutputTokens ?? 32768 });
+    await start(); await assertEnforcementHealthy();
     const selected = await nativeRpc('sessions.describe', { key: sessionKey, includeDerivedTitles: false, includeLastMessage: false });
     if (!selected.session?.sessionId) return { ok: true, compacted: false, reason: 'No native conversation exists for this Timechain yet.' };
     const operationId = randomUUID(), controller = new AbortController();

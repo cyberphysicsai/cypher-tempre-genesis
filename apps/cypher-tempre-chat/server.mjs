@@ -18,9 +18,10 @@ import {
   assertCredentialIsolation,
   validUsedRings,
   perspectiveTokenAllowance,
+  answerTokenAllowance,
 } from "./lib/providers.mjs";
 import { archetypes, chooseArchetypes } from "./lib/archetypes.mjs";
-import { StateStore, validateSettings, writeJSON } from "./lib/state.mjs";
+import { StateStore, validateSettings, writeJSON, reconcileLoadout, defaultLoadout } from "./lib/state.mjs";
 import { sanitizeModelValue, sanitizeModelText } from "./lib/terminology.mjs";
 import { createHoldingsGate } from "./lib/holdings-gate.mjs";
 import { Activity, CAPABILITIES, cognitionFor, validateCognition } from "./lib/cognition.mjs";
@@ -40,6 +41,7 @@ import { createTrustedPluginManager, trustedPluginRpcValidators } from './lib/tr
 import { controlSessionKey } from './lib/openclaw-controls.mjs';
 import { createBrowserBootstrap } from './lib/browser-bootstrap.mjs';
 import { nativePluginNotice } from './lib/plugin-notices.mjs';
+import { errorStage } from './lib/runtime-errors.mjs';
 
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = JSON.parse(
@@ -340,7 +342,16 @@ export async function createApp(options = {}) {
       dormancy: ["cognition"], pack_import: ["faculties", "gate"],
     }[request.op];
     const trace = requestSession.getStore()?.trace;
-    const action = () => runNativeEngine(request);
+    const action = async () => {
+      try { return await runNativeEngine(request); }
+      catch (error) {
+        error.stage ||= errorStage(error, ({ prepare: 'chain-preparation', inspect: 'chain-preparation',
+          verify: 'chain-preparation', evaluate: 'native-review', commit: 'commitment', ingest: 'commitment',
+          route: 'memory-planning', memory: 'memory-planning', search: 'native-review',
+          pack_import: 'loadout', faculty_action: 'loadout' })[request.op]);
+        throw error;
+      }
+    };
     return trace?.running && abilities ? trace.step(abilities, `Native ${request.op}`, action) : action();
   };
   const generateModel = options.generate || generate;
@@ -410,7 +421,13 @@ export async function createApp(options = {}) {
         event: (ability, status, label) => { if (trace?.running) trace.event(ability, status, label); },
       });
     };
-    const rawResult = trace?.running ? await trace.step("model", "Model inference", action) : await action();
+    let rawResult;
+    try { rawResult = trace?.running ? await trace.step("model", "Model inference", action) : await action(); }
+    catch (error) {
+      if (args.chainchatPurpose === 'utility') error.stage = 'memory-planning';
+      else error.stage ||= errorStage(error, 'generation');
+      throw error;
+    }
     await requireHoldings();
     checkCancelled(args.signal);
     assertCredentialIsolation(config, rawResult);
@@ -435,7 +452,9 @@ export async function createApp(options = {}) {
     };
     const trace = requestSession.getStore()?.trace;
     const action = () => reviewModel(config, sanitizeModelValue(boundedArgs));
-    const rawResult = trace?.running ? await trace.step("review", "Semantic covenant review", action) : await action();
+    let rawResult;
+    try { rawResult = trace?.running ? await trace.step("review", "Semantic covenant review", action) : await action(); }
+    catch (error) { error.stage ||= 'review'; throw error; }
     await requireHoldings();
     checkCancelled(args.signal);
     assertCredentialIsolation(config, rawResult);
@@ -448,7 +467,7 @@ export async function createApp(options = {}) {
       strictReview(await reviewer(config, args), args.availableEvidence || []),
       generateSummary: async (config, { system, sourceMessages, instructions, signal }) => {
         await requireHoldings();
-        const args = { system, messages: [{ role: 'user', content: JSON.stringify({ instructions, transcript: sourceMessages }) }], maxTokens: 4096, signal };
+        const args = { system, messages: [{ role: 'user', content: JSON.stringify({ instructions, transcript: sourceMessages }) }], maxTokens: answerTokenAllowance(config), signal };
         assertCredentialIsolation(config, args); assertServiceIsolation(args);
         const result = await generateModel(config, args);
         await requireHoldings(); assertCredentialIsolation(config, result); assertServiceIsolation(result);
@@ -550,6 +569,8 @@ export async function createApp(options = {}) {
           model: config.model,
           baseUrl: config.baseUrl,
           reasoningCapable: config.reasoningCapable === true,
+          ...(config.contextWindow !== undefined ? { contextWindow: config.contextWindow } : {}),
+          ...(config.maxOutputTokens !== undefined ? { maxOutputTokens: config.maxOutputTokens } : {}),
         }
       : { configured: false };
 
@@ -628,6 +649,7 @@ export async function createApp(options = {}) {
     let pending = { exchanges: [], bytes: 0 };
     if (record) {
       inspected = await engine({ op: "inspect", root: record.root });
+      await repairEquipment(record, inspected);
       pending = await store.pending(record);
     }
     return {
@@ -643,6 +665,7 @@ export async function createApp(options = {}) {
       executionRuntime: openclaw ? openclaw.status() : { backend: "direct" },
       provider: cleanProvider(session.provider),
       loadout: record?.loadout || { modalities: [], senses: [] },
+      loadoutRepair: record?.loadoutRepair || null,
       settings: record?.settings || validateSettings({}),
       cognition: controlFor(record, inspected),
       faculties: inspected?.faculties || [],
@@ -672,6 +695,34 @@ export async function createApp(options = {}) {
       },
       gate: { required: controlFor(record, inspected).mode !== "dormant", threshold: 180, fruits: FRUITS },
     };
+  }
+  async function repairEquipment(record, inspected, { beforeTurn = false } = {}) {
+    if (!inspected?.verified || !Array.isArray(inspected.faculties)) return;
+    const change = reconcileLoadout(record.loadout, inspected.faculties);
+    if (!change.changed && record.loadoutDefaultsPending !== true) return;
+    const identity = process.platform === "win32" ? record.root.toLowerCase() : record.root;
+    const persist = async latest => {
+      if (!latest?.verified || !Array.isArray(latest.faculties)) return;
+      const repair = reconcileLoadout(record.loadout, latest.faculties);
+      const initialize = record.loadoutDefaultsPending === true;
+      if (!repair.changed && !initialize) return;
+      const untouched = Array.isArray(record.loadout?.modalities) && !record.loadout.modalities.length &&
+        Array.isArray(record.loadout?.senses) && !record.loadout.senses.length;
+      record.loadout = initialize && untouched ? defaultLoadout(latest.faculties) : repair.loadout;
+      delete record.loadoutDefaultsPending;
+      if (repair.changed)
+        record.loadoutRepair = { reason: "unavailable-faculties", removed: repair.removed };
+      await store.save();
+    };
+    // State can be read while a request is generating. Its equipment remains
+    // immutable for that run; defer migration until idle. The turn owner has
+    // one explicit reconciliation point before preparation and model work.
+    if (busy.has(identity)) {
+      if (beforeTurn && requestSession.getStore()?.operationRecord === record) await persist(inspected);
+      return;
+    }
+    if (pausing.has(identity)) return;
+    await exclusive(record, async () => persist(await engine({ op: "inspect", root: record.root })), { control: true });
   }
   async function assess(
     config,
@@ -915,6 +966,7 @@ export async function createApp(options = {}) {
     requestSession.getStore().signal = signal;
     requestSession.getStore().originalInput = message;
     const inspected = await engine({ op: "inspect", root: record.root });
+    await repairEquipment(record, inspected, { beforeTurn: true });
     if (openclaw?.sessionControls && inspected.genesis?.hash) {
       const identity = { agentId: record.id, genesisHash: inspected.genesis.hash };
       requestSession.getStore().nativeIdentity = identity;
@@ -930,7 +982,7 @@ export async function createApp(options = {}) {
       requestSession.getStore().plainCall = true;
       const raw = await model(config, {
         system: "You are a helpful assistant. This is an ordinary stateless model call. The user has paused Timechain memory, learning, faculty operations, review and commitment. No chain context or external tools are available. Do not claim to have used them.",
-        messages: [{ role: "user", content: message }], maxTokens: 4096, signal,
+        messages: [{ role: "user", content: message }], maxTokens: answerTokenAllowance(config), signal,
       });
       checkCancelled(signal);
       return ( { message: { role: "assistant", agentId: record.id, content: text(raw.text, "Generated answer"),
@@ -1064,7 +1116,7 @@ export async function createApp(options = {}) {
             }),
           },
         ],
-        maxTokens: 4096,
+        maxTokens: answerTokenAllowance(config),
         signal,
       });
       return result.text;
@@ -1076,7 +1128,7 @@ export async function createApp(options = {}) {
             ...conversation,
             { role: "user", content: message },
           ],
-          maxTokens: 4096,
+          maxTokens: answerTokenAllowance(config),
           signal,
         })
       ).text;
@@ -1112,7 +1164,7 @@ export async function createApp(options = {}) {
           system: `${system}\nThe prior candidate was withheld. Correct unsupported assertions and covenant conflicts. If evidence is insufficient, explicitly abstain or state uncertainty. Do not assert that the revised candidate is verified; it will be reviewed again.`,
           messages: [...conversation, { role: "user", content: JSON.stringify({ request: message,
             heldCandidate: candidate, review: error.nativeVerdict || error.gate || { decision: "REJECT" } }) }],
-          maxTokens: 4096, signal,
+          maxTokens: answerTokenAllowance(config), signal,
         }), { revision: revisions })).text, "Revised answer");
       }
     }
@@ -1757,6 +1809,7 @@ export async function createApp(options = {}) {
               root,
               initialized.genesis?.name || name,
               true,
+              initialized.faculties || [],
             );
             session.agentId = record.id;
             return send(201, await state(session));
@@ -1788,6 +1841,7 @@ export async function createApp(options = {}) {
               root,
               inspected.genesis?.name || path.basename(root),
               false,
+              inspected.faculties,
             );
             session.agentId = record.id;
             return send(200, await state(session));
@@ -2104,11 +2158,28 @@ export async function createApp(options = {}) {
                 if (input[field].some((id) => !available.has(id)))
                   throw err(
                     "A selected faculty is not in the paired agent’s current catalogue. Refresh and try again.",
+                    "INVALID_LOADOUT",
                   );
                 next[field] = [...new Set(input[field])];
               }
               await requireHoldings();
               record.loadout = next;
+              delete record.loadoutDefaultsPending;
+              delete record.loadoutRepair;
+              await store.save();
+              return send(200, await state(session));
+            });
+          if (url.pathname === "/api/loadout/reset")
+            return await exclusive(record, async () => {
+              if (Object.keys(input).some(key => key !== "confirm"))
+                throw err("Clear equipment only for the currently selected agent.", "LOADOUT_RESET_INVALID", 400);
+              if (input.confirm !== true)
+                throw err("Confirm clearing the selected agent's equipped faculties.", "LOADOUT_RESET_CONFIRM", 400);
+              // Removing app-side equipment grants no new action authority and
+              // remains available when provider or wallet authorization expires.
+              record.loadout = { modalities: [], senses: [] };
+              delete record.loadoutDefaultsPending;
+              delete record.loadoutRepair;
               await store.save();
               return send(200, await state(session));
             });
@@ -2432,6 +2503,7 @@ export async function createApp(options = {}) {
       send(Number.isInteger(error.status) ? error.status : 500, {
         error: message,
         code: error.code || "INTERNAL_ERROR",
+        stage: errorStage(error),
         ...(error.gate ? { gate: error.gate } : {}),
         ...(String(req.url).startsWith('/api/openclaw/plugins/') && nativePluginNotice(error.details)
           ? { pluginNotice: nativePluginNotice(error.details) } : {}),

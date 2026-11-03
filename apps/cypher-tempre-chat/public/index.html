@@ -107,7 +107,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.9.0</span>
+        ><span class="mono" id="appVersion">v0.9.1</span>
       </div>
       <div class="top-actions">
         <div class="theme-selector" role="group" aria-label="Visual mode">
@@ -436,6 +436,7 @@
           </button>
         </div>
         <button class="faculty-growth-notice hidden" id="newFacultiesNotice" type="button"></button>
+        <p class="info-box fine-print hidden" id="loadoutRepairNotice" role="status"></p>
         <label class="faculty-search"
           ><svg><use href="#i-eye" /></svg
           ><input
@@ -457,6 +458,7 @@
           <svg><use href="#i-equip" /></svg><span>Faculty Exchange</span
           ><span>↗</span>
         </button>
+        <button class="text-button" id="clearLoadout" type="button">Clear equipped faculties…</button>
         <div class="loadout-foot">
           <span class="status-dot"></span>
           <p id="growthNote">
@@ -492,13 +494,13 @@
         </button>
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.0/CypherTempre-ChainChat-Setup-0.9.0-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.1/CypherTempre-ChainChat-Setup-0.9.1-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
         >
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.0/CypherTempre-ChainChat-Setup-0.9.0-macos.zip" rel="noopener noreferrer">Install for macOS</a>
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.0/CypherTempre-ChainChat-Setup-0.9.0-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.1/CypherTempre-ChainChat-Setup-0.9.1-macos.zip" rel="noopener noreferrer">Install for macOS</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.1/CypherTempre-ChainChat-Setup-0.9.1-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
     </section>
@@ -613,9 +615,9 @@
         <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
       </ol>
       <div class="platform-downloads">
-        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.0/CypherTempre-ChainChat-Setup-0.9.0-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.0/CypherTempre-ChainChat-Setup-0.9.0-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.0/CypherTempre-ChainChat-Setup-0.9.0-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.1/CypherTempre-ChainChat-Setup-0.9.1-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.1/CypherTempre-ChainChat-Setup-0.9.1-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.1/CypherTempre-ChainChat-Setup-0.9.1-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
       </div>
       <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
       <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>
@@ -828,6 +830,15 @@
         </button>
       </form>
     </dialog>
+    <dialog id="clearLoadoutDialog" class="modal compact-modal">
+      <form id="clearLoadoutForm">
+        <div class="dialog-top"><span class="eyebrow">FACULTY EQUIPMENT</span><button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button></div>
+        <h2>Clear this agent’s equipment?</h2>
+        <p>This removes current equipment selections. Your faculties remain in inventory, and your saved chain and registry history stay intact. You can equip available faculties again afterward.</p>
+        <div class="dialog-error" role="alert"></div>
+        <button type="submit" class="primary-button full-width">Clear equipped faculties</button>
+      </form>
+    </dialog>
     <dialog id="modelDialog" class="modal compact-modal">
       <form id="modelForm">
         <div class="dialog-top">
@@ -881,6 +892,12 @@
             placeholder="Held only in local app memory"
         /></label>
         <label class="native-check"><input type="checkbox" id="reasoningCapable" /><span>This model supports native reasoning effort settings (/think). Enable only if supported by your provider and model.</span></label>
+        <details class="model-limits">
+          <summary>Model token limits · optional</summary>
+          <p class="fine-print">Use limits documented by your provider for this exact model. Leave blank to use the app defaults. Smaller limits may prevent active Timechain context from fitting.</p>
+          <label class="field">Context window (tokens)<input id="modelContextWindow" type="number" min="4096" max="2097152" step="1" inputmode="numeric" placeholder="Use app default" /></label>
+          <label class="field">Output ceiling per model call (tokens)<input id="modelOutputLimit" type="number" min="128" max="32768" step="1" inputmode="numeric" placeholder="Use app default" /></label>
+        </details>
         <div class="info-box">
           In active Timechain mode, your prompt, selected memories and candidate answer go to this
           provider for generation and alignment review. Plain mode sends only your current message.

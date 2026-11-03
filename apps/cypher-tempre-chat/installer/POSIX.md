@@ -82,7 +82,7 @@ mutations or an arbitrary schema downgrade.
 From the application directory:
 
 ```sh
-python3 installer/build_posix.py --archive /reviewed/cypher-tempre-chat-v0.9.0.zip --output-dir /reviewed/setup --platform all
+python3 installer/build_posix.py --archive /reviewed/cypher-tempre-chat-v0.9.1.zip --output-dir /reviewed/setup --platform all
 ```
 
 The builder reads bootstrap/installer sources and runtime pins from that ZIP,
@@ -99,7 +99,7 @@ only in a synthetic HOME/XDG directory, briefly starts a private local runtime
 with no browser and uses synthetic native-chain data, then authenticates shutdown:
 
 ```sh
-python3 installer/acceptance_posix.py --installer /reviewed/setup/CypherTempre-ChainChat-Setup-0.9.0-linux.tar.gz --work-root /var/tmp/chainchat-acceptance
+python3 installer/acceptance_posix.py --installer /reviewed/setup/CypherTempre-ChainChat-Setup-0.9.1-linux.tar.gz --work-root /var/tmp/chainchat-acceptance
 ```
 
 Use the macOS ZIP path on a macOS runner. Optional `--cache-dir` reuses only

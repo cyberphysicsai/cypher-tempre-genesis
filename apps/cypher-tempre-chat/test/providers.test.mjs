@@ -226,7 +226,7 @@ test("OpenCode Go receives an honest client name and private random provider-ses
   }
 });
 
-test("only official Go Responses Muse Contributor reviews and perspective requests receive the bounded 8192-token allowance", async (t) => {
+test("review and perspective budgets support reasoning and retain the exact Muse Go allowance", async (t) => {
   const requests = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
     requests.push({ url, body: JSON.parse(options.body) });
@@ -264,11 +264,11 @@ test("only official Go Responses Muse Contributor reviews and perspective reques
       "max_output_tokens",
       8192,
     ],
-    [{ ...eligible, model: "another-model" }, "max_output_tokens", 2048],
+    [{ ...eligible, model: "another-model" }, "max_output_tokens", 4096],
     [
       { ...eligible, baseUrl: "https://api.openai.com/v1" },
       "max_output_tokens",
-      2048,
+      4096,
     ],
     [
       {
@@ -276,7 +276,7 @@ test("only official Go Responses Muse Contributor reviews and perspective reques
         baseUrl: "https://opencode.ai.evil.example/inference/go/openai/v1",
       },
       "max_output_tokens",
-      2048,
+      4096,
     ],
     [
       {
@@ -284,28 +284,28 @@ test("only official Go Responses Muse Contributor reviews and perspective reques
         baseUrl: "https://opencode.ai:444/inference/go/openai/v1",
       },
       "max_output_tokens",
-      2048,
+      4096,
     ],
     [
       { ...eligible, baseUrl: "https://opencode.ai/inference/go/other/v1" },
       "max_output_tokens",
-      2048,
+      4096,
     ],
     [
       { ...eligible, baseUrl: "https://opencode.ai/inference/go/openai/v10" },
       "max_output_tokens",
-      2048,
+      4096,
     ],
-    [{ ...eligible, provider: "compatible" }, "max_tokens", 2048],
+    [{ ...eligible, provider: "compatible" }, "max_tokens", 4096],
     [
       { provider: "anthropic", model: "fixture", apiKey: eligible.apiKey },
       "max_tokens",
-      2048,
+      4096,
     ],
     [
       { provider: "gemini", model: "fixture", apiKey: eligible.apiKey },
       "maxOutputTokens",
-      2048,
+      4096,
     ],
   ];
   for (const [config, field, expected] of cases) {

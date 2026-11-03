@@ -16,7 +16,7 @@ const PINNED_CHROMIUM_PATHS = {
   'win32-x64': ['chrome-win64', 'chrome.exe'],
 };
 
-async function fixture(t, script = null) {
+async function fixture(t, script = null, discoverBrowser = async () => null) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ct-browser-bootstrap-')));
   const packageRoot = path.join(root, 'node_modules', 'openclaw'), core = path.join(root, 'node_modules', 'playwright-core'), cacheDirectory = path.join(root, 'cache');
   const lock = JSON.parse(await fs.readFile(new URL('../openclaw/runtime/package-lock.json', import.meta.url), 'utf8'));
@@ -37,6 +37,7 @@ async function fixture(t, script = null) {
     fs.mkdirSync(path.dirname(executable),{recursive:true});fs.writeFileSync(executable,'disposable test browser binary fixture');fs.chmodSync(executable,0o700);
     fs.writeFileSync(path.join(cache,'chromium-1243','INSTALLATION_COMPLETE'),'');`);
   const bootstrap = createBrowserBootstrap({ cacheDirectory, packageRoot, nodePath: process.execPath,
+    discoverBrowser,
     environment: { ...process.env, OPENAI_API_KEY: 'never-to-child-fixture-key', NODE_OPTIONS: '--not-a-real-option', PLAYWRIGHT_DOWNLOAD_HOST: 'https://untrusted.invalid' } });
   t.after(async () => { await bootstrap.close(); await fs.rm(root, { recursive: true, force: true }); });
   return { root, packageRoot, core, cacheDirectory, executable, bootstrap };
@@ -64,6 +65,36 @@ test('browser setup refuses mismatched runtime libraries and preserves a useful 
   await fs.writeFile(path.join(f.core, 'package.json'), JSON.stringify({ name: 'playwright-core', version: '0.0.0' }));
   await assert.rejects(resolveBrowserRuntime(f), /reviewed runtime lock/);
   await assert.rejects(f.bootstrap.install(), /reviewed runtime lock/);
+});
+
+test('a system browser is reported as available without downloading or revealing its executable path', async t => {
+  const privateExecutable = path.join(os.tmpdir(), 'private-system-browser', 'browser.exe');
+  const lookups = [];
+  const f = await fixture(t, null, async options => { lookups.push(options); return privateExecutable; });
+  const status = await f.bootstrap.status();
+  assert.equal(status.state, 'available');
+  assert.equal(status.browserSource, 'system');
+  assert.match(status.guidance, /setup is optional/);
+  assert.match(status.guidance, /separate owned profile/);
+  assert.equal(status.guidance.includes('No supported'), false);
+  assert.equal(JSON.stringify(status).includes(privateExecutable), false);
+  assert.equal(lookups[0].packageRoot, f.packageRoot);
+  assert.equal(lookups[0].cacheDirectory, f.cacheDirectory);
+  assert.equal(lookups[0].env.NODE_OPTIONS, '--not-a-real-option', 'Discovery reads environment data without spawning a process.');
+  await assert.rejects(fs.access(path.join(f.cacheDirectory, 'calls.txt')), { code: 'ENOENT' }, 'Status never starts a downloader.');
+  await f.bootstrap.install();
+  assert.equal((await f.bootstrap.status()).state, 'installed');
+  assert.equal((await f.bootstrap.status()).browserSource, 'managed', 'An explicit installed managed browser takes precedence.');
+});
+
+test('a failed optional managed download does not hide an available system browser', async t => {
+  const f = await fixture(t, 'process.exit(1)', async () => '/private/system/browser');
+  await assert.rejects(f.bootstrap.install(), { code: 'BROWSER_BOOTSTRAP_FAILED' });
+  const status = await f.bootstrap.status();
+  assert.equal(status.state, 'available');
+  assert.equal(status.browserSource, 'system');
+  assert.equal(status.code, 'BROWSER_BOOTSTRAP_FAILED', 'The failed optional operation remains visible.');
+  assert.equal(JSON.stringify(status).includes('/private/system/browser'), false);
 });
 
 test('cache discovery uses only exact locked revision and architecture artifacts', async t => {
