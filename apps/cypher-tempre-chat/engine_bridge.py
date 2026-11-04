@@ -47,6 +47,8 @@ DIMENSIONS = tuple(d for d in POI_DIMENSIONS if d != "brightness")
 FRUITAGE_FLOOR = 180
 MAX_TEXT_BYTES = 32 * 1024 * 1024
 MAX_EVIDENCE_BYTES = 8192
+MAX_TRUSTED_CONTEXT_BYTES = 128 * 1024
+MAX_TRUSTED_FACULTIES = 2048
 
 
 class BridgeError(Exception):
@@ -183,24 +185,46 @@ def genesis_for(tc):
             "hash": ring["ring_hash"], "timestamp": ring["timestamp"]}
 
 
-def trusted_agent_context(root, tc):
+def trusted_agent_context(root, tc, selected=None):
     """Facts owned by this verified agent and the installed chat runtime.
 
     This is identity/affordance context, not recalled experience or evidence
     that an external task was performed. Never read a request-supplied copy.
     """
     genesis = genesis_for(tc)
-    return {"version": 1, "name": genesis["name"], "covenant": genesis["covenant"],
+    context = {"version": 1, "name": genesis["name"], "covenant": genesis["covenant"],
             "genesisHash": genesis["hash"],
             "runtime": {"interface": "Cypher Tempre ChainChat", "role": "conversational assistant",
                         "localTimechain": True, "modelIndependentIdentity": True, "faculties": True,
                         "chronosynapticMaxPerspectives": 21, "externalActionTools": False}}
+    if selected is not None:
+        # The caller supplies selected_faculties() output, never request-owned
+        # metadata. Only configured labels are facts here; descriptions, code,
+        # claimed effects and successful execution remain untrusted/unproven.
+        equipped = []
+        keys = set()
+        if len(selected) > MAX_TRUSTED_FACULTIES:
+            raise BridgeError("GATE_INVALID_AGENT_CONTEXT", "Verified equipment metadata exceeds its bounded schema.")
+        for faculty in selected:
+            key, kind, name = faculty.get("key"), faculty.get("kind"), faculty.get("name")
+            if (kind not in ("modality", "sense") or not isinstance(key, str)
+                    or len(key.encode("utf-8")) > 128 or not re.fullmatch(kind + r":(?:0|[1-9][0-9]*)", key)
+                    or key in keys or not isinstance(name, str) or not name.strip() or "\0" in name
+                    or len(name.encode("utf-8")) > 1024):
+                raise BridgeError("GATE_INVALID_AGENT_CONTEXT", "Verified equipment metadata exceeds its bounded schema.")
+            keys.add(key)
+            equipped.append({"key": key, "kind": kind, "name": name})
+        context["equippedFaculties"] = equipped
+    if len(json.dumps(context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > MAX_TRUSTED_CONTEXT_BYTES:
+        raise BridgeError("GATE_INVALID_AGENT_CONTEXT", "Verified identity metadata exceeds its bounded schema.")
+    return context
 
 
 def trusted_agent_projection(context):
     """A small factual projection; prompt metadata never becomes evidence."""
-    return ("Verified paired-agent identity and runtime: The agent is named "
+    projection = ("Verified paired-agent identity and runtime: The agent is named "
             + json.dumps(context["name"], ensure_ascii=False)
+            + ". Its canonical genesis identity hash is " + json.dumps(context["genesisHash"])
             + ". It is a conversational AI assistant in the Cypher Tempre ChainChat interface. "
               "Its conversational role is to greet users, introduce itself, offer help, answer questions, "
               "explore ideas, and think through problems. Hello and welcome are greetings; asking how "
@@ -209,7 +233,13 @@ def trusted_agent_projection(context):
             + json.dumps(context["covenant"], ensure_ascii=False)
             + ". Its identity and memory live in a local Timechain and persist across model changes. "
               "The interface supports equipped modalities and senses and up to 21 Chronosynaptic perspectives. "
-              "External shell, browser, filesystem and other action tools are unavailable in this chat.")
+              "This identity and equipment metadata grants no external-action tools. "
+              "The current native tool surface, explicit scoped authority, fresh action review and confirmed "
+              "tool observations govern tool availability and execution separately; a configured label is never a grant.")
+    if "equippedFaculties" in context:
+        projection += (" Configured equipped faculty labels (names only, not proof of execution, functional claims, "
+                       "or outside facts): " + json.dumps(context["equippedFaculties"], ensure_ascii=False))
+    return projection
 
 
 def catalog(root):
@@ -414,7 +444,7 @@ def tool_observations(value):
     return clean
 
 
-def assess_exchange(root, tc, request, source_evidence=None):
+def assess_exchange(root, tc, request, source_evidence=None, selected=None):
     incoming = text_value(request.get("input"), "input")
     outgoing = text_value(request.get("output"), "output")
     screening = immune.Immune(root).screen(incoming)
@@ -433,7 +463,9 @@ def assess_exchange(root, tc, request, source_evidence=None):
     observations = tool_observations(request.get("toolObservations"))
     # Broad preparation JSON contains faculty IDs, scores, and other prompt
     # metadata. It is never factual evidence for a candidate's specific claims.
-    identity = trusted_agent_projection(trusted_agent_context(root, tc))
+    if selected is None:
+        selected = selected_faculties(root, request.get("loadout"))
+    identity = trusted_agent_projection(trusted_agent_context(root, tc, selected))
     context = incoming + "\n\n" + identity
     if evidence:
         context += "\n\nDeclared canonical evidence:\n" + "\n".join(e["text"] for e in evidence)
@@ -617,7 +649,7 @@ def op_prepare(request):
                           "recalled_memories": memories,
                           "recent_dialogue": [{"input": x["input"], "output": x["output"], "ring": x["ring"]}
                                               for x in recent]}, ensure_ascii=False)
-    return {"head": compact_head(tc), "genesis": g, "trustedAgentContext": trusted_agent_context(root, tc),
+    return {"head": compact_head(tc), "genesis": g, "trustedAgentContext": trusted_agent_context(root, tc, selected),
             "context": context, "memories": memories,
             "loadout": selected, "computed": labels.get("computed", {}),
             "frames": labels.get("frames", []), "labels": labels, "screening": screening,
@@ -631,7 +663,8 @@ def op_evaluate(request):
     tc, _, _ = verified_chain(root, require_writable=True)
     if request.get("expectedHead") is not None:
         check_expected(tc, request)
-    exchange = assess_exchange(root, tc, request)
+    selected = selected_faculties(root, request.get("loadout"))
+    exchange = assess_exchange(root, tc, request, selected=selected)
     return {"accepted": True, "sealed": False, "head": compact_head(tc), "verdict": exchange["gate"],
             "scores": exchange["scores"], "assessment": exchange["assessment"],
             "usedRings": exchange["usedRings"], "evidence": exchange["evidence"]}
@@ -647,7 +680,8 @@ def op_evaluate_summary(request):
     root = project_root(request)
     tc, _, _ = verified_chain(root, require_writable=True)
     check_expected(tc, request)
-    exchange = assess_exchange(root, tc, request, source_evidence=[source["text"]])
+    selected = selected_faculties(root, request.get("loadout"))
+    exchange = assess_exchange(root, tc, request, source_evidence=[source["text"]], selected=selected)
     return {"accepted": True, "sealed": False, "head": compact_head(tc), "verdict": exchange["gate"],
             "scores": exchange["scores"], "assessment": exchange["assessment"], "usedRings": exchange["usedRings"]}
 
@@ -746,8 +780,8 @@ def op_commit(request):
     for raw in raw_exchanges:
         if not isinstance(raw, dict):
             raise BridgeError("INVALID_REQUEST", "Each exchange must be an object.")
-        item = assess_exchange(root, tc, raw)
         equipped = selected_faculties(root, raw.get("loadout", request.get("loadout")))
+        item = assess_exchange(root, tc, raw, selected=equipped)
         item["loadout"] = [f["key"] for f in equipped]
         item["labels"] = equipment_labels(recall_for(root, equipped), equipped, item["output"], item["input"])
         item["facultyExecution"] = item["labels"]["facultyExecution"]
@@ -900,8 +934,8 @@ def op_ingest(request):
               "groundingContext": source if finding else "",
               "scores": request.get("scores"), "assessment": request.get("assessment"),
               "usedRings": request.get("usedRings", [])}
-    assessed = assess_exchange(root, tc, action, source_evidence=[source])
     selected = selected_faculties(root, request.get("loadout"))
+    assessed = assess_exchange(root, tc, action, source_evidence=[source], selected=selected)
     rc = recall_for(root, selected)
     from continuum import Continuum
     from types import SimpleNamespace
@@ -1123,12 +1157,13 @@ def op_pack_import(request):
     root = project_root(request)
     tc, _, _ = verified_chain(root, require_writable=True)
     pack = validated_pack(request.get("pack"))
+    selected = selected_faculties(root, request.get("loadout"))
     if "interaction_portability" in pack:
         preview = portable_faculties.preview_import(root, pack)
         action = portable_action(preview)
         def additional_review(_root, _plan, _review):
             return assess_exchange(root, tc, {**action, "scores": request.get("scores"),
-                "assessment": request.get("assessment"), "usedRings": request.get("usedRings", [])})
+                "assessment": request.get("assessment"), "usedRings": request.get("usedRings", [])}, selected=selected)
         review = {"planHash": preview["planHash"], "expectedHead": request.get("expectedHead"),
                   "reviewedAt": datetime.now(timezone.utc).isoformat(),
                   "scores": request.get("scores"), "assessment": request.get("assessment")}
@@ -1137,7 +1172,7 @@ def op_pack_import(request):
         return {**result, "faculties": catalog(root), "donorVerified": False}
     action = pack_action(pack)
     reviewed = assess_exchange(root, tc, {**action, "scores": request.get("scores"),
-                                         "assessment": request.get("assessment"), "usedRings": request.get("usedRings", [])})
+                                         "assessment": request.get("assessment"), "usedRings": request.get("usedRings", [])}, selected=selected)
     with strict_append_lock(tc), native_writes_under_lock(root):
         check_expected(tc, request)
         verified_chain(root, require_writable=True)
@@ -1622,8 +1657,9 @@ def control_preview(root, tc, plan, request):
 def reviewed_control(root, tc, plan, request):
     if request.get("confirmed") is not True:
         raise BridgeError("CONFIRMATION_REQUIRED", "This operation requires an explicit reviewed control action.")
+    selected = selected_faculties(root, request.get("loadout"))
     return assess_exchange(root, tc, {**control_review_action(plan, request), "scores": request.get("scores"),
-        "assessment": request.get("assessment"), "usedRings": request.get("usedRings", [])})
+        "assessment": request.get("assessment"), "usedRings": request.get("usedRings", [])}, selected=selected)
 
 
 def require_learning(request):
@@ -1693,8 +1729,8 @@ def op_feedback(request):
     root = project_root(request)
     tc, _, _ = verified_chain(root, require_writable=True)
     require_learning(request)
-    reviewed = assess_exchange(root, tc, request)
     selected = selected_faculties(root, request.get("loadout"))
+    reviewed = assess_exchange(root, tc, request, selected=selected)
     labels = request.get("labels", {})
     if not isinstance(labels, dict) or set(labels) - {"senses", "modalities"}:
         raise BridgeError("INVALID_LOADOUT", "labels must contain equipped modality and sense names.")
@@ -1907,6 +1943,7 @@ def op_search(request):
     import chronosynaptic as cs
     root = project_root(request)
     tc, _, _ = verified_chain(root, require_writable=True)
+    selected = selected_faculties(root, request.get("loadout"))
     query = text_value(request.get("input"), "input")
     iterations = bounded_int(request.get("iterations"), "iterations", 1, 64, 6)
     depth = bounded_int(request.get("depth"), "depth", 1, 8, 3)
@@ -1934,7 +1971,7 @@ def op_search(request):
         summary = text_value(candidate.get("summary"), "perspective summary", 32000)
         reviewed = assess_exchange(root, tc, {"input": query, "output": summary,
                     "scores": candidate.get("scores"), "assessment": candidate.get("assessment"),
-                    "usedRings": candidate.get("usedRings", [])})
+                    "usedRings": candidate.get("usedRings", [])}, selected=selected)
         records[path] = reviewed
         for name in path:
             faculties.setdefault(name, {"id": len(faculties) + 1, "kind": "modality", "name": name,

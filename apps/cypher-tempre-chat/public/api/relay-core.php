@@ -301,6 +301,56 @@ final class Store {
     public function blocked(): array { return $this->transaction(fn(&$s) => array_keys($s['blocks'])); }
 }
 
+/** Transport liveness only: never receives any upstream content or private headers. */
+final class PendingOutput {
+    public const INTERVAL = 12;
+    public const MAX_PULSES = 9; // The inference transport still has its independent 115-second deadline.
+    private \Closure $clock;
+    private \Closure $write;
+    private \Closure $flush;
+    private \Closure $begin;
+    private float $last;
+    private int $pulses = 0;
+    private bool $started = false;
+    public function __construct(private bool $stream, ?callable $clock = null, ?callable $write = null,
+        ?callable $flush = null, ?callable $begin = null) {
+        $this->clock = \Closure::fromCallable($clock ?? static fn() => hrtime(true) / 1e9);
+        $this->write = \Closure::fromCallable($write ?? static function ($bytes) { echo $bytes; });
+        $this->flush = \Closure::fromCallable($flush ?? static function () { flush(); });
+        $this->begin = \Closure::fromCallable($begin ?? static function ($stream) {
+            // Discard removable PHP buffers instead of flushing unknown buffered bytes.
+            @ini_set('zlib.output_compression', '0'); @ini_set('output_buffering', '0');
+            while (ob_get_level() > 0) { $level = ob_get_level(); @ob_end_clean(); if (ob_get_level() === $level) break; }
+            header('Content-Type: ' . ($stream ? 'text/event-stream' : 'application/json'));
+            header('Cache-Control: no-store, no-transform'); header('X-Accel-Buffering: no');
+            // Finish validation and quota cleanup even when the peer disconnects; cURL aborts on its next progress tick.
+            ignore_user_abort(true);
+        });
+        $this->last = ($this->clock)();
+    }
+    public function started(): bool { return $this->started; }
+    public function pulse(): void {
+        $now = ($this->clock)();
+        if ($now - $this->last < self::INTERVAL || $this->pulses >= self::MAX_PULSES) return;
+        if (!$this->started) { ($this->begin)($this->stream); $this->started = true; }
+        $this->last = $now; $this->pulses++;
+        // Constant 4 KiB protocol padding cannot expose candidate text, usage, identifiers or credentials.
+        ($this->write)($this->stream ? ': pending' . str_repeat(' ', 4085) . "\n\n" : str_repeat(' ', 4095) . "\n");
+        ($this->flush)();
+    }
+    public function complete(array $response): void {
+        $type = $this->stream ? 'text/event-stream' : 'application/json';
+        if (($response['type'] ?? null) !== $type || !is_string($response['body'] ?? null)) throw new RelayError('FREE_RESPONSE_INVALID');
+        if (!$this->started) header('Content-Type: ' . $type);
+        ($this->write)($response['body']);
+    }
+    public function fail(array $payload): void {
+        $json = json_encode($payload, JSON_THROW_ON_ERROR);
+        // Once a pending pulse commits HTTP 200, signal a terminal protocol error, never a successful empty answer.
+        ($this->write)($this->started && $this->stream ? 'data: ' . $json . "\n\ndata: [DONE]\n\n" : $json);
+    }
+}
+
 final class Relay {
     private \Closure $fetch;
     public function __construct(private string $secret, private Store $store, callable $fetch) { $this->fetch = \Closure::fromCallable($fetch); }
@@ -321,7 +371,7 @@ final class Relay {
             'notice' => 'Free model tier *when available. Shared limits apply; never falls back to a paid model. Your selected context passes through this relay to OpenCode.',
             'limits' => ['requestsPerHour' => 120, 'outputTokens' => 8192, 'textOnly' => true], 'models' => array_values($models)];
     }
-    public function infer(array $body, string $ip, string $session, ?string $originalJson = null): array {
+    public function infer(array $body, string $ip, string $session, ?string $originalJson = null, ?callable $pending = null): array {
         if (!preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i', $session)) throw new RelayError('FREE_SESSION_REQUIRED', 400);
         $original = $body; $wire = null;
         if ($originalJson !== null) {
@@ -347,7 +397,7 @@ final class Relay {
             $id = hash_hmac('sha256', $session, $this->secret);
             $uuid = substr($id,0,8).'-'.substr($id,8,4).'-4'.substr($id,13,3).'-a'.substr($id,17,3).'-'.substr($id,20,12);
             $r = ($this->fetch)('POST', Policy::BASE . '/chat/completions', ['Authorization: Bearer ' . $this->secret,
-                'Content-Type: application/json', 'User-Agent: CypherTempre-ChainChat', 'x-opencode-session: ' . $uuid], json_encode($wire ?? $body, JSON_THROW_ON_ERROR), 115);
+                'Content-Type: application/json', 'User-Agent: CypherTempre-ChainChat', 'x-opencode-session: ' . $uuid], json_encode($wire ?? $body, JSON_THROW_ON_ERROR), 115, $pending);
             if ($r['status'] < 200 || $r['status'] >= 300) {
                 if (in_array($r['status'], [401,403,404], true)) $this->store->block($body['model']);
                 throw new RelayError($r['status'] === 429 ? 'FREE_RATE_LIMIT' : 'FREE_MODEL_UNAVAILABLE', $r['status'] === 429 ? 429 : 503);
@@ -362,12 +412,16 @@ final class Relay {
     }
 }
 
-function upstream(string $method, string $url, array $headers, ?string $body, int $timeout): array {
+function upstream(string $method, string $url, array $headers, ?string $body, int $timeout, ?callable $pending = null): array {
     if (!in_array($url, [Policy::CATALOGUE, Policy::BASE . '/chat/completions'], true) || !function_exists('curl_init')) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
     $curl = curl_init($url); $raw = '';
     curl_setopt_array($curl, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_HTTPHEADER => $headers, CURLOPT_RETURNTRANSFER => false,
         CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 8, CURLOPT_TIMEOUT => $timeout, CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
         CURLOPT_WRITEFUNCTION => function ($c, $bytes) use (&$raw) { if (strlen($raw) + strlen($bytes) > Policy::MAX_RESPONSE) return 0; $raw .= $bytes; return strlen($bytes); }]);
+    if ($pending !== null) curl_setopt_array($curl, [CURLOPT_NOPROGRESS => false,
+        CURLOPT_XFERINFOFUNCTION => static function ($c, $downloadSize, $downloaded, $uploadSize, $uploaded) use ($pending) {
+            $pending(); return connection_aborted() ? 1 : 0;
+        }]);
     if ($body !== null) curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
     $ok = curl_exec($curl); $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE); $type = (string)curl_getinfo($curl, CURLINFO_CONTENT_TYPE);
     curl_close($curl);
@@ -458,6 +512,7 @@ function serve(bool $catalogue): never {
         header('Access-Control-Allow-Headers: Content-Type, Authorization, X-ChainChat-Session'); header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
     } elseif ($origin !== '') { http_response_code(403); echo '{"error":{"code":"FREE_ORIGIN_DENIED"}}'; exit; }
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') { http_response_code(204); exit; }
+    $pending = null;
     try {
         if ($catalogue) {
             if (!in_array($_SERVER['REQUEST_METHOD'] ?? '', ['GET','HEAD'], true)) throw new RelayError('FREE_METHOD_DENIED',405);
@@ -470,14 +525,18 @@ function serve(bool $catalogue): never {
             if ($raw === false || strlen($raw) > Policy::MAX_BODY) throw new RelayError('FREE_INPUT_LIMIT',413);
             $body = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($body)) throw new RelayError('FREE_REQUEST_INVALID',400);
-            $r = privateRelay()->infer($body, $_SERVER['REMOTE_ADDR'] ?? 'unknown', $_SERVER['HTTP_X_CHAINCHAT_SESSION'] ?? '', $raw);
-            header('Content-Type: ' . $r['type']); echo $r['body'];
+            $pending = new PendingOutput(($body['stream'] ?? false) === true);
+            $r = privateRelay()->infer($body, $_SERVER['REMOTE_ADDR'] ?? 'unknown', $_SERVER['HTTP_X_CHAINCHAT_SESSION'] ?? '', $raw, $pending->pulse(...));
+            $pending->complete($r);
         }
     } catch (\Throwable $error) {
         $code = $error instanceof RelayError ? $error->publicCode : 'FREE_SERVICE_UNAVAILABLE';
-        http_response_code($error instanceof RelayError ? $error->status : 503);
+        if (!$pending?->started()) http_response_code($error instanceof RelayError ? $error->status : 503);
         if ($catalogue) echo json_encode(['freeOnly'=>true,'available'=>false,'models'=>[], 'notice'=>'Shared free access is temporarily unavailable. Your own API remains available.','code'=>$code]);
-        else echo json_encode(['error'=>['code'=>$code,'message'=>'Free access is unavailable for this request. Choose another available free model or connect your own API. No paid fallback was used.']]);
+        else {
+            $payload = ['error'=>['code'=>$code,'message'=>'Free access is unavailable for this request. Choose another available free model or connect your own API. No paid fallback was used.']];
+            if ($pending !== null) $pending->fail($payload); else echo json_encode($payload);
+        }
     }
     exit;
 }
