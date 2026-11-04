@@ -13,6 +13,8 @@ const MAX_BODY = 8 * 1024 * 1024;
 const MAX_CONTEXT = 4 * 1024 * 1024;
 const MAX_RUNS = 1024;
 const RUN_TTL = 10 * 60 * 1000;
+const DEFAULT_BROKER_TIMEOUT_MS = 200000;
+const MAX_BROKER_TIMEOUT_MS = 240000;
 const HASH = /^[a-f0-9]{64}$/;
 const PURPOSES = new Set(["candidate", "utility"]);
 const textHash = value => createHash("sha256").update(value, "utf8").digest("hex");
@@ -32,8 +34,8 @@ function configuration(config = {}, env = process.env) {
   if (envName && !/^[A-Z][A-Z0-9_]{0,127}$/.test(envName)) throw new Error("Invalid PoI credential environment variable.");
   const token = envName ? env[envName] : config.brokerToken;
   if (!nonempty(token, 4096) || token.length < 24 || /[\r\n\0]/.test(token)) throw new Error("The private PoI broker credential is unavailable.");
-  const timeout = config.requestTimeoutMs ?? 60000;
-  if (!Number.isInteger(timeout) || timeout < 100 || timeout > 60000) throw new Error("Invalid PoI request timeout.");
+  const timeout = config.requestTimeoutMs ?? DEFAULT_BROKER_TIMEOUT_MS;
+  if (!Number.isInteger(timeout) || timeout < 100 || timeout > MAX_BROKER_TIMEOUT_MS) throw new Error("Invalid PoI request timeout.");
   return { url: url.href, token, timeout };
 }
 
@@ -50,8 +52,10 @@ export function createBrokerClient(config, options = {}) {
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) controller.abort();
     try {
+      if (controller.signal.aborted) throw new Error(DENIED);
       const response = await fetcher(url, { method: "POST", redirect: "error", signal: controller.signal,
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: raw });
+      if (controller.signal.aborted) throw new Error(DENIED);
       if (!response.ok) throw new Error(DENIED);
       if (!String(response.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) throw new Error(DENIED);
       const declared = Number(response.headers.get("content-length"));
@@ -62,6 +66,7 @@ export function createBrokerClient(config, options = {}) {
       try {
         for (;;) {
           const part = await reader.read();
+          if (controller.signal.aborted) throw new Error(DENIED);
           if (part.done) break;
           length += part.value.byteLength;
           if (length > MAX_BODY) { await reader.cancel(); throw new Error(DENIED); }
@@ -308,7 +313,7 @@ export function register(api) {
   api.registerContextEngine?.(PLUGIN_ID, guardedContext.factory);
   // Each callback's own transport deadline expires before the host can discard
   // its explicit deny/cancel result. The UI transport also requires receipts.
-  const timeoutMs = 2 * (config.requestTimeoutMs ?? 60000) + 10000;
+  const timeoutMs = 2 * (config.requestTimeoutMs ?? DEFAULT_BROKER_TIMEOUT_MS) + 10000;
   // The native durable-goal admission contract permits before_agent_reply
   // after its recovery checkpoint. before_dispatch and before_agent_run are
   // both restart-unsafe, so channel ingress uses observation only; it cannot

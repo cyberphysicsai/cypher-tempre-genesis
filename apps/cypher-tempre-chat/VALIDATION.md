@@ -10,6 +10,10 @@ Installer acceptance preserves the real owner bootstrap, rotating resume credent
 
 ## Active-chat reliability
 
+Long-chain preparation uses coordinated, bounded deadlines. The private broker defaults to 200 seconds with a 240-second maximum, covering native verification that can outlast the former short broker window. Native control heartbeat monitoring tracks the invocation deadline plus 60 seconds; the independent invocation timer remains responsible for cancelling actual work. An expired broker request remains denied even if a transport later supplies headers or body bytes.
+
+Focused regressions exercise the configured bounds, delayed broker responses, cancellation before and during response delivery, safe classification of the known native heartbeat timeout, and redaction of arbitrary close-frame text. Native provider-protocol and restart acceptance remains a separate release check. These mechanical tests establish deadline and release behavior; they do not establish real-model answer quality or a universal preparation time for personal chains. PoI thresholds, evidence checks and exact-candidate receipts remain enforced, and the 65 native engine files are unchanged.
+
 The focused regression suite exercises untouched default cognition through the actual pinned OpenClaw runtime and the default HTTP generation/review transports. Local provider fixtures reproduce output limits, complete fenced JSON, missing evidence, low fruitage scores and incomplete planning. It verifies accepted conversation sealing and unchanged integrity while failures remain held. These are controlled model responses, not evidence that every real provider judges requests correctly.
 
 Catalogue tests construct and pair a genuine independent original-engine genesis with a smaller base registry. They check catalogue-aware defaults, migration of saved equipment, preserved valid choices, no automatic equipment of grown/quarantined/dormant faculties, immutable historical bytes and explicit equipment reset. Equipment repair is deferred during generation.
