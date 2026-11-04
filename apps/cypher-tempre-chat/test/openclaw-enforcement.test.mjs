@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { readFile } from "node:fs/promises";
 import { createBrokerClient, createEnforcementHooks, register, PLUGIN_ID } from "../openclaw/plugin/index.mjs";
 
 const binding = { sessionKey: "agent:main:chainchat:isolated", runId: "run-isolated" };
@@ -223,7 +224,7 @@ test("plugin registers all required blocking and delivery hooks against the publ
   assert.equal(registered.some(entry => ['before_dispatch', 'before_message_write', 'reply_dispatch'].includes(entry.name)), false,
     'Native durable goals reject all pre-checkpoint takeover hooks even when their handler would decline.');
   assert.ok(registered.some(entry => entry.name === 'message_received'), 'Channel observation cannot acquire native inference authority.');
-  assert.ok(registered.every(entry => entry.options.timeoutMs > 120000));
+  assert.ok(registered.every(entry => entry.options.timeoutMs === 410000));
 });
 
 test("broker credentials stay local and malformed or reflected protocol data is rejected", async t => {
@@ -270,4 +271,118 @@ test("broker transport refuses redirects and aborts timed-out decisions", async 
     await assert.rejects(request("admit", binding));
   }
   assert.equal(redirected, false, "A private bearer must never follow a redirect.");
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function slowPreparation(t, { delay = 64000, requestTimeoutMs, invalidReceipt = false } = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now });
+  const started = deferred(), calls = [], signals = [];
+  const request = createBrokerClient({ brokerUrl: 'http://127.0.0.1:18791/private', brokerToken: token,
+    ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}) }, {
+    fetch: async (_url, options) => {
+      const fields = JSON.parse(options.body), { op, sessionKey, runId } = fields;
+      calls.push(op); signals.push(options.signal);
+      if (op === 'prepare') {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, delay);
+          options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('Private transport detail')); }, { once: true });
+          started.resolve();
+        });
+      }
+      const instant = Date.now();
+      const value = result({ binding: { sessionKey, runId },
+        ...(op === 'prepare' ? { context: 'Verified 10000-ring fixture context.', toolsAllow: ['read'] } : {}),
+        ...(['finalize', 'outgoing'].includes(op) ? { candidateSha256: fields.candidateSha256,
+          receipt: receipt({ candidateSha256: fields.candidateSha256, expectedHead: invalidReceipt ? 'invalid-head' : 'a'.repeat(64),
+            issuedAt: new Date(instant).toISOString(), expiresAt: new Date(instant + 60000).toISOString() }) } : {}) });
+      return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+    },
+  });
+  return { hooks: createEnforcementHooks(request), request, started, calls, signals };
+}
+
+test('default broker deadline accommodates a 64-second native preparation and still requires an exact reviewed receipt', async t => {
+  const f = slowPreparation(t);
+  let completed = false;
+  const preparing = prepare(f).then(value => { completed = true; return value; });
+  await f.started.promise;
+  t.mock.timers.tick(60000);
+  await Promise.resolve();
+  assert.equal(completed, false);
+  assert.equal(f.signals.at(-1).aborted, false, 'The previous 60-second cutoff must no longer abort preparation.');
+  t.mock.timers.tick(4000);
+  assert.deepEqual(await preparing, { appendSystemContext: '', toolsAllow: ['read'] });
+  assert.deepEqual(await finalize(f), { action: 'continue' });
+  assert.equal((await outgoing(f)).cancel, false);
+  assert.equal((await outgoing(f, 'Unreviewed changed text')).cancel, true);
+  assert.deepEqual(f.calls, ['admit', 'prepare', 'finalize', 'outgoing']);
+  t.mock.timers.tick(200000);
+  assert.ok(f.signals.every(signal => !signal.aborted), 'Completed request deadlines must be cleared.');
+});
+
+test('the real default broker deadline fails closed and cannot authorize later tools or delivery', async t => {
+  const f = slowPreparation(t, { delay: 200001 });
+  const preparing = prepare(f);
+  await f.started.promise;
+  t.mock.timers.tick(200000);
+  const held = await preparing;
+  assert.deepEqual(held.toolsAllow, []);
+  assert.match(held.appendSystemContext, /did not authorize/);
+  assert.equal(held.appendSystemContext.includes('Private transport detail'), false);
+  assert.equal((await f.hooks.before_agent_run({}, binding)).outcome, 'block');
+  assert.equal((await f.hooks.before_tool_call({ toolName: 'read', toolCallId: 'after-timeout', params: {} }, binding)).block, true);
+  assert.equal((await finalize(f)).action, 'revise');
+  assert.equal((await outgoing(f)).cancel, true);
+});
+
+test('a long successful preparation does not excuse an invalid final review receipt', async t => {
+  const f = slowPreparation(t, { invalidReceipt: true });
+  const preparing = prepare(f);
+  await f.started.promise; t.mock.timers.tick(64000);
+  assert.deepEqual((await preparing).toolsAllow, ['read']);
+  assert.equal((await finalize(f)).action, 'revise');
+  assert.equal((await outgoing(f)).cancel, true);
+});
+
+test('explicit cancellation and late ignored-abort transport results remain refused under the longer deadline', async t => {
+  const f = slowPreparation(t);
+  const controller = new AbortController();
+  const preparing = f.hooks.before_prompt_build({ prompt: 'Please prepare.' }, { ...binding, abortSignal: controller.signal });
+  await f.started.promise; controller.abort();
+  assert.deepEqual((await preparing).toolsAllow, []);
+  assert.equal((await finalize(f)).action, 'revise');
+  assert.equal((await outgoing(f)).cancel, true);
+  const response = deferred(); let requests = 0;
+  const client = createBrokerClient({ brokerUrl: 'http://127.0.0.1:18791/private', brokerToken: token }, {
+    fetch: async () => { requests++; return response.promise; },
+  });
+  const late = new AbortController();
+  const pending = client('admit', binding, {}, late.signal); late.abort();
+  response.resolve(new Response(JSON.stringify(result()), { headers: { 'content-type': 'application/json' } }));
+  await assert.rejects(pending, /did not authorize/);
+  await assert.rejects(client('admit', binding, {}, late.signal), /did not authorize/);
+  assert.equal(requests, 1, 'An already cancelled request must not reach the transport.');
+});
+
+test('broker timeout bounds, manifest schema and derived hook deadlines remain consistent', async () => {
+  const config = { brokerUrl: 'http://127.0.0.1:18791/private', brokerToken: token };
+  const manifest = JSON.parse(await readFile(new URL('../openclaw/plugin/openclaw.plugin.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifest.configSchema.properties.requestTimeoutMs, { type: 'integer', minimum: 100, maximum: 240000, default: 200000 });
+  assert.equal(manifest.configSchema.additionalProperties, false);
+  for (const requestTimeoutMs of [99, 240001, 100.5, '200000', NaN])
+    assert.throws(() => createBrokerClient({ ...config, requestTimeoutMs }), /Invalid PoI request timeout/);
+  assert.throws(() => createBrokerClient({ ...config, allowUnreviewed: true }), /Unexpected PoI plugin configuration/);
+  for (const requestTimeoutMs of [100, 200000, 240000]) {
+    assert.doesNotThrow(() => createBrokerClient({ ...config, requestTimeoutMs }));
+    const deadlines = [];
+    register({ pluginConfig: { ...config, requestTimeoutMs }, registerTool: () => {},
+      on: (_name, _handler, options) => deadlines.push(options.timeoutMs) });
+    assert.ok(deadlines.length > 0);
+    assert.ok(deadlines.every(value => value === 2 * requestTimeoutMs + 10000));
+  }
 });

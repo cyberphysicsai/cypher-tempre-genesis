@@ -6,10 +6,21 @@ import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { createOpenClawGateway, providerRequest, OPENCLAW_VERSION, consumeModelRouteCapability } from "../openclaw/gateway.mjs";
+import { createOpenClawGateway, providerRequest, OPENCLAW_VERSION, consumeModelRouteCapability, nativeControlCloseError } from "../openclaw/gateway.mjs";
 import { createPoIBroker } from "../openclaw/broker.mjs";
 import { engine } from "../lib/engine.mjs";
 import { DIMENSIONS, FRUITS } from "../lib/providers.mjs";
+
+test('native control diagnostics distinguish the exact watchdog close without reflecting frame text', () => {
+  const timeout = nativeControlCloseError(4000, 'tick timeout');
+  assert.equal(timeout.code, 'OPENCLAW_CONTROL_TIMEOUT');
+  assert.equal(timeout.status, 504);
+  for (const [code, reason] of [[1006, 'private-key-in-close-frame'], [4000, 'tick timeout private-key'], [1000, 'tick timeout']]) {
+    const error = nativeControlCloseError(code, reason);
+    assert.equal(error.code, 'OPENCLAW_CONTROL_CLOSED');
+    assert.equal(error.message.includes(reason), false);
+  }
+});
 
 test('private model route capability is accepted only once in system instructions and stripped for every protocol', () => {
   const capability = 'a'.repeat(64), marker = `[CHAINCHAT_PRIVATE_MODEL_ROUTE:${capability}]`;
@@ -121,7 +132,9 @@ test("managed child does not inherit other agent credentials, Node preload, prox
 const runtimePackage = process.env.CT_OPENCLAW_PACKAGE, runtimeNode = process.env.CT_OPENCLAW_NODE;
 test("pinned real OpenClaw performs four provider protocols, enforces receipts and recovers after child and application restart", {
   skip: !runtimePackage || !runtimeNode ? "Set CT_OPENCLAW_PACKAGE and CT_OPENCLAW_NODE for the real pinned runtime acceptance test." : false,
-  timeout: 180000,
+  // Four protocols plus owned child/application restarts. This must exceed a
+  // single bounded 200s broker operation on slower Windows installations.
+  timeout: 420000,
 }, async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ct-openclaw-gateway-"));
   const root = path.join(directory, "chain"); await engine({ op: "init", root, name: "TransportFixture" });
@@ -178,7 +191,8 @@ test("pinned real OpenClaw performs four provider protocols, enforces receipts a
       finishInvocation: invocation => broker.finishInvocation(invocation),
     }, onDiagnostic: line => diagnostics.push(line) });
   let manager = makeManager();
-  t.after(async () => { await manager.close(); await broker.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve));
+  t.after(async () => { t.diagnostic(`Native gateway acceptance observed ${upstreamRequests.length} fixture provider calls.`);
+    await manager.close(); await broker.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve));
     assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep));
     assert.ok(path.basename(directory).startsWith("ct-openclaw-gateway-")); await fs.rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 }); });
   try {

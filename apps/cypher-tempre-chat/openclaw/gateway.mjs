@@ -25,6 +25,18 @@ const PROVIDERS = Object.freeze({
   gemini: { id: "chainchat-gemini", api: "google-generative-ai", prefix: "/gemini", endpoint: null },
 });
 const fail = (message, code = "OPENCLAW_RUNTIME", status = 502) => Object.assign(new Error(message), { code, status });
+export function nativeControlCloseError(code, reason) {
+  // Close frames are untrusted transport data. Expose only this exact, known
+  // watchdog condition; arbitrary native text must never reach the UI/logs.
+  return code === 4000 && reason === 'tick timeout'
+    ? fail('The native control heartbeat timed out. No unreviewed answer was released.', 'OPENCLAW_CONTROL_TIMEOUT', 504)
+    : fail('The native control connection closed.', 'OPENCLAW_CONTROL_CLOSED');
+}
+function nativeControlWatchdogMs(requestTimeoutMs) {
+  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 100 || requestTimeoutMs > 600000)
+    throw new TypeError('The native invocation timeout must be an integer from 100 through 600000 milliseconds.');
+  return Math.max(60000, requestTimeoutMs + 60000);
+}
 const secret = () => randomBytes(32).toString("hex");
 const isLoopback = address => address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 function authorized(actual, expected) {
@@ -302,6 +314,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       typeof broker.assertCandidate !== "function") throw new TypeError("A local OpenClaw runtime, plugin and enforcement broker are required.");
   if (modelContextTokens !== undefined && (!Number.isSafeInteger(modelContextTokens) || modelContextTokens < 16384 || modelContextTokens > 131072))
     throw new TypeError('The private native model context cap must be an integer from 16384 through 131072.');
+  const controlWatchdogTimeoutMs = nativeControlWatchdogMs(requestTimeoutMs);
   const directory = path.resolve(stateDir), upstream = path.resolve(packageRoot), plugin = path.resolve(pluginPath);
   // Private transport identity remains stable so native session/goal storage
   // survives restarts without retaining a stale loopback model endpoint/token.
@@ -586,11 +599,16 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
         const client = new GatewayClient({ url: controlUrl, deviceAuthScope: controlUrl, token: gatewayToken,
           clientName: 'cli', clientDisplayName: 'Cypher Tempre private controls', mode: 'backend', role: 'operator',
           caps: ['session-scoped-events'],
+          // chat.send acknowledges before an agent finishes. Long verified
+          // hooks can then be quiet for more than the SDK's default 60s tick
+          // window. Keep the watchdog bounded by the invocation plus cleanup;
+          // the independent invocation timer still cancels the actual work.
+          tickWatchTimeoutMs: controlWatchdogTimeoutMs,
           scopes: ['operator.read', 'operator.write', 'operator.admin'], deviceIdentity, sharedStateMode: 'read-only',
           onHelloOk() { clearTimeout(timer); resolve(client); },
           onConnectError() { clearTimeout(timer); client.stop(); reject(fail('Native OpenClaw control authentication failed.', 'OPENCLAW_CONTROL_AUTH')); },
           onEvent(event) { for (const listener of nativeEvents) { try { listener(event); } catch {} } },
-          onClose() { if (active?.nativeRun) active.nativeClose?.(); },
+          onClose(code, reason) { if (active?.nativeRun) active.nativeClose?.(code, reason); },
         });
         nativeClient = client; client.start();
       });
@@ -782,7 +800,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       void client.request('chat.abort', { sessionKey: params.sessionKey, runId: expectedRun }).catch(() => {});
       if (!settled) done.reject(fail('The native OpenClaw turn was cancelled.', 'REQUEST_CANCELLED', 499));
     };
-    if (active) { active.nativeRun = true; active.nativeClose = () => { if (!settled) done.reject(fail('The native control connection closed.', 'OPENCLAW_CONTROL_CLOSED')); }; }
+    if (active) { active.nativeRun = true; active.nativeClose = (code, reason) => { if (!settled) done.reject(nativeControlCloseError(code, reason)); }; }
     nativeEvents.add(listener); controller.signal.addEventListener('abort', aborted, { once: true });
     try {
       await client.request('sessions.messages.subscribe', { key: params.sessionKey, subscriptionId: 'chainchat-active-turn' });

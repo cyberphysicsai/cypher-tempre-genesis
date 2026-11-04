@@ -26,6 +26,8 @@ const messages = Object.freeze({
   PENDING_HELD: 'A pending exchange requires explicit review and commitment before another active turn.',
   OPENCLAW_CONTEXT_BUDGET: 'The active agent context exceeds the configured model context window. Increase the supported window or shorten the conversation.',
   OPENCLAW_OUTPUT_BUDGET: 'The model request has an invalid output budget.',
+  OPENCLAW_CONTROL_TIMEOUT: 'The native control heartbeat timed out. No unreviewed answer was released.',
+  OPENCLAW_CONTROL_CLOSED: 'The native control connection closed. No unreviewed answer was released.',
 });
 export const CHAT_STAGES = new Set(['memory-planning', 'generation', 'review', 'native-review',
   'chain-preparation', 'loadout', 'context', 'compaction', 'commitment', 'provider', 'runtime', 'authorization', 'cancellation']);
@@ -46,7 +48,8 @@ export function safeInvocationError(error, fallbackStage = 'runtime') {
   if (!Object.hasOwn(messages, error?.code || '')) return null;
   const code = error.code;
   const status = code === 'SESSION_CHANGED' ? 409 : code === 'PAIR_REQUIRED' ? 401
-    : code === 'PROVIDER_RATE_LIMIT' ? 429 : code === 'PROVIDER_TIMEOUT' ? 504
+    : code === 'PROVIDER_RATE_LIMIT' ? 429 : ['PROVIDER_TIMEOUT', 'OPENCLAW_CONTROL_TIMEOUT'].includes(code) ? 504
+    : code === 'OPENCLAW_CONTROL_CLOSED' ? 502
     : /^PROVIDER_(?:HTTP|CONNECTION)/.test(code) ? 502 : 422;
   const cleanScores = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     keys.every(key => Number.isInteger(value[key]) && value[key] >= 0 && value[key] <= 255)
