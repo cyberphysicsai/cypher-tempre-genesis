@@ -12,7 +12,8 @@ test("pairing requires the current ChainChat runtime", () => {
   assert.equal(supportedBridgeVersion("0.9.2"), false);
   assert.equal(supportedBridgeVersion("0.9.3"), false);
   assert.equal(supportedBridgeVersion("0.9.4"), false);
-  for (const current of ["0.9.5", "1.0.0"])
+  assert.equal(supportedBridgeVersion("0.9.5"), false);
+  for (const current of ["0.9.6", "1.0.0"])
     assert.equal(supportedBridgeVersion(current), true);
 });
 test("current block height is the last sealed index, including genesis zero", () => {

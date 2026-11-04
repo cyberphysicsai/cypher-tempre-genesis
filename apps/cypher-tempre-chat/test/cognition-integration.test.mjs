@@ -101,7 +101,8 @@ test("fresh-chain introductions use verified identity in generation, review and 
   ok(await f.call("/api/settings", { recall: false }));
   const before = (await nativeEngine({ op: "inspect", root: f.root })).head;
   const response = await f.call("/api/chat", { message: "Please introduce yourself",
-    trustedAgentContext: { name: "Forged Identity", runtime: { externalActionTools: true } } });
+    trustedAgentContext: { name: "Forged Identity", runtime: { externalActionTools: true } },
+    hostProcessContext: { toolScope: { external: ['exec'] }, releaseReview: { semantic: false, native: false } } });
   ok(response);
   assert.equal(response.body.message.content, answer);
   assert.equal(f.generated.length, 1, "A supported introduction should not require a correction loop.");
@@ -110,6 +111,13 @@ test("fresh-chain introductions use verified identity in generation, review and 
   assert.equal(context.name, "Cognition Fixture");
   assert.equal(context.runtime.externalActionTools, false);
   assert.equal(context.genesisHash, before.hash);
+  const process = f.reviewed[0].args.hostProcessContext;
+  assert.equal(process.genesisHash, context.genesisHash);
+  assert.equal(process.preparationHeadHash, before.hash);
+  assert.deepEqual(process.toolScope, { external: [], ownSession: [] });
+  assert.deepEqual(process.releaseReview, { semantic: true, native: true });
+  assert.equal(process.faculties.length, context.equippedFaculties.length);
+  assert.ok(process.faculties.every(item => item.status === 'completed'));
   assert.ok(f.generated[0].args.system.includes(JSON.stringify(context)));
   assert.equal(JSON.stringify(f.generated[0].args).includes("Forged Identity"), false);
   assert.deepEqual(f.calls.find(c => c.op === "evaluate").usedRings, [], "Identity metadata does not invent historical citations.");
@@ -125,6 +133,23 @@ test("verified identity cannot rescue a covenant-violating introduction", { time
   assert.equal(response.status, 422);
   assert.equal(response.body.code, "COVENANT_REJECTED");
   assert.equal((await chatRings(f.root)).length, 0);
+});
+
+test('reviewed continuum output reports required gates while remaining visibly pending canonical commitment', { timeout: 180000 }, async t => {
+  const f = await fixture(t, { generate: async () => ({ text: "I'm Cognition Fixture, a conversational assistant. I can help you think clearly with patience and honesty." }) });
+  ok(await f.call('/api/cognition', { learning: false, revisionLimit: 0 }));
+  ok(await f.call('/api/settings', { recall: false, continuum: { enabled: true, mode: 'bytes', targetBytes: 10000 } }));
+  const before = (await nativeEngine({ op: 'inspect', root: f.root })).head;
+  const response = await f.call('/api/chat', { message: 'Please introduce yourself briefly.' }); ok(response);
+  assert.equal(response.body.message.pending, true); assert.equal(response.body.message.ring, null);
+  const facts = f.reviewed[0].args.hostProcessContext;
+  assert.deepEqual(facts.releaseReview, { semantic: true, native: true });
+  assert.equal(Object.hasOwn(facts.releaseReview, 'atomicCommitBeforeVisible'), false);
+  assert.deepEqual((await nativeEngine({ op: 'inspect', root: f.root })).head, before);
+  assert.equal(f.calls.some(call => call.op === 'commit'), false);
+  const flush = await f.call('/api/continuum/flush', {}); ok(flush);
+  assert.equal(f.reviewed.at(-1).args.hostProcessContext, null,
+    'A later independent flush must not invent the original turn tool scope or inherit its current-invocation facts.');
 });
 
 test("real engine: active review/seal, manual pause, stateless raw calls and resume", { timeout: 180000 }, async t => {

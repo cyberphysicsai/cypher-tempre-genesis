@@ -387,11 +387,22 @@ test('native channel delivery binds the exact recipient and one fresh chain head
 
 test('perspective branches cannot inherit explicit host grants while the selected synthesis can', async t => {
   const generated = [];
-  const f = await fixture(t, { openclawFactory: () => ({ start: async () => {}, close: async () => {},
+  const f = await fixture(t, { prepare: (request, chain) => {
+    const equipped = inspect(chain).faculties.filter(item => request.loadout.includes(item.key));
+    return { runtime: { mode: 'active' }, trustedAgentContext: { genesisHash: HASH(0), equippedFaculties: equipped },
+      facultyExecution: { scope: 'turn', entries: equipped.map(item => ({ ...item, mode: 'computed', status: 'completed', mechanism: 'base-op' })) } };
+  }, review: async (_config, args) => {
+    assert.ok(args.hostProcessContext, 'Current perspective review must receive actual host facts.');
+    assert.deepEqual(args.hostProcessContext.toolScope, { external: args.candidate.includes('scoped read') ? ['read'] : [], ownSession: [] });
+    assert.ok(args.hostProcessContext.faculties.every(item => item.status === 'completed'));
+    return goodReview();
+  }, openclawFactory: () => ({ start: async () => {}, close: async () => {},
     status: () => ({ backend: 'openclaw', version: '2026.10.9', running: true }),
     describeControls: async () => ({}), executeCommand: async () => ({}),
     sessionControls: async () => ({ sessionKey: 'stable', goal: null }),
-    generate: async (_config, args, context) => { generated.push({ args, context }); return { text: 'A helpful and truthful answer.', usage: {} }; },
+    generate: async (_config, args, context) => { generated.push({ args, context }); return {
+      text: 'The host applies my configured faculties to structure responses. ' + (context.toolAuthority.enabled
+        ? 'I can request scoped read tools; none have been executed.' : 'No external tools are admitted to this perspective.'), usage: {} }; },
   }) });
   await f.ready();
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ct-human-grant-'));
@@ -404,7 +415,12 @@ test('perspective branches cannot inherit explicit host grants while the selecte
   assert.equal(generated.length, 4);
   assert.ok(generated.slice(0, 3).every(x => !x.context.toolAuthority.enabled && !x.args.nativeControl));
   assert.equal(generated[3].context.toolAuthority.enabled, true);
+  assert.match(generated[3].args.system, /Only the host-supplied current admitted tool surface establishes action tools/);
+  assert.equal(generated[3].args.system.includes('You have no shell, browser, filesystem tools'), false);
+  assert.match(generated[3].args.system, /Do not claim successful use without confirmed tool observations/);
   assert.equal(generated[3].args.nativeControl.sessionKey, 'stable');
+  assert.ok(f.reviewCalls.slice(0, 3).every(item => item.args.hostProcessContext.toolScope.external.length === 0));
+  assert.deepEqual(f.reviewCalls.at(-1).args.hostProcessContext.toolScope.external, ['read']);
   assert.equal((await f.request('/api/openclaw/tools', { enabled: false })).status, 200);
   const disabled = JSON.parse(await fs.readFile(path.join(f.dataDir, 'tool-permissions.json'), 'utf8'));
   assert.ok(Object.values(disabled.agents).every(entry => !entry.grant.enabled));

@@ -13,6 +13,7 @@ const good = () => ({ approved: true, scores: Object.fromEntries(DIMENSIONS.map(
 const candidate = "Hello! I'm Cypher Tempre, your conversational assistant. I can help you explore ideas and think through questions carefully.";
 async function fixture(t, options = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ct-openclaw-broker-')), root = path.join(dir, 'agent');
+  const sessionKey = options.sessionKey || 'agent:main:chainchat:fixture';
   await engine({ op: 'init', root, name: 'Cypher Tempre' });
   let time = Date.now(); const seen = [];
   const broker = createPoIBroker({ engine, review: async (config, args) => { seen.push(args); return options.assessment?.() || good(); }, now: () => time });
@@ -21,10 +22,10 @@ async function fixture(t, options = {}) {
   const config = { provider: 'compatible', model: 'fixture', baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'fixture-private-key' };
   const context = { root, input: 'Please introduce yourself', purpose: 'candidate', loadout: [], settings: { recall: false }, authorize: async () => {} };
   const register = extra => broker.registerInvocation({ config, args: { messages: [{ role: 'user', content: context.input }] },
-    context: { ...context, ...extra }, sessionKey: 'agent:main:chainchat:fixture', invocationId: 'fixture' });
+    context: { ...context, ...extra }, sessionKey, invocationId: 'fixture' });
   const call = async (op, fields = {}, headers = {}) => {
     const response = await fetch(broker.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${broker.token}`, ...headers },
-      body: JSON.stringify({ version: 1, op, sessionKey: 'agent:main:chainchat:fixture', runId: 'run-one', ...fields }) });
+      body: JSON.stringify({ version: 1, op, sessionKey, runId: 'run-one', ...fields }) });
     return { status: response.status, body: await response.json() };
   };
   return { broker, root, seen, register, call, setTime: value => { time = value; } };
@@ -112,15 +113,35 @@ test('native prepare/review/evaluate bind an exact candidate, but UI retains com
   const prepared = (await f.call('prepare')).body;
   assert.ok(prepared.context.includes('Proof of Interaction'));
   assert.ok(prepared.context.includes('CHAINCHAT HOST CONTRACT'));
+  assert.match(prepared.context, /Canonical commitment follows the selected block policy/);
+  assert.match(prepared.context, /reviewed continuum answers may be visible while pending commitment/);
+  assert.equal(prepared.context.includes('after host review and the atomic conversation commitment'), false);
   assert.deepEqual(prepared.toolsAllow, []);
-  const final = (await f.call('finalize', { candidate, candidateSha256: hash(candidate) })).body;
+  const final = (await f.call('finalize', { candidate, candidateSha256: hash(candidate),
+    hostProcessContext: { toolScope: { external: ['exec'] }, releaseReview: { semantic: false, native: false } } })).body;
   assert.equal(final.allowed, true); assert.equal(final.receipt.reviewed, true);
   assert.equal(f.seen[0].trustedAgentContext.name, 'Cypher Tempre');
+  const facts = f.seen[0].hostProcessContext;
+  assert.deepEqual(facts.toolScope, { external: [], ownSession: [] });
+  assert.deepEqual(facts.faculties, []);
+  assert.deepEqual(facts.releaseReview, { semantic: true, native: true });
+  assert.ok(prepared.context.includes(JSON.stringify(facts)), 'Generation and review use the same private facts.');
   assert.equal((await f.broker.assertCandidate({ claimId: claim.claimId, candidate })).commitOwner, 'chainchat');
   await assert.rejects(f.broker.assertCandidate({ claimId: claim.claimId, candidate: candidate + ' changed' }));
   assert.equal((await f.call('outgoing', { candidate: candidate + ' changed' })).body.allowed, false);
   assert.equal((await engine({ op: 'inspect', root: f.root })).head.index, 0, 'Individual model candidates cannot double-commit the user turn.');
   assert.equal((await f.call('tool', { tool: { name: 'exec', params: { command: 'echo ungranted' } } })).body.allowed, false);
+});
+
+test('actual private goal-only admission exposes goal API names separately from disabled external actions', async t => {
+  const sessionKey = 'agent:main:chainchat-control:' + 'a'.repeat(64);
+  const f = await fixture(t, { sessionKey });
+  await f.register({ goalAuthority: { enabled: true, sessionKey } }); await f.call('admit');
+  const prepared = (await f.call('prepare')).body;
+  assert.deepEqual(prepared.toolsAllow, ['get_goal', 'update_goal']);
+  assert.equal((await f.call('finalize', { candidate })).body.allowed, true);
+  assert.deepEqual(f.seen[0].hostProcessContext.toolScope, { external: [], ownSession: ['get_goal', 'update_goal'] });
+  assert.equal((await f.call('tool', { tool: { name: 'exec', params: { command: 'echo ungranted' }, callId: 'not-a-goal' } })).body.allowed, false);
 });
 test('low semantic/native scores and changed run identities cannot release output', async t => {
   const f = await fixture(t, { assessment: () => { const result = good(); result.fruitages.love = 179; return result; } });
