@@ -45,3 +45,34 @@
 .platform-downloads a { text-align: center; padding: 17px 10px; font-size: 11px; display: block; }
 .platform-downloads small { display: block; font-size: 7px; line-height: 1.8; margin-top: 10px; }
 @media(max-width: 700px) { .native-workspace { padding: 20px 14px; } .native-card { padding: 17px; } .native-tabs button { font-size: 9px; padding: 11px 8px; } .platform-downloads, .native-service-grid, .native-credential-row { grid-template-columns: 1fr; } }
+
+/* Native controls remain below the Cypher interface instead of replacing it. */
+.native-workspace { max-width: 1600px; margin: 30px auto; padding: 28px; border-top: 1px solid var(--line); scroll-margin-top: calc(var(--app-chrome-height, 100px) + 16px); }
+.native-heading h2 { font-size: 23px; margin: 12px 0 10px; }
+.native-heading p, .native-boundary-note, .native-family-notice { font-size: 10px; line-height: 1.9; color: var(--muted); }
+.native-heading p { margin: 0; }
+.native-connection { display: flex; gap: 16px; align-items: center; justify-content: space-between; border: 1px solid var(--line-light); padding: 12px 16px; }
+.native-connection p { margin: 0; }
+.native-connection button { flex-shrink: 0; }
+.native-boundary-note { margin: 16px 0; max-width: 1100px; }
+.native-connected-controls { border: 0; margin: 0; padding: 0; min-width: 0; }
+.native-connected-controls:disabled .native-card { opacity: .65; }
+.native-tabs { flex-wrap: nowrap; overflow-x: auto; gap: 5px; padding-bottom: 3px; scrollbar-width: thin; }
+.native-tabs button { flex-shrink: 0; white-space: nowrap; }
+.native-tabs button:focus-visible, .native-family-choice:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.native-config-families { display: flex; flex-wrap: wrap; gap: 7px; margin: 16px 0; }
+.native-family-choice { border: 1px solid var(--line-light); background: var(--panel-2); color: var(--muted); padding: 9px 12px; font-size: 9px; overflow-wrap: anywhere; }
+.native-family-choice[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+.native-family-notice { white-space: pre-line; overflow-wrap: anywhere; }
+.native-card h3 { font-size: 12px; margin: 0 0 12px; }
+.native-context-policy { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 20px; }
+.native-card pre { max-height: 460px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.native-card, .native-service-grid, .native-workspace { min-width: 0; }
+@media(max-width: 700px) {
+  .native-workspace { margin: 20px 0; padding: 20px 14px; }
+  .native-heading { align-items: flex-start; }
+  .native-heading h2 { font-size: 18px; }
+  .native-connection { align-items: flex-start; flex-direction: column; }
+  .native-tabs { margin: 18px 0; }
+  .native-family-choice { font-size: 8px; padding: 8px; }
+}

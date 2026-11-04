@@ -12,6 +12,9 @@ const bounded = (value, limit) => typeof value === 'string' && value.trim().leng
 const check = signal => signal?.throwIfAborted();
 const failure = message => Object.assign(new Error(message), { code: 'OPENCLAW_COMPACTION_HELD' });
 const estimate = messages => Math.max(1, Math.ceil(bytes(messages) / 4));
+export const CONTEXT_POLICY = Object.freeze({ version: 1, mode: 'reviewed-native-compaction',
+  historicalContext: 'reviewed-summary-and-recent-turns', automaticSummary: true, manualSummary: 'reviewed-optional',
+  storedHistory: 'preserved', pendingTurn: 'host-owned', retainedRecentTurns: 2 });
 export function nativeBranchDigest(branch) {
   const digest = createHash('sha256'); digest.update('[');
   branch.forEach((entry, index) => { if (index) digest.update(','); digest.update(JSON.stringify(entry)); });

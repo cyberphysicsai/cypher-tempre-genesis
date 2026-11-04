@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { controlSessionKey, createNativeControls, validateControlPatch, redactNativeControl } from '../lib/openclaw-controls.mjs';
+import { controlSessionKey, createNativeControls, validateControlPatch, redactNativeControl, nativeConfigSections } from '../lib/openclaw-controls.mjs';
 
 const identity = { agentId: 'paired-agent', genesisHash: 'a'.repeat(64) };
 function fixture(entry = null) {
@@ -23,7 +23,7 @@ function fixture(entry = null) {
 }
 
 test('configuration guard preserves numeric token budgets and safe native schema documentation', () => {
-  const patch = { agents: { defaults: { compaction: { maxHistoryShare: 0.5 }, contextTokens: 32000 } }, messages: { queue: { cap: 25 } } };
+  const patch = { agents: { defaults: { thinkingDefault: 'high', contextTokens: 32000 } }, messages: { queue: { cap: 25 } } };
   assert.deepEqual(validateControlPatch(patch), patch);
   for (const patch of [{ gateway: { bind: 'lan' } }, { models: {} }, { agents: { defaults: { workspace: '/tmp' } } },
     { agents: { list: [] } }, { agents: null }, { agents: { defaults: [] } }, { ui: { apiKey: 'private' } }, { tools: { profile: 'full' } }])
@@ -35,6 +35,39 @@ test('configuration guard preserves numeric token budgets and safe native schema
   assert.deepEqual(validateControlPatch({ tools: { profile: 'full' } }, { allowHostConfiguration: true }), { tools: { profile: 'full' } });
   assert.throws(() => validateControlPatch({ tools: { web: { fetch: { maxRedirects: 3 } } } }, { allowHostConfiguration: true }), error => error.code === 'OPENCLAW_SETTING_GUARDED');
   assert.throws(() => validateControlPatch({ browser: { ssrfPolicy: null } }, { allowHostConfiguration: true }), error => error.code === 'OPENCLAW_SETTING_GUARDED');
+});
+
+test('the pinned agent roster and authority-bearing settings cannot replace managed chain admission', () => {
+  for (const patch of [{ agents: { entries: { escape: { model: 'unbound/provider', workspace: '/elsewhere' } } } },
+    { agents: { entries: null } }, { agents: { defaults: { systemAgent: { agentId: 'escape' } } } },
+    { agents: { defaults: { sessionStore: { agentId: 'escape' } } } }, { agents: { defaults: { authInheritance: { agentId: 'escape' } } } },
+    { agents: { defaults: { sandbox: { docker: { setupCommand: 'unreviewed process' } } } } },
+    { agents: { defaults: { embeddedAgent: { projectSettingsPolicy: 'trusted', cyberFailover: { model: 'unbound/provider' } } } } },
+    { agents: { defaults: { elevatedDefault: 'full' } } },
+    { agents: { defaults: { models: { route: { agentRuntime: { id: 'unreviewed-harness' } } } } } },
+    { agents: { defaults: { compaction: { provider: 'legacy-fallback' } } } },
+    { session: { maintenance: { mode: 'enforce' } } }, { memory: { qmd: { command: 'unreviewed-process' } } },
+    { browser: { allowSystemProfileImport: true } }, { logging: { redactSensitive: 'off' } },
+    { skills: { load: { extraDirs: ['/unreviewed'] } } }])
+    for (const allowHostConfiguration of [false, true]) assert.throws(() => validateControlPatch(patch, { allowHostConfiguration }),
+      error => error.code === 'OPENCLAW_SETTING_GUARDED', JSON.stringify(patch));
+});
+
+test('native settings inventory includes every schema family with explicit editable or managed classification', async () => {
+  const roots = ['agents', 'messages', 'tts', 'mcp', 'desktop', 'cloudWorkers', 'storage', 'gateway', 'channels', 'plugins'];
+  const sections = nativeConfigSections({ schema: { properties: Object.fromEntries(roots.map(key => [key, { type: 'object' }])) } });
+  assert.deepEqual(sections.map(section => section.key), roots.toSorted());
+  assert.equal(sections.find(section => section.key === 'gateway').classification, 'supervisor-owned');
+  assert.equal(sections.find(section => section.key === 'messages').classification, 'editable');
+  assert.equal(sections.find(section => section.key === 'mcp').classification, 'managed');
+  assert.ok(sections.find(section => section.key === 'agents').guardedPaths.includes('agents.entries'));
+  assert.ok(sections.every(section => typeof section.reason === 'string' && section.reason.length > 0));
+  const snapshot = await fixture().controls.describeControls(identity);
+  assert.equal(snapshot.contextPolicy.mode, 'reviewed-native-compaction');
+  assert.equal(snapshot.contextPolicy.automaticSummary, true); assert.equal(snapshot.contextPolicy.storedHistory, 'preserved');
+  assert.equal(snapshot.contextPolicy.retainedRecentTurns, 2);
+  assert.equal(snapshot.contextPolicy.manualSummary, 'reviewed-optional');
+  assert.ok(Array.isArray(snapshot.config.sections));
 });
 
 test('controls select only the verified chain and project no held conversation preview', async () => {

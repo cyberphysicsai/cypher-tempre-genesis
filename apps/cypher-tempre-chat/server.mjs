@@ -42,6 +42,7 @@ import { controlSessionKey } from './lib/openclaw-controls.mjs';
 import { createBrowserBootstrap } from './lib/browser-bootstrap.mjs';
 import { nativePluginNotice } from './lib/plugin-notices.mjs';
 import { errorStage } from './lib/runtime-errors.mjs';
+import { createModelCatalogue } from './lib/model-catalogue.mjs';
 
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = JSON.parse(
@@ -273,6 +274,8 @@ async function mapConcurrent(items, limit, action) {
 }
 
 export async function createApp(options = {}) {
+  const modelCatalogue = createModelCatalogue({ fetchImpl: options.catalogueFetch,
+    freeModelEndpoint: options.freeModelEndpoint, freeModelBaseUrl: options.freeModelBaseUrl });
   const allowedOrigins = parsePublicOrigins(
     options.publicOrigins ?? process.env.CT_CHAT_PUBLIC_ORIGINS ?? "",
   );
@@ -396,7 +399,7 @@ export async function createApp(options = {}) {
         purpose, root: record.root, input, loadout: keys(record.loadout), settings: record.settings,
         learning: cognitionFor(record).learning, signal: args.signal,
         nativeIdentity: identity, toolAuthority: purpose === "candidate" && !scope.scratchCandidates ? tools.grant : disabledToolAuthority(),
-        modelCapabilities: { reasoning: config.reasoningCapable === true },
+        modelCapabilities: modelCapabilitiesFor(config),
         executeManagedService: params => requestSession.run(scope, () => executeAgentService(record, identity, params)),
         pluginTools: pluginCatalogue.map(tool => tool.name),
         toolProtectedRoots: protectedToolRoots(),
@@ -515,6 +518,7 @@ export async function createApp(options = {}) {
       origin,
       expires: Date.now() + 12 * 60 * 60 * 1000,
       provider: null,
+      byokProvider: null,
       controllers: new Set(),
       agentId: store.agents[0]?.id || null,
     };
@@ -534,11 +538,12 @@ export async function createApp(options = {}) {
     session.resumeDigest = digest;
     return ticket;
   }
-  const abortSession = (session) => {
+  const abortSession = (session, { preserveByok = false } = {}) => {
     authority.revoke(session);
     for (const controller of session.controllers || []) controller.abort();
     for (const [identity, lease] of automationOwners) if (lease.session === session) automationOwners.delete(identity);
     session.provider = null;
+    if (!preserveByok) session.byokProvider = null;
     void automation?.holdOwner(serviceOwner);
   };
   const expiry = setInterval(() => {
@@ -555,6 +560,7 @@ export async function createApp(options = {}) {
     config
       ? {
           configured: true,
+          tier: config.tier === 'free' ? 'free' : 'byok',
           provider: config.provider,
           model: config.model,
           baseUrl: config.baseUrl,
@@ -562,7 +568,22 @@ export async function createApp(options = {}) {
           ...(config.contextWindow !== undefined ? { contextWindow: config.contextWindow } : {}),
           ...(config.maxOutputTokens !== undefined ? { maxOutputTokens: config.maxOutputTokens } : {}),
         }
-      : { configured: false };
+      : { configured: false, tier: 'byok' };
+
+  const savedByok = session => session.byokProvider ||
+    (session.provider && session.provider.tier !== 'free' ? session.provider : null);
+  const activeModel = session => ({ tier: session.provider?.tier === 'free' ? 'free' : 'byok',
+    provider: session.provider?.provider || null, model: session.provider?.model || null });
+  function modelCapabilitiesFor(config) {
+    return { reasoning: config?.reasoningCapable === true,
+      ...(config?.contextWindow !== undefined ? { contextWindow: config.contextWindow } : {}),
+      ...(config?.maxOutputTokens !== undefined ? { maxOutputTokens: config.maxOutputTokens } : {}) };
+  }
+  async function describeModels(session, refresh = false) {
+    const result = await modelCatalogue.describe({ byok: savedByok(session), active: session.provider, refresh });
+    await requireLocalAccess();
+    return result;
+  }
 
   function agentFor(session) {
     const record = requestSession.getStore()?.operationRecord || store.agents.find((a) => a.id === session.agentId);
@@ -577,7 +598,7 @@ export async function createApp(options = {}) {
   function providerFor(session) {
     if (!session.provider)
       throw err(
-        "Connect your model and API key first.",
+        "Select a free model or connect your own provider and API key first.",
         "PROVIDER_REQUIRED",
         409,
       );
@@ -1580,6 +1601,8 @@ export async function createApp(options = {}) {
       return await requestSession.run(
         { session, token, epoch: authority.epoch(session) },
         async () => {
+          if (req.method === 'GET' && url.pathname === '/api/models')
+            return send(200, await describeModels(session));
           if (req.method === "GET" && url.pathname === "/api/openclaw") {
             const identity = await nativeControlIdentity(session);
             const snapshot = await openclaw.describeControls(identity.agentId ? identity : null);
@@ -1617,6 +1640,10 @@ export async function createApp(options = {}) {
           }
           if (req.method !== "POST") throw err("Not found.", "NOT_FOUND", 404);
           const input = await body(req);
+          if (url.pathname === '/api/models/refresh') {
+            if (Object.keys(input).length) throw err('Model catalogue refresh accepts no provider, key or URL.');
+            return send(200, await describeModels(session, true));
+          }
           if (url.pathname === '/api/openclaw/browser/install') {
             if (!browserBootstrap) throw err('Install the current OpenClaw edition to set up its owned browser.', 'OPENCLAW_REQUIRED', 409);
             if (Object.keys(input).length) throw err('Managed browser setup accepts no custom command or download URL.');
@@ -1738,18 +1765,38 @@ export async function createApp(options = {}) {
               "/api/faculties/import",
               "/api/loadout",
               "/api/settings",
+              "/api/model",
             ].includes(url.pathname) ||
             (url.pathname === "/api/provider" && input.disconnect !== true)
           )
             await requireLocalAccess();
+          if (url.pathname === '/api/model') {
+            if (Object.keys(input).some(key => !['tier', 'model'].includes(key)) || !['byok', 'free'].includes(input.tier) ||
+                input.model !== undefined && typeof input.model !== 'string')
+              throw err('Choose a model tier and its model ID. This control accepts no API key or endpoint.');
+            const byok = savedByok(session);
+            const selected = input.tier === 'free' ? await modelCatalogue.selectFree(input.model) :
+              await modelCatalogue.selectByok(byok, input.model);
+            // A newer switch or revoked local session cannot be overwritten by a slower catalogue lookup.
+            await requireLocalAccess();
+            if (JSON.stringify(session.provider) !== JSON.stringify(selected)) {
+              abortSession(session, { preserveByok: true });
+              session.byokProvider = byok;
+              session.provider = selected;
+              if (selected.tier === 'byok') session.byokProvider = selected;
+              void automation?.wake().catch(() => {});
+            }
+            return send(200, { provider: cleanProvider(session.provider), active: activeModel(session) });
+          }
           if (url.pathname === "/api/provider") {
             if (input.disconnect === true) {
               abortSession(session);
               return send(200, { provider: cleanProvider(null) });
             }
-            const configured = validateProvider(input);
+            const configured = { ...validateProvider(input), tier: 'byok' };
             abortSession(session);
             session.provider = configured;
+            session.byokProvider = configured;
             void automation?.wake().catch(() => {});
             return send(200, { provider: cleanProvider(session.provider) });
           }
@@ -2454,7 +2501,7 @@ export async function createApp(options = {}) {
       let message = error.code
         ? error.message
         : "The operation could not be completed. No unreviewed answer was released.";
-      for (const secret of [poiBroker?.token, ...serviceSecrets, ...[...sessions.values()].map(session => session.provider?.apiKey)].filter(Boolean)) {
+      for (const secret of [poiBroker?.token, ...serviceSecrets, ...[...sessions.values()].flatMap(session => [session.provider?.apiKey, session.byokProvider?.apiKey])].filter(Boolean)) {
         for (const encoded of new Set([secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)]))
           message = String(message).split(encoded).join('[REDACTED]');
       }
