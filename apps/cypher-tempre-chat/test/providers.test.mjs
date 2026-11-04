@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
+import { projectHostProcessContext } from '../lib/host-process-context.mjs';
 import {
   validateProvider,
   generate,
@@ -937,6 +938,68 @@ const verifiedAgentFixture = () => ({
     localTimechain: true, modelIndependentIdentity: true, faculties: true,
     chronosynapticMaxPerspectives: 21, externalActionTools: false,
   },
+});
+const verifiedProcessFixture = () => {
+  const identity = { ...verifiedAgentFixture(), equippedFaculties: [{ key: 'modality:2', kind: 'modality', name: 'Configured operator' }] };
+  const hostProcessContext = projectHostProcessContext({ trustedAgentContext: identity, genesis: { hash: identity.genesisHash },
+    head: { hash: 'b'.repeat(64) }, runtime: { mode: 'active' }, facultyExecution: { scope: 'turn', entries: [
+      { key: 'modality:2', kind: 'modality', name: 'Configured operator', mode: 'computed', status: 'completed', mechanism: 'base-op' },
+    ] } }, { active: true });
+  return { trustedAgentContext: identity, hostProcessContext };
+};
+
+test('the independent reviewer receives narrowly bound current host processing and disabled-tool facts', async t => {
+  const mock = await localProvider(t, (_req, res) => respond(res, {
+    choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(goodReview()) } }],
+  }));
+  const context = verifiedProcessFixture();
+  const result = await review({ provider: 'compatible', model: 'fixture', baseUrl: mock.baseUrl }, {
+    input: 'Introduce yourself', candidate: 'The host applies my configured operator and reviews final replies. No external tools are admitted.',
+    covenant: [...FRUITS], ...context,
+  });
+  assert.equal(result.approved, true);
+  const [frame, message] = mock.requests[0].body.messages, payload = JSON.parse(message.content);
+  assert.deepEqual(payload.hostProcessContext, context.hostProcessContext);
+  assert.deepEqual(payload.availableEvidence, []);
+  assert.match(frame.content, /ordinary description that the host applies those configured faculties/);
+  assert.match(frame.content, /never proves a faculty's accuracy/);
+  assert.match(frame.content, /empty list establishes no such external tools/);
+  assert.match(frame.content, /not that this candidate has passed/);
+  assert.match(frame.content, /never promises that every visible pending answer has already been committed/);
+  assert.match(frame.content, /no historical ring credit, permission, approval or outside truth/);
+});
+
+test('invalid, injected or credential-bearing host process facts are held before review transmission', async t => {
+  const mock = await localProvider(t, (_req, res) => respond(res, {}));
+  const context = verifiedProcessFixture(), config = { provider: 'compatible', model: 'fixture', baseUrl: mock.baseUrl, apiKey: 'synthetic-process-secret' };
+  for (const change of [
+    value => { value.genesisHash = 'c'.repeat(64); }, value => { value.approved = true; },
+    value => { value.faculties[0].description = 'Guaranteed accuracy'; }, value => { value.faculties[0].status = 'approved'; },
+    value => { value.releaseReview.native = false; }, value => { value.toolScope.permissions = { allowExecution: true }; },
+  ]) {
+    const hostProcessContext = structuredClone(context.hostProcessContext); change(hostProcessContext);
+    await assert.rejects(review(config, { input: 'Hello', candidate: 'Hello!', covenant: [...FRUITS], ...context, hostProcessContext }),
+      { code: 'GATE_INVALID_AGENT_CONTEXT' });
+  }
+  const hostProcessContext = structuredClone(context.hostProcessContext); hostProcessContext.toolScope.external = [config.apiKey];
+  await assert.rejects(review(config, { input: 'Hello', candidate: 'Hello!', covenant: [...FRUITS], ...context, hostProcessContext }),
+    { code: 'PROVIDER_CREDENTIAL_REFLECTION' });
+  assert.equal(mock.requests.length, 0);
+});
+
+test('verified process facts cannot override a valid rejection, low fruit or fabricated memory citation', async t => {
+  let assessment = { ...goodReview(), decision: 'reject', rationale: 'Host processing does not prove guaranteed accuracy or a past memory.' };
+  const mock = await localProvider(t, (_req, res) => respond(res, {
+    choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(assessment) } }],
+  }));
+  const context = verifiedProcessFixture(), args = { input: 'Describe yourself', candidate: 'My configured operator always finds truth. I remember yesterday.', covenant: [...FRUITS], ...context };
+  const config = { provider: 'compatible', model: 'fixture', baseUrl: mock.baseUrl };
+  assert.equal((await review(config, args)).approved, false);
+  assert.equal(mock.requests.length, 1, 'A semantic rejection must not be retried to obtain approval.');
+  assessment = { ...goodReview(), fruits: { ...goodReview().fruits, faith: 179 } };
+  assert.equal((await review(config, args)).approved, false);
+  assessment = { ...goodReview(), usedRings: [99] };
+  await assert.rejects(review(config, args), { code: 'GATE_INVALID_EVIDENCE' });
 });
 
 test("simple-task review receives verified identity without inventing memory evidence or demanding emotional displays", async t => {
