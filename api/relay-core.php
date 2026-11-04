@@ -16,6 +16,7 @@ final class Policy {
     public const IDS = ['beam-free', 'iceman-contributor-free'];
     public const MAX_BODY = 2097152;
     public const MAX_RESPONSE = 4194304;
+    public const MAX_REASONING_REPLAY = 131072;
     public static function zero(mixed $n): bool {
         return (is_int($n) || is_float($n)) && is_finite((float)$n) && (float)$n === 0.0;
     }
@@ -84,7 +85,12 @@ final class Policy {
             count($body['messages']) < 1 || count($body['messages']) > 200) throw new RelayError('FREE_REQUEST_INVALID', 400);
         foreach ($body['messages'] as $m) {
             if (!is_array($m) || !in_array($m['role'] ?? '', ['system', 'developer', 'user', 'assistant', 'tool'], true)) throw new RelayError('FREE_REQUEST_INVALID', 400);
-            self::fields($m, ['role', 'content', 'name', 'tool_calls', 'tool_call_id']);
+            self::fields($m, ['role', 'content', 'name', 'tool_calls', 'tool_call_id', 'reasoning_content']);
+            // Pinned native completions replay an assistant's signed text reasoning on later turns.
+            // This is bounded conversation text, never a tool grant, executable field or model option.
+            if (array_key_exists('reasoning_content', $m) && ($m['role'] !== 'assistant' ||
+                !is_string($m['reasoning_content']) || strlen($m['reasoning_content']) > self::MAX_REASONING_REPLAY))
+                throw new RelayError('FREE_REQUEST_INVALID', 400);
             if (isset($m['name']) && !self::name($m['name'])) throw new RelayError('FREE_REQUEST_INVALID', 400);
             if ($m['role'] === 'tool' ? !self::name($m['tool_call_id'] ?? null, 256) : array_key_exists('tool_call_id', $m)) throw new RelayError('FREE_REQUEST_INVALID', 400);
             if (array_key_exists('tool_calls', $m)) {
@@ -367,7 +373,7 @@ final class Relay {
     public function catalogue(): array {
         $models = $this->models();
         foreach ($this->store->blocked() as $id) if (isset($models[$id])) { $models[$id]['available'] = false; $models[$id]['reason'] = 'Temporarily unavailable from the shared provider.'; }
-        return ['freeOnly' => true, 'available' => count(array_filter($models, fn($m) => $m['available'])) > 0,
+        return ['relayVersion' => '1.0.1', 'freeOnly' => true, 'available' => count(array_filter($models, fn($m) => $m['available'])) > 0,
             'notice' => 'Free model tier *when available. Shared limits apply; never falls back to a paid model. Your selected context passes through this relay to OpenCode.',
             'limits' => ['requestsPerHour' => 120, 'outputTokens' => 8192, 'textOnly' => true], 'models' => array_values($models)];
     }
