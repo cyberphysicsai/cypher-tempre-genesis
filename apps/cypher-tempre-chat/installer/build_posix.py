@@ -66,7 +66,7 @@ def build(source, directory, platform_name):
         ("Double-click Install ChainChat.command. macOS may require its normal confirmation for unsigned downloaded software. Setup never removes quarantine attributes or bypasses Gatekeeper.\n" if platform_name == 'darwin' else
          "Extract this archive, then run Install ChainChat.sh using your file manager's Run as Program action. If your desktop displays scripts as text, run it with sh. The installer does not need sudo.\n") +
         "Setup detects ARM64/x64, downloads exact hash-verified portable Node/Python, installs locked OpenClaw dependencies, and opens the local chat. No separate bridge startup or system runtime installation is needed. First setup needs Internet access and curl or wget.\n" +
-        "Linux support is glibc distributions; musl/Alpine is not claimed. Files and data install only for your user. Existing external Timechains stay in place. Your API/model, wallet and chain remain explicit choices.\n" +
+        "Linux support is glibc distributions; musl/Alpine is not claimed. Files and data install only for your user. Existing external Timechains stay in place. Choose your API/model and a fresh or existing chain after the local chat opens.\n" +
         "The source-built setup is unsigned. Read the release notes and SHA-256 sidecars. Runtime and dependency pins are in openclaw/upstream-lock.json; residual upstream risks are documented in openclaw/SECURITY.md.\n")
     directory.mkdir(parents=True, exist_ok=True)
     outputs = []

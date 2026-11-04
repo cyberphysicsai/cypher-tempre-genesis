@@ -6,7 +6,6 @@ import {
   activityLineState, pollWithDeadline, routeControlState, reviewReceipt, facultyExecutionView, portabilityView,
   operatorCompatibilityView, facultyIsExportable,
 } from "../public/cognition-display.js";
-import { requiresHoldings } from "../public/chainchat-display.js";
 
 const feed = (overrides = {}) => ({
   agentId: "chain-a", revision: 3, running: true, stage: "model",
@@ -86,16 +85,6 @@ test("faculty pruning is reversible, promotes emerging faculties, and never remo
 test("raw model responses have an explicit mode marker, never inferred from missing gate data", () => {
   for (const message of [{ mode: "dormant" }, { raw: true }, { dormant: true }]) assert.equal(messageIsDormant(message), true);
   for (const message of [{}, { gate: null }, { mode: "active" }, { raw: "true" }]) assert.equal(messageIsDormant(message), false);
-});
-
-test("stopping remains available after wallet eligibility expires without bypassing settings protection", () => {
-  assert.equal(requiresHoldings("/api/cancel", {}), false);
-  assert.equal(requiresHoldings("/api/cognition", { mode: "dormant", confirm: true }), false);
-  for (const input of [{ mode: "active", confirm: true }, { mode: "dormant" },
-    { mode: "dormant", confirm: true, learning: false }, { learning: false }])
-    assert.equal(requiresHoldings("/api/cognition", input), true);
-  for (const path of ["/api/maintenance", "/api/faculties/lifecycle"])
-    assert.equal(requiresHoldings(path, { confirm: true }), true);
 });
 
 test("native search paths and winner render from the actual engine report shape", () => {

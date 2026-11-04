@@ -198,7 +198,6 @@ test(
       reviews = [];
     let consistency = 240;
     const app = await createApp({
-      licenseConfig: { mode: "holdings", required: false },
       dataDir: path.join(dataDir, "app"),
       pairingCode: "COMPATIBILITY-ONLY",
       generate: async (config, args) => {

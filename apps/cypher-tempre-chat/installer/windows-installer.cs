@@ -351,7 +351,8 @@ namespace CypherTempreInstaller {
       Log("Waiting for the local ChainChat runtime to become ready");
       using(child) {
         Stopwatch deadline=Stopwatch.StartNew();
-        while(deadline.Elapsed.TotalSeconds<120) {
+        // The Gateway can use its 180-second cold-start window before local restore completes.
+        while(deadline.Elapsed.TotalSeconds<240) {
           // This private control exists only after the local UI is listening.
           // Never log its token or request a new browser bootstrap nonce here.
           int ownerPid;

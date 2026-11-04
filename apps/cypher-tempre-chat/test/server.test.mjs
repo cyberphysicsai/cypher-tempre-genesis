@@ -6,10 +6,8 @@ import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
-import { Wallet } from "ethers";
 import { createApp, strictReview } from "../server.mjs";
 import { FRUITS, DIMENSIONS } from "../lib/providers.mjs";
-import { HOLDINGS_NETWORK } from "../lib/holdings-gate.mjs";
 import { StateStore } from "../lib/state.mjs";
 import { connectLocalSession } from "../public/local-session.js";
 import { engine as nativeEngine } from "../lib/engine.mjs";
@@ -103,8 +101,6 @@ async function fixture(t, overrides = {}) {
     throw new Error("Unsupported fixture operation.");
   };
   const app = await createApp({
-    licenseConfig: { mode: "holdings", required: false, ...overrides.licenseConfig },
-    licenseFetch: overrides.licenseFetch,
     publicOrigins: overrides.publicOrigins,
     dataDir,
     pairingCode: "TEST-CODE",
@@ -360,15 +356,16 @@ test('a PoI-rejected operator wake cannot renew rotated background model authori
 });
 
 test('native channel delivery authority is revoked while the SDK is waiting to dispatch', async t => {
-  for (const revocation of ['pause', 'channel', 'provider', 'wallet']) await t.test(revocation, async t => {
+  for (const revocation of ['pause', 'channel', 'provider', 'session']) await t.test(revocation, async t => {
     let release, started; const began = new Promise(resolve => { started = resolve; });
     const native = managedNativeFixture({ beforeGate: async () => { started(); await new Promise(resolve => { release = resolve; }); } });
     const f = await fixture(t, { openclawFactory: native.factory }); await f.ready(); const { job, channel } = await createDeliveryJob(f);
     native.fire(job); await began;
     const result = ['pause', 'channel'].includes(revocation) ? await f.request('/api/openclaw/automation/pause', { kind: revocation === 'channel' ? 'channel' : 'cron', id: revocation === 'channel' ? channel.id : job.id }) :
       revocation === 'provider' ? await f.request('/api/provider', { provider: 'openai', model: 'replacement', apiKey: 'replacement-key-stays-private' }) :
-        await f.request('/api/license/logout', {});
+        await f.request('/api/unpair', {});
     assert.equal(result.status, 200, JSON.stringify(result.body)); release();
+    if (revocation === 'session') await f.pair(); // Inspect through a fresh local session after unpairing.
     await waitManaged(f, services => services?.occurrences.some(item => ['uncertain', 'revoked'].includes(item.status)));
     assert.equal(native.sent.length, 0, 'A held native send must never reach its transport after revocation.');
     assert.equal((await native.replayGate()).status, 422, 'Retired delivery authorization cannot be replayed.');
@@ -530,7 +527,7 @@ test("resume tickets cannot survive unpair, session expiry or a server restart",
       if (ending === "restart") {
         const port = f.server.address().port;
         await new Promise(resolve => { f.server.closeAllConnections(); f.server.close(resolve); });
-        const restarted = await createApp({ dataDir: f.dataDir, pairingCode: "TEST-CODE", licenseConfig: { mode: "holdings", required: false } });
+        const restarted = await createApp({ dataDir: f.dataDir, pairingCode: "TEST-CODE", });
         try {
           restarted.server.listen(port, "127.0.0.1"); await once(restarted.server, "listening");
           const result = await f.request("/api/local-resume", { resumeTicket }, browser);
@@ -545,22 +542,10 @@ test("resume tickets cannot survive unpair, session expiry or a server restart",
   }
 });
 
-test("resume preserves the original wallet challenge, grant and subsequent revocation", async t => {
-  // Public deterministic fixture account; no live wallet, network or transaction.
-  const wallet = new Wallet("0x" + "11".repeat(32));
-  const fetchRpc = async (_url, options) => {
-    const request = JSON.parse(options.body); let result;
-    if (request.method === "eth_chainId") result = "0x2105";
-    else if (request.method === "eth_blockNumber") result = "0x64";
-    else if (request.method === "eth_getBlockByNumber") result = { number: "0x62", hash: "0x" + "ab".repeat(32) };
-    else if (request.method === "eth_getCode") result = "0x";
-    else if (request.method === "eth_call") result = "0x" + BigInt(request.params[0].data === "0x313ce567" ? 18 : HOLDINGS_NETWORK.minimumBalance).toString(16).padStart(64, "0");
-    else throw new Error("Unexpected local RPC fixture method.");
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
-  };
-  const f = await fixture(t, { licenseConfig: { required: true }, licenseFetch: fetchRpc });
+test("resume preserves a model session and unpair revokes access without a wallet", async t => {
+  const f = await fixture(t);
   const browser = { origin: f.base }, storageValues = new Map(), frontendCalls = [];
-  let saved = "aa".repeat(32); // A stale tab credential must not override a fresh owner nonce.
+  let saved = "aa".repeat(32);
   const storage = { getItem: () => saved, setItem(key, value) { storageValues.set(key, value); saved = value; },
     removeItem(key) { storageValues.delete(key); saved = null; } };
   const request = async (endpoint, input) => {
@@ -572,35 +557,22 @@ test("resume preserves the original wallet challenge, grant and subsequent revoc
   const launch = await connectLocalSession({ origin: f.base, nonce: f.issueLaunchNonce(), storage, request });
   assert.equal(launch.resumable, true); assert.deepEqual(frontendCalls, ["/api/launch"]);
   const token = launch.token, firstTicket = saved, auth = { ...browser, authorization: `Bearer ${token}` };
-  assert.equal((await f.request("/api/provider", { provider: "openai", model: "fixture", apiKey: "private-reload-wallet-key" }, auth)).body.code, "HOLDINGS_REQUIRED");
-  const challenge = await f.request("/api/license/challenge", { address: wallet.address }, auth);
-  assert.equal(challenge.status, 200);
+  const key = "private-reload-model-key";
+  assert.equal((await f.request("/api/provider", { provider: "openai", model: "fixture", apiKey: key }, auth)).status, 200);
   const resumed = await connectLocalSession({ origin: f.base, storage, request });
   assert.equal(resumed.token, token); assert.notEqual(saved, firstTicket);
-  const signedIn = await f.request("/api/license/verify", { requestId: challenge.body.requestId,
-    message: challenge.body.message, signature: await wallet.signMessage(challenge.body.message) }, auth);
-  assert.equal(signedIn.status, 200, JSON.stringify(signedIn.body)); assert.equal(signedIn.body.status, "active");
-  assert.equal((await f.request("/api/provider", { provider: "openai", model: "fixture", apiKey: "private-reload-wallet-key" }, auth)).status, 200);
-  const again = await connectLocalSession({ origin: f.base, storage, request });
-  assert.equal(again.token, token);
   assert.equal((await f.request("/api/state", undefined, auth)).body.provider.configured, true);
-  const license = await f.request("/api/license", undefined, auth);
-  assert.equal(license.body.status, "active"); assert.deepEqual(license.body.session, signedIn.body.session);
-  assert.equal((await f.request("/api/license/logout", {}, auth)).status, 200);
-  const loggedOut = await connectLocalSession({ origin: f.base, storage, request });
-  assert.equal(loggedOut.token, token);
-  assert.equal((await f.request("/api/license", undefined, auth)).body.status, "wallet-required");
-  assert.equal((await f.request("/api/provider", { provider: "openai", model: "fixture", apiKey: "new-key" }, auth)).body.code, "HOLDINGS_REQUIRED");
-  assert.equal((await f.request("/api/state", undefined, auth)).body.provider.configured, false);
-  assert.deepEqual(frontendCalls, ["/api/launch", "/api/local-resume", "/api/local-resume", "/api/local-resume"]);
+  assert.equal((await f.request("/api/unpair", {}, auth)).status, 200);
+  assert.equal((await f.request("/api/state", undefined, auth)).status, 401);
+  assert.equal((await f.request("/api/provider", { provider: "openai", model: "fixture", apiKey: "new-key" }, auth)).status, 401);
+  assert.deepEqual(frontendCalls, ["/api/launch", "/api/local-resume"]);
   assert.equal(storageValues.size, 1);
-  assert.equal([...storageValues.values()][0], saved);
-  for (const secret of [token, "private-reload-wallet-key", "new-key"])
+  for (const secret of [token, key, "new-key"])
     assert.equal(JSON.stringify([...storageValues]).includes(secret), false);
 });
 
-test("audit reads require a paired selected agent, never a browser directory or a wallet grant", { timeout: 60000 }, async t => {
-  const f = await fixture(t, { engine: nativeEngine, licenseConfig: { required: true } });
+test("audit reads require a paired selected agent and reject arbitrary browser directories", { timeout: 60000 }, async t => {
+  const f = await fixture(t, { engine: nativeEngine, });
   assert.equal((await f.request("/api/audit/read", { op: "summary" })).status, 401);
   await f.pair();
   assert.equal((await f.request("/api/audit/read", { op: "summary" })).status, 409);
@@ -632,8 +604,8 @@ test("audit reads require a paired selected agent, never a browser directory or 
   assert.equal(selected.status, 200); assert.equal(selected.body.root, await fs.realpath(secondRoot));
   assert.deepEqual(await fs.readFile(path.join(firstRoot, "chain", "rings.jsonl")), firstBytes);
   assert.deepEqual(await fs.readFile(path.join(secondRoot, "chain", "rings.jsonl")), secondBytes);
-  assert.equal((await f.request("/api/provider", { provider: "openai", model: "fixture", apiKey: "unused-audit-key" })).body.code, "HOLDINGS_REQUIRED");
-  assert.equal((await f.request("/api/chat", { message: "Inspection did not authorize execution." })).body.code, "HOLDINGS_REQUIRED");
+  assert.equal((await f.request("/api/chat", { message: "Inspection did not configure a model." })).body.code, "PROVIDER_REQUIRED");
+  assert.equal((await f.request("/api/provider", { provider: "openai", model: "fixture", apiKey: "unused-audit-key" })).status, 200);
   assert.equal(f.modelCalls.length, 0); assert.equal(f.calls.some(call => ["commit", "ingest", "dormancy", "maintenance", "faculty_action"].includes(call.op)), false);
 });
 

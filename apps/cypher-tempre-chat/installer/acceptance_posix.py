@@ -96,13 +96,14 @@ def main():
     sentinel_digest = digest(sentinel)
     install('repeat-install')
     if digest(chain) != chain_digest or digest(sentinel) != sentinel_digest: raise RuntimeError('Repeat setup changed existing data.')
-    policy = "import { requiresHoldings } from './public/chainchat-display.js'; if(['/api/launch','/api/local-resume','/api/audit/read'].some(p=>requiresHoldings(p,{})) || !requiresHoldings('/api/chat',{})) process.exit(1);"
-    subprocess.run([active['node'], '--input-type=module', '-e', policy], cwd=release, check=True, env=environment, timeout=30)
+    removed_access_assets = ('holdings-wallet.js', 'seat-wallet.js', 'license-config.json', 'seat-registry.json')
+    if any((release / 'public' / name).exists() for name in removed_access_assets):
+        raise RuntimeError('The installed release still contains removed token-access assets.')
 
     def frontdoor(label, expected=0, custom=None):
         filename = work / (label + '.json')
         result = subprocess.run([active['python'], str(target / 'launcher.py'), '--launch', '--quiet', '--install-root', str(target), '--result-file', str(filename)],
-            env=custom or environment, capture_output=True, timeout=240)
+            env=custom or environment, capture_output=True, timeout=300)
         value = json.loads(filename.read_text(encoding='utf-8'))
         if result.returncode != expected or value.get('ok') is not (expected == 0): raise RuntimeError(label + ' readiness result failed.')
         return value
@@ -127,8 +128,17 @@ def main():
     nonce = urllib.parse.parse_qs(parsed.fragment)['launch'][0]
     session = http(base + '/api/launch', {'nonce': nonce}, origin=base)
     token, ticket = session['token'], session['resumeTicket']
+    provider_config = {'provider': 'compatible', 'model': 'installer-onboarding-fixture',
+        'apiKey': 'disposable-installer-onboarding-key', 'baseUrl': 'http://127.0.0.1:9/v1'}
+    http(base + '/api/provider', provider_config, origin=base, expected=401)
+    configured = http(base + '/api/provider', provider_config, token, base)
+    if configured.get('ok') is False or provider_config['apiKey'] in json.dumps(configured):
+        raise RuntimeError('Authenticated direct model setup failed or exposed its fixture credential.')
     state = http(base + '/api/state', token=token, origin=base)
     if state['executionRuntime']['backend'] != 'openclaw': raise RuntimeError('Installed app did not use OpenClaw.')
+    if (state.get('agent') is not None or not state.get('provider', {}).get('configured')
+            or provider_config['apiKey'] in json.dumps(state)):
+        raise RuntimeError('Direct model setup did not retain a private process-memory provider session.')
     http(base + '/api/agents/pair', {'root': str(native)}, token, base, 200)
     controls = http(base + '/api/openclaw', token=token, origin=base)
     if controls.get('runtime', {}).get('running') is not True or not controls.get('schema', {}).get('schema'):
@@ -139,6 +149,9 @@ def main():
     http(base + '/api/local-resume', {'resumeTicket': ticket}, expected=403)
     resumed = http(base + '/api/local-resume', {'resumeTicket': ticket}, origin=base)
     if resumed['token'] != token or resumed['resumeTicket'] == ticket: raise RuntimeError('Refresh did not preserve/rotate the owner session.')
+    after_resume = http(base + '/api/state', token=resumed['token'], origin=base)
+    if after_resume.get('provider') != state.get('provider') or provider_config['apiKey'] in json.dumps(after_resume):
+        raise RuntimeError('Refresh changed the provider session or exposed its fixture credential.')
     http(base + '/api/local-resume', {'resumeTicket': ticket}, origin=base, expected=403)
     frontdoor('relaunch')
     if json.loads((data / 'runtime-owner.json').read_text())['pid'] != owner['pid']: raise RuntimeError('Relaunch replaced the live owned runtime.')
@@ -159,7 +172,9 @@ def main():
     if digest(chain) != chain_digest or digest(sentinel) != sentinel_digest: raise RuntimeError('Acceptance changed persistent user data.')
     result = {'installerSha256': digest(artifact), 'version': active['version'], 'platform': active['platform'],
         'freshInstall': True, 'repeatInstall': True, 'nativeVerified': True, 'dataPreserved': True,
-        'ownedReady': True, 'openclawGatewayReady': True, 'samePidRelaunch': True, 'occupiedPortHeld': True, 'frontendBootstrapPolicy': True,
+        'ownedReady': True, 'openclawGatewayReady': True, 'samePidRelaunch': True, 'occupiedPortHeld': True,
+        'removedAccessAssetsAbsent': True, 'providerSetupRequiresSession': True,
+        'providerSetupBeforeAgentSelection': True, 'providerKeyRemainedPrivate': True,
         'automaticOwnerAuth': True, 'rotatingResume': True, 'readOnlyAudit': True, 'tamperedCandidateHeld': True,
         'rollbackPointerPath': True, 'ownedRuntimeStopped': True, 'shortcutsCreated': True, 'shortcutsInSyntheticHome': True,
         'paidModelCalls': 0, 'productionUserInstallationTouched': False}

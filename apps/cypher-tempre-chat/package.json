@@ -1,7 +1,7 @@
 {
   "name": "cypher-tempre-chat",
-  "version": "0.9.1",
-  "description": "Cypher Tempre ChainChat: bring-your-own-model chat with a local Timechain and verified CPHY holdings.",
+  "version": "0.9.2",
+  "description": "Cypher Tempre ChainChat: bring-your-own-model chat with a local Timechain and Proof of Interaction.",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -18,7 +18,5 @@
     "test": "node --test --test-concurrency=2 test/*.test.mjs",
     "test:engine": "python -m unittest discover -s test -p test_*.py"
   },
-  "dependencies": {
-    "ethers": "6.17.0"
-  }
+  "dependencies": {}
 }

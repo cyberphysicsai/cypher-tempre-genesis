@@ -39,14 +39,16 @@ const GROUPS = [
   { codes: ['OPENCLAW_ENFORCEMENT', 'OPENCLAW_ENFORCEMENT_UNHEALTHY', 'OPENCLAW_NATIVE_HELD', 'OPENCLAW_CONTROL_CLOSED', 'OPENCLAW_EMPTY_RESPONSE', 'OPENCLAW_ADMISSION_FAILED', 'OPENCLAW_START_TIMEOUT', 'OPENCLAW_REQUIRED', 'ENGINE_PROTOCOL', 'ENGINE_TIMEOUT', 'ENGINE_REJECTED', 'ENGINE_ERROR', 'PYTHON_UNAVAILABLE'],
     stage: 'runtime', title: 'ACTIVE RUNTIME HELD', kind: 'runtime',
     message: 'The local runtime could not return an approved answer. Inspect runtime status and use this code when reporting the failure.', action: 'native' },
-  { codes: ['LICENSE_REQUIRED', 'LICENSE_RPC_UNAVAILABLE', 'LICENSE_EXPIRED', 'LICENSE_REVOKED', 'LICENSE_INSUFFICIENT_BALANCE', 'UNAUTHORIZED'],
+  { codes: ['SESSION_CHANGED'], stage: 'authorization', title: 'MODEL SESSION CHANGED', kind: 'authorization',
+    message: 'The model connection or local session changed while this request was running. Inspect the current connection, then retry.', action: 'model' },
+  { codes: ['UNAUTHORIZED', 'PAIR_REQUIRED', 'PAIRING_REQUIRED', 'LOCAL_LAUNCH_REQUIRED', 'LOCAL_SESSION_EXPIRED'],
     stage: 'authorization', title: 'AUTHORIZATION NEEDS ATTENTION', kind: 'authorization',
-    message: 'The current authorization could not be verified. Reconnect the app or verify wallet holdings before starting another operation.', action: 'holdings' },
+    message: 'The local app session is unavailable or expired. Open ChainChat using its application launcher, or reconnect in optional website mode.', action: 'connect' },
   { codes: ['CANCELLED', 'REQUEST_CANCELLED'], stage: 'cancellation', title: 'REQUEST STOPPED', kind: 'cancelled',
     message: 'The operation was stopped. Refresh and inspect the latest chain receipt before retrying.', action: null },
 ];
 const BY_CODE = new Map(GROUPS.flatMap(group => group.codes.map(code => [code, group])));
-const ACTIONS = Object.freeze({ model: 'Open model settings', loadout: 'Review equipped faculties', continuum: 'Open pending block', inspect: 'Inspect chain', native: 'Open runtime settings', holdings: 'Verify access' });
+const ACTIONS = Object.freeze({ model: 'Open model settings', loadout: 'Review equipped faculties', continuum: 'Open pending block', inspect: 'Inspect chain', native: 'Open runtime settings', connect: 'Reconnect local app' });
 
 export function chatFailure(error = {}) {
   const suppliedCode = error?.name === 'AbortError' ? 'REQUEST_CANCELLED' : error?.code;

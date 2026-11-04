@@ -2643,49 +2643,6 @@ p {
   border-radius: 6px;
   background: var(--theme-hex-101010);
 }
-.license-controls {
-  margin: 20px 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-}
-#licenseDeviceKey,
-#licenseStatus,
-#licenseError {
-  overflow-wrap: anywhere;
-}
-#licenseDeviceKey {
-  font-size: 10px;
-}
-.holdings-readout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-  padding: 20px 0;
-}
-.holdings-readout > div { min-width: 0; }
-.holdings-readout span,
-.holdings-readout small { display: block; font-size: 8px; line-height: 1.7; color: var(--muted); }
-.holdings-readout strong { display: block; font-size: 16px; line-height: 1.7; font-weight: 500; overflow-wrap: anywhere; }
-.holdings-prompt {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 16px;
-  border: 1px solid var(--line);
-  background: var(--theme-rgba-255-255-255-0_025);
-  color: var(--muted);
-  padding: 10px 12px;
-  margin: 0 0 10px;
-  font-size: 8px;
-  line-height: 1.6;
-  text-align: left;
-}
-.holdings-prompt > span:last-child { color: var(--text); flex-shrink: 0; }
-.holdings-prompt.verified { border-style: dashed; }
-.holdings-prompt.verified > span:first-child { color: var(--text); }
 @media (max-width: 700px) {
   .beta-access,
   .audit-heading {
@@ -2860,8 +2817,6 @@ optgroup,
     overflow-wrap: anywhere;
   }
   #currentBlockHeight { font-size: 21px; }
-  .holdings-prompt { flex-wrap: wrap; gap: 3px 12px; font-size: 7px; padding: 7px 9px; }
-  .holdings-readout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .conversation-tags {
     flex-direction: column;
     gap: 5px;

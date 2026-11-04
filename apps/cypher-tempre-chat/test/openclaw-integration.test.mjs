@@ -64,7 +64,6 @@ async function fixture(t) {
     await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   });
   app = await createApp({ dataDir: path.join(directory, "application"), pairingCode: "OPENCLAW-UI-FIXTURE",
-    licenseConfig: { mode: "holdings", required: false },
     engine: async request => { calls.push(structuredClone(request)); return engine(request); },
     review: async (_config, args) => {
       reviews.push(args); const result = goodReview();

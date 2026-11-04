@@ -1,6 +1,8 @@
 // Public diagnostics are fixed metadata, never provider bodies or private prompts.
 import { DIMENSIONS, FRUITS, REVIEW_THRESHOLD } from './providers.mjs';
 const messages = Object.freeze({
+  SESSION_CHANGED: 'The model or local session changed. Retry from the current app session.',
+  PAIR_REQUIRED: 'This local session expired. Open ChainChat from its application launcher.',
   PROVIDER_HTTP_ERROR: 'The provider rejected the model request. Check the model, endpoint and configured limits.',
   PROVIDER_RATE_LIMIT: 'The provider rate limit or quota was reached. Wait before retrying.',
   PROVIDER_TIMEOUT: 'The provider did not complete the request in time.',
@@ -31,7 +33,7 @@ export function errorStage(error, fallback = 'runtime') {
   if (CHAT_STAGES.has(error?.stage)) return error.stage;
   const code = error?.code || '';
   if (/^(?:REQUEST_CANCELLED|CANCELLED)$/.test(code)) return 'cancellation';
-  if (/^(?:LICENSE_|HOLDINGS_|SESSION_|PAIR_|PROVIDER_REQUIRED)/.test(code)) return 'authorization';
+  if (/^(?:SESSION_|PAIR_|PROVIDER_REQUIRED)/.test(code)) return 'authorization';
   if (code === 'INVALID_LOADOUT') return 'loadout';
   if (code === 'POI_REJECTED') return 'native-review';
   if (/^(?:GATE_|COVENANT_REJECTED)/.test(code)) return 'review';
@@ -43,7 +45,8 @@ export function errorStage(error, fallback = 'runtime') {
 export function safeInvocationError(error, fallbackStage = 'runtime') {
   if (!Object.hasOwn(messages, error?.code || '')) return null;
   const code = error.code;
-  const status = code === 'PROVIDER_RATE_LIMIT' ? 429 : code === 'PROVIDER_TIMEOUT' ? 504
+  const status = code === 'SESSION_CHANGED' ? 409 : code === 'PAIR_REQUIRED' ? 401
+    : code === 'PROVIDER_RATE_LIMIT' ? 429 : code === 'PROVIDER_TIMEOUT' ? 504
     : /^PROVIDER_(?:HTTP|CONNECTION)/.test(code) ? 502 : 422;
   const cleanScores = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     keys.every(key => Number.isInteger(value[key]) && value[key] >= 0 && value[key] <= 255)

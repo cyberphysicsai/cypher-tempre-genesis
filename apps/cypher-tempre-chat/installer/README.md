@@ -49,8 +49,12 @@ launcher starts the selected release's gateway and UI through
 not start a separate bridge or install the skill, Node or Python themselves.
 Setup waits for the owned runtime's authenticated readiness check before
 reporting success; reopening the Start Menu shortcut reuses that running
-instance. API/model selection, wallet verification, and choosing a new or
-existing Timechain remain explicit user controls.
+instance. Cold startup has a bounded four-minute readiness window, covering the
+Gateway's cold-start allowance and local restoration. An exited child still
+fails immediately; the readiness check still requires the exact owned runtime.
+API/model selection and choosing a new or existing Timechain remain
+explicit user controls. Provider setup is available immediately after local
+authentication.
 The first installation needs Internet access to download
 the pinned runtimes and locked npm packages. A failed check keeps the previously
 selected release; `install.log` remains for local diagnosis. Re-run a repaired
@@ -71,7 +75,7 @@ beside the executable.
 Build on Windows after producing the sanitized Git-based application ZIP:
 
 ```powershell
-python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.9.1.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.9.1-windows-x64.exe
+python installer/build_windows.py --archive C:\reviewed\cypher-tempre-chat-v0.9.2.zip --output C:\reviewed\CypherTempre-ChainChat-Setup-0.9.2-windows-x64.exe
 ```
 
 The .NET Framework compiler consumes the C# source, Windows manifest and font
@@ -90,7 +94,7 @@ Use a dedicated empty test directory, suppress launch/shortcuts, and capture the
 result without touching the current user's actual installation:
 
 ```powershell
-.\CypherTempre-ChainChat-Setup-0.9.1-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
+.\CypherTempre-ChainChat-Setup-0.9.2-windows-x64.exe --quiet --install-root C:\test\chainchat-install --no-launch --no-shortcuts --result-file C:\test\install-result.json
 ```
 
 `--cache-dir` may name a directory containing the exact official Node/CPython ZIP
@@ -112,8 +116,11 @@ the rollback path. The test installation is retained for inspection.
 It also authenticates the local UI from the launch nonce, resumes the same
 session with a rotated ticket, and rejects replay, hosted-origin and
 missing-origin resume attempts. Test credentials stay in process memory.
-The installed frontend policy must allow bootstrap and read-only audit before
-wallet verification while keeping model operations behind the holdings gate.
+Acceptance configures a synthetic local provider immediately after owner
+authentication, before selecting an agent, and checks that its key stays out of
+public responses and survives an authenticated refresh only in process memory.
+The removed token-access assets must be absent from the installed release.
+Origin checks, replay rejection and PoI enforcement remain independent controls.
 
 macOS and Linux packages and their isolated native acceptance procedure are
 described in [POSIX.md](POSIX.md). Platform execution support is established by

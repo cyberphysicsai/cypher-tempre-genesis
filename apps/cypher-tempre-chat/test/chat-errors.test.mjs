@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chatFailure, providerLimits, loadoutRepairNotice } from '../public/chat-errors.js';
-import { requiresHoldings } from '../public/chainchat-display.js';
 
 test('chat diagnostics never render raw transport bodies, credentials, URLs or unknown code/stage strings', () => {
   const privateValue = 'https://private.example.invalid/key=not-for-display';
@@ -49,7 +48,7 @@ test('optional model limits preserve existing connections and reject invalid tok
   ]) assert.throws(() => providerLimits(input), { code: 'INVALID_PROVIDER_LIMITS' });
 });
 
-test('catalogue reconciliation notice exposes only removed faculty IDs and clearing is authority reducing', () => {
+test('catalogue reconciliation notice exposes only removed faculty IDs', () => {
   assert.equal(loadoutRepairNotice(null), '');
   assert.equal(loadoutRepairNotice({ reason: 'unavailable-faculties', removed: { modalities: [], senses: [] } }), '');
   const notice = loadoutRepairNotice({ reason: 'unavailable-faculties', removed: { modalities: ['37'], senses: ['10', '84'] } });
@@ -57,6 +56,16 @@ test('catalogue reconciliation notice exposes only removed faculty IDs and clear
   assert.match(notice, /historical chain was preserved/);
   const privateValue = 'private-file-or-secret';
   assert.equal(loadoutRepairNotice({ reason: 'unavailable-faculties', removed: { modalities: [privateValue] } }).includes(privateValue), false);
-  assert.equal(requiresHoldings('/api/loadout/reset', { confirm: true }), false);
-  assert.equal(requiresHoldings('/api/loadout/reset', { confirm: true, modalities: ['1'] }), true);
+});
+
+test('expired local sessions recover through app authentication without wallet authorization', () => {
+  for (const code of ['UNAUTHORIZED', 'PAIR_REQUIRED', 'PAIRING_REQUIRED', 'LOCAL_LAUNCH_REQUIRED', 'LOCAL_SESSION_EXPIRED']) {
+    const view = chatFailure({ code });
+    assert.equal(view.stage, 'authorization');
+    assert.equal(view.action, 'connect');
+    assert.equal(view.actionLabel, 'Reconnect local app');
+    assert.doesNotMatch(view.message, /wallet|holdings|CPHY/i);
+  }
+  assert.equal(chatFailure({ code: 'SESSION_CHANGED' }).action, 'model');
+  assert.equal(chatFailure({ code: 'SESSION_CHANGED' }).stage, 'authorization');
 });
