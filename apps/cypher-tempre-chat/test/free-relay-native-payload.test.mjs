@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { generate } from '../lib/providers.mjs';
 
 const runtime = process.env.CT_OPENCLAW_PACKAGE;
 const php = process.env.CT_PHP_BIN || (process.platform !== 'win32' ? 'php' : null);
@@ -48,4 +49,48 @@ test('actual pinned native completions bodies pass the free PHP policy without e
     const { stdout } = await promisify(execFile)(php, [validator, core, capturedFile], { windowsHide: true, timeout: 10000 });
     assert.deepEqual(JSON.parse(stdout), { accepted: true, tokens: 512, stream: true, tools: tools.length, store: false, cache: false });
   }
+});
+
+test('actual pinned native SSE parser and direct reviewer fail closed on PHP late errors after pending padding', {
+  skip: !runtime || !php ? 'Set the pinned native package and CT_PHP_BIN (Windows) for the native/PHP contract.' : false,
+  timeout: 30000,
+}, async t => {
+  const require = createRequire(path.join(runtime, 'package.json'));
+  const dist = path.dirname(require.resolve('@openclaw/ai'));
+  const modules = (await fs.readdir(dist)).filter(name => /^openai-completions-(?!transport-|compat-).+\.mjs$/.test(name));
+  assert.equal(modules.length, 1);
+  const adapter = await import(pathToFileURL(path.join(dist, modules[0])).href);
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'ct-relay-native-error-'));
+  t.after(async () => {
+    const absolute = await fs.realpath(temporary), parent = await fs.realpath(os.tmpdir());
+    assert.ok(absolute.startsWith(parent + path.sep) && path.basename(absolute).startsWith('ct-relay-native-error-'));
+    await fs.rm(absolute, { recursive: true, force: true });
+  });
+  const fixture = path.join(temporary, 'pending.php');
+  await fs.writeFile(fixture, '<?php require $argv[1]; $results=[]; foreach ([false,true] as $stream) { $clock=0.0; $out=""; $pending=new CypherTempre\\FreeModels\\PendingOutput($stream,function()use(&$clock){return $clock;},function($bytes)use(&$out){$out.=$bytes;},fn()=>null,fn()=>null); $clock=12; $pending->pulse(); $pending->fail(["error"=>["code"=>"FREE_PRICE_CHANGED","message"=>"This response is held."]]); $results[$stream?"sse":"json"]=$out; } echo json_encode($results,JSON_THROW_ON_ERROR);');
+  const core = fileURLToPath(new URL('../public/api/relay-core.php', import.meta.url));
+  const { stdout } = await promisify(execFile)(php, [fixture, core], { windowsHide: true, timeout: 10000 });
+  const body = JSON.parse(stdout);
+  assert.ok(body.sse.startsWith(': pending') && body.json.startsWith(' '));
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests++;
+    const request = JSON.parse(options.body);
+    return new Response(request.stream ? body.sse : body.json, {
+      status: 200, headers: { 'content-type': request.stream ? 'text/event-stream' : 'application/json' },
+    });
+  });
+  const model = { id: 'beam-free', name: 'Fixture', api: 'openai-completions', provider: 'chainchat-compatible',
+    baseUrl: 'http://127.0.0.1:1/compatible/v1', reasoning: false, input: ['text'], contextWindow: 131072, maxTokens: 8192,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const result = await adapter.n(model, { systemPrompt: 'Synthetic fixture.', messages: [
+    { role: 'user', content: 'Please respond carefully.', timestamp: 1 },
+  ], tools: [] }, { apiKey: 'synthetic-local-parser-key', maxTokens: 512 }).result();
+  assert.equal(result.stopReason, 'error');
+  assert.ok(!(result.content || []).some(block => block.type === 'text' && block.text));
+  await assert.rejects(generate({ provider: 'compatible', model: 'beam-free',
+    baseUrl: 'https://cyphertempre.ai/api/free-model/v1', apiKey: 'chainchat-free-tier' },
+  { messages: [{ role: 'user', content: 'Synthetic reviewer fixture.' }], maxTokens: 512 }),
+  error => error.code === 'PROVIDER_INVALID_RESPONSE');
+  assert.equal(requests, 2);
 });

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/../public/api/relay-core.php';
 
-use CypherTempre\FreeModels\{Policy, Store, Relay, RelayError};
+use CypherTempre\FreeModels\{Policy, Store, Relay, RelayError, PendingOutput};
 
 // Test children never inherit a real operator secret or secret-location override.
 putenv('CHAINCHAT_OPENCODE_API_KEY'); putenv('CHAINCHAT_FREE_CONFIG_DIR');
@@ -268,6 +268,88 @@ run('validated empty JSON objects in tool schemas keep object semantics on the u
     $decoded=json_decode($wire); ok($decoded->tools[0]->function->parameters->properties instanceof stdClass);
     ok($decoded->max_tokens===512 && !isset($decoded->max_completion_tokens));
     denied(fn()=>$relay->infer(request(),'192.0.2.11',$session,$raw),'FREE_REQUEST_INVALID');
+});
+
+run('pending transport emits only bounded constant protocol padding on a monotonic twelve-second throttle', function () {
+    foreach ([false,true] as $stream) {
+        $clock=100.0; $writes=[]; $starts=[]; $flushes=0;
+        $pending=new PendingOutput($stream, function() use (&$clock) { return $clock; },
+            function($bytes) use (&$writes) { $writes[]=$bytes; }, function() use (&$flushes) { $flushes++; },
+            function($value) use (&$starts) { $starts[]=$value; });
+        $pending->pulse(); $clock=111.999; $pending->pulse(); ok(!$pending->started() && $writes===[]);
+        $clock=112; $pending->pulse(); $pending->pulse(); $clock=113; $pending->pulse();
+        ok($pending->started() && $starts===[$stream] && count($writes)===1 && $flushes===1);
+        ok(strlen($writes[0])===4096);
+        ok($stream ? preg_match('/^: pending +\n\n$/D',$writes[0])===1 : preg_match('/^ +\n$/D',$writes[0])===1);
+        for ($i=2;$i<=20;$i++) { $clock=100+12*$i; $pending->pulse(); }
+        ok(count($writes)===PendingOutput::MAX_PULSES && $flushes===PendingOutput::MAX_PULSES);
+        ok(count(array_unique($writes))===1 && count($starts)===1);
+    }
+});
+run('invalid requests, changed pricing and exhausted quotas cannot start pending output', function () use ($secret,$session) {
+    foreach (['invalid','price','quota'] as $mode) {
+        $writes=[]; $starts=0; $posts=0; $store=new Store(directory(),$secret,1);
+        if ($mode==='quota') { $lease=$store->reserve('192.0.2.20'); $store->release($lease); }
+        $pending=new PendingOutput(false,fn()=>100.0,function($bytes) use (&$writes) { $writes[]=$bytes; },fn()=>null,
+            function() use (&$starts) { $starts++; });
+        $relay=new Relay($secret,$store,function($method,$url,$headers,$body,$timeout,$progress=null) use ($mode,&$posts) {
+            if ($method==='POST') { $posts++; $progress(); return ['status'=>200,'type'=>'application/json','body'=>response()]; }
+            ok($progress===null);
+            return ['status'=>200,'type'=>'application/json','body'=>json_encode(['data'=>[model('beam-free',0,$mode==='price'?1:0)]])];
+        });
+        denied(fn()=>$relay->infer(request($mode==='invalid'?['model'=>'paid-model']:[]),'192.0.2.20',$session,null,$pending->pulse(...)));
+        ok(!$pending->started() && $writes===[] && $starts===0 && $posts===0);
+    }
+});
+run('slow approved JSON and SSE emit no candidate until whole-response policy approval', function () use ($secret,$session) {
+    foreach ([false,true] as $stream) {
+        $clock=0.0; $out=''; $starts=[];
+        $pending=new PendingOutput($stream,function() use (&$clock) { return $clock; },function($bytes) use (&$out) { $out.=$bytes; },fn()=>null,
+            function($value) use (&$starts) { $starts[]=$value; });
+        $type=$stream?'text/event-stream':'application/json'; $raw=$stream?stream(['APPROVED_CANDIDATE']):response('APPROVED_CANDIDATE');
+        $relay=new Relay($secret,new Store(directory(),$secret),function($method,$url,$headers,$body,$timeout,$progress=null) use (&$clock,&$out,$type,$raw) {
+            if ($method==='GET') { ok($timeout===8 && $progress===null); return ['status'=>200,'type'=>'application/json','body'=>json_encode(['data'=>[model()]])]; }
+            ok($timeout===115 && is_callable($progress));
+            foreach ([12,24,36] as $time) { $clock=$time; $progress(); ok(!str_contains($out,'CANDIDATE')); }
+            return ['status'=>200,'type'=>$type,'body'=>$raw];
+        });
+        $result=$relay->infer(request(['stream'=>$stream]),'192.0.2.21',$session,null,$pending->pulse(...));
+        ok(!str_contains($out,'CANDIDATE') && $starts===[$stream]); $pending->complete($result);
+        ok(str_ends_with($out,$raw));
+        if (!$stream) ok(json_decode($out,true,64,JSON_THROW_ON_ERROR)['choices'][0]['message']['content']==='APPROVED_CANDIDATE');
+    }
+});
+run('late cost, private-key, incomplete-stream and transport failures emit matching terminal errors without candidate bytes', function () use ($secret,$session) {
+    foreach ([false,true] as $stream) foreach (['cost','unknown','secret','incomplete','transport'] as $mode) {
+        $clock=0.0; $out='';
+        $pending=new PendingOutput($stream,function() use (&$clock) { return $clock; },function($bytes) use (&$out) { $out.=$bytes; },fn()=>null,fn()=>null);
+        $candidate=$mode==='secret'?$secret:'REJECTED_CANDIDATE';
+        $cost=$mode==='cost'?1:($mode==='unknown'?null:0);
+        $raw=$stream?stream([$candidate],$cost,$mode!=='incomplete'):response($candidate,$cost);
+        $relay=new Relay($secret,new Store(directory(),$secret),function($method,$url,$headers,$body,$timeout,$progress=null) use (&$clock,$stream,$mode,$raw) {
+            if ($method==='GET') return ['status'=>200,'type'=>'application/json','body'=>json_encode(['data'=>[model()]])];
+            $clock=12; $progress();
+            if ($mode==='transport') throw new RelayError('FREE_PROVIDER_UNAVAILABLE');
+            return ['status'=>200,'type'=>$stream?'text/event-stream':'application/json','body'=>$raw];
+        });
+        $caught=null;
+        try { $result=$relay->infer(request(['stream'=>$stream]),'192.0.2.22',$session,null,$pending->pulse(...));
+            // A JSON fixture has no SSE terminator requirement; all other cases must be held.
+            ok(!$stream && $mode==='incomplete'); $pending->complete($result); continue;
+        } catch (RelayError $error) { $caught=$error; }
+        ok($caught!==null && $pending->started()); $pending->fail(['error'=>['code'=>$caught->publicCode]]);
+        ok(!str_contains($out,$candidate) && !str_contains($out,$secret));
+        if ($stream) {
+            $data=[]; foreach (explode("\n",$out) as $line) if (str_starts_with($line,'data: ')) $data[]=substr($line,6);
+            ok(count($data)===2 && $data[1]==='[DONE]' && isset(json_decode($data[0],true,64,JSON_THROW_ON_ERROR)['error']['code']));
+        } else ok(isset(json_decode($out,true,64,JSON_THROW_ON_ERROR)['error']['code']));
+    }
+});
+run('fast responses and preflight errors retain ordinary JSON without pending headers or padding', function () {
+    $out=''; $begins=0; $pending=new PendingOutput(true,fn()=>0.0,function($bytes) use (&$out) { $out.=$bytes; },fn()=>null,
+        function() use (&$begins) { $begins++; });
+    $pending->fail(['error'=>['code'=>'FREE_REQUEST_INVALID']]);
+    ok(!$pending->started() && $begins===0 && json_decode($out,true,64,JSON_THROW_ON_ERROR)['error']['code']==='FREE_REQUEST_INVALID');
 });
 
 function cleanup(string $path): void {
