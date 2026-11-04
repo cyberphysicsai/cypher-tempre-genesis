@@ -94,3 +94,55 @@ test('actual pinned native SSE parser and direct reviewer fail closed on PHP lat
   error => error.code === 'PROVIDER_INVALID_RESPONSE');
   assert.equal(requests, 2);
 });
+
+test('actual pinned reasoning assistant history replays bounded text through PHP for later turns and function results', {
+  skip: !runtime || !php ? 'Set the pinned native package and CT_PHP_BIN (Windows) for the native/PHP contract.' : false,
+  timeout: 30000,
+}, async t => {
+  const require = createRequire(path.join(runtime, 'package.json'));
+  const dist = path.dirname(require.resolve('@openclaw/ai'));
+  const modules = (await fs.readdir(dist)).filter(name => /^openai-completions-(?!transport-|compat-).+\.mjs$/.test(name));
+  assert.equal(modules.length, 1);
+  const adapter = await import(pathToFileURL(path.join(dist, modules[0])).href);
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Reasoning replay fixture permits no network.'); });
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'ct-relay-native-reasoning-'));
+  t.after(async () => {
+    const absolute = await fs.realpath(temporary), parent = await fs.realpath(os.tmpdir());
+    assert.ok(absolute.startsWith(parent + path.sep) && path.basename(absolute).startsWith('ct-relay-native-reasoning-'));
+    await fs.rm(absolute, { recursive: true, force: true });
+  });
+  const validator = path.join(temporary, 'validate.php');
+  await fs.writeFile(validator, '<?php require $argv[1]; $body=json_decode(file_get_contents($argv[2]),true,64,JSON_THROW_ON_ERROR); $body["model"]="beam-free"; $safe=CypherTempre\\FreeModels\\Policy::request($body,["beam-free"=>["maxOutputTokens"=>8192]]); $assistant=array_values(array_filter($safe["messages"],fn($m)=>$m["role"]==="assistant"))[0]; echo json_encode(["accepted"=>true,"reasoning"=>$assistant["reasoning_content"],"toolCalls"=>count($assistant["tool_calls"]??[])],JSON_THROW_ON_ERROR);');
+  const model = { id: 'route', name: 'Synthetic reasoning model', api: 'openai-completions', provider: 'chainchat-compatible',
+    baseUrl: 'http://127.0.0.1:1/fixture/v1', reasoning: true, input: ['text'], contextWindow: 131072, maxTokens: 8192,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const reasoning = 'Synthetic prior reasoning with unicode π and newline\nkept exactly.';
+  for (const withTool of [false, true]) {
+    const assistant = { role: 'assistant', api: model.api, provider: model.provider, model: model.id, timestamp: 2,
+      stopReason: withTool ? 'toolUse' : 'stop', content: [
+        { type: 'thinking', thinking: reasoning, thinkingSignature: 'reasoning_content' },
+        { type: 'text', text: 'A synthetic prior answer.' },
+        ...(withTool ? [{ type: 'toolCall', id: 'call-1', name: 'noop', arguments: {} }] : []),
+      ], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+    const messages = [{ role: 'user', content: 'A synthetic first turn.', timestamp: 1 }, assistant,
+      ...(withTool ? [{ role: 'toolResult', toolCallId: 'call-1', toolName: 'noop', isError: false,
+        content: [{ type: 'text', text: 'Synthetic approved result.' }], timestamp: 3 }] : []),
+      { role: 'user', content: 'Continue the synthetic conversation carefully.', timestamp: 4 }];
+    const tools = withTool ? [{ name: 'noop', description: 'Synthetic granted function.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false } }] : [];
+    let captured;
+    await adapter.n(model, { systemPrompt: 'Synthetic fixture.', messages, tools }, {
+      apiKey: 'synthetic-no-network-replay-key', maxTokens: 512,
+      onPayload: body => { captured = structuredClone(body); throw new Error('CAPTURE_BEFORE_HTTP'); },
+    }).result();
+    assert.ok(captured);
+    const serialized = captured.messages.find(message => message.role === 'assistant');
+    assert.equal(serialized.reasoning_content, reasoning);
+    assert.equal(serialized.reasoning_details, undefined);
+    const bodyFile = path.join(temporary, 'body.json'); await fs.writeFile(bodyFile, JSON.stringify(captured));
+    const core = fileURLToPath(new URL('../public/api/relay-core.php', import.meta.url));
+    const { stdout } = await promisify(execFile)(php, [validator, core, bodyFile], { windowsHide: true, timeout: 10000 });
+    assert.deepEqual(JSON.parse(stdout), { accepted: true, reasoning, toolCalls: withTool ? 1 : 0 });
+  }
+});

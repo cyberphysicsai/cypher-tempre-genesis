@@ -72,6 +72,38 @@ run('native storage/cache hints are removed and paid service tiers remain forbid
     foreach ([['store'=>true],['service_tier'=>'priority'],['service_tier'=>'flex'],['prompt_cache_key'=>str_repeat('x',257)],
         ['prompt_cache_options'=>['ttl'=>'30m','paid'=>true]]] as $patch) denied(fn()=>Policy::request(request($patch),$models),'FREE_REQUEST_INVALID');
 });
+run('assistant reasoning replay is preserved as bounded text and no other role or opaque reasoning fields are enabled', function () {
+    $models=Policy::models(['data'=>[model()]]);
+    foreach (['','Synthetic prior reasoning.',str_repeat('r',Policy::MAX_REASONING_REPLAY)] as $reasoning) {
+        $clean=Policy::request(request(['messages'=>[['role'=>'assistant','content'=>'A synthetic answer.','reasoning_content'=>$reasoning]]]),$models);
+        ok($clean['messages'][0]['reasoning_content']===$reasoning);
+    }
+    foreach (['user','system','developer','tool'] as $role) {
+        $m=['role'=>$role,'content'=>'Synthetic text.','reasoning_content'=>'Synthetic reasoning.'];
+        if ($role==='tool') $m['tool_call_id']='call-1';
+        denied(fn()=>Policy::request(request(['messages'=>[$m]]),$models),'FREE_REQUEST_INVALID');
+    }
+    foreach ([null,1,false,[],['type'=>'reasoning.encrypted','data'=>'opaque'],str_repeat('x',Policy::MAX_REASONING_REPLAY+1)] as $bad)
+        denied(fn()=>Policy::request(request(['messages'=>[['role'=>'assistant','content'=>'Text.','reasoning_content'=>$bad]]]),$models),'FREE_REQUEST_INVALID');
+    foreach (['reasoning_details','reasoning','thinking','signature'] as $field)
+        denied(fn()=>Policy::request(request(['messages'=>[['role'=>'assistant','content'=>'Text.',$field=>'Opaque.']]]),$models),'FREE_REQUEST_INVALID');
+    denied(fn()=>Policy::request(request(['messages'=>[['role'=>'assistant','content'=>str_repeat('x',Policy::MAX_BODY),'reasoning_content'=>'Reasoning.']]]),$models),'FREE_INPUT_LIMIT');
+});
+run('reasoning replay keeps existing private-key isolation and original wire text unchanged', function () use ($secret,$session) {
+    $calls=0; $posted=null;
+    $relay=new Relay($secret,new Store(directory(),$secret),function($method,$url,$headers,$body) use (&$calls,&$posted) {
+        $calls++; if ($method==='POST') $posted=json_decode($body,true,64,JSON_THROW_ON_ERROR);
+        return ['status'=>200,'type'=>'application/json','body'=>$method==='GET'?json_encode(['data'=>[model()]]):response()];
+    });
+    foreach ([$secret,base64_encode($secret),bin2hex($secret)] as $private)
+        denied(fn()=>$relay->infer(request(['messages'=>[['role'=>'assistant','content'=>'Text.','reasoning_content'=>$private]]]),'192.0.2.30',$session),'FREE_PRIVATE_DATA_HELD');
+    ok($calls===0);
+    $reasoning="Synthetic reasoning with unicode \u{03C0} and newline\nkept exactly.";
+    $body=request(['messages'=>[['role'=>'assistant','content'=>'Synthetic answer.','reasoning_content'=>$reasoning],['role'=>'user','content'=>'Continue carefully.']]]);
+    $raw=json_encode($body,JSON_THROW_ON_ERROR);
+    ok($relay->infer($body,'192.0.2.30',$session,$raw)['status']===200);
+    ok($calls===2 && $posted['messages'][0]['reasoning_content']===$reasoning);
+});
 run('hosted tools, URLs, unknown fields, media and malformed tool roles are rejected', function () {
     $models = Policy::models(['data'=>[model()]]);
     foreach ([request(['url'=>'https://attacker.example']),request(['model'=>'paid-model']),
