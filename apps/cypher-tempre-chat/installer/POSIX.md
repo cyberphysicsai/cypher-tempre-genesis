@@ -31,8 +31,8 @@ The application, portable runtimes and immutable releases live under that privat
 per-user root; `data/` is persistent. Existing external Timechains remain at
 their selected paths. macOS setup creates a local app in `~/Applications`;
 Linux creates a user application-menu entry. It opens the authenticated local
-chat with OpenClaw and PoI included. Model/API selection, wallet verification and
-fresh-versus-existing chain selection remain explicit user choices.
+chat with OpenClaw and PoI included. Choose your model/API and a fresh or existing
+chain. Provider setup is available immediately after local authentication.
 
 Optional browser automation can use an existing Chrome, Chromium or Edge
 executable with a fresh owned profile. The **Browser** settings tab also offers
@@ -66,8 +66,11 @@ The Python front door waits for the private owned-runtime status and supports
 relaunch without replacing a live matching runtime. It does not report success
 merely because Node was spawned, and it never kills another program to obtain a
 port. Quiet CI mode reports a nonzero failure/result file; desktop launches show
-a safe error where the OS's dialog tools are available. Logs stay in the private
-installation. Quitting the browser does not stop the local runtime.
+a safe error where the OS's dialog tools are available. Cold startup has a bounded
+four-minute readiness window for Gateway startup and local restoration. An
+exited child still fails immediately, and only its authenticated owned runtime
+can report readiness. Logs stay in the private installation. Quitting the browser
+does not stop the local runtime.
 
 `current.json` and `previous.json` select immutable releases. Setup verifies its
 source ZIP, exact dependency lockfiles, native engine commitments and installed
@@ -82,7 +85,7 @@ mutations or an arbitrary schema downgrade.
 From the application directory:
 
 ```sh
-python3 installer/build_posix.py --archive /reviewed/cypher-tempre-chat-v0.9.1.zip --output-dir /reviewed/setup --platform all
+python3 installer/build_posix.py --archive /reviewed/cypher-tempre-chat-v0.9.2.zip --output-dir /reviewed/setup --platform all
 ```
 
 The builder reads bootstrap/installer sources and runtime pins from that ZIP,
@@ -99,7 +102,7 @@ only in a synthetic HOME/XDG directory, briefly starts a private local runtime
 with no browser and uses synthetic native-chain data, then authenticates shutdown:
 
 ```sh
-python3 installer/acceptance_posix.py --installer /reviewed/setup/CypherTempre-ChainChat-Setup-0.9.1-linux.tar.gz --work-root /var/tmp/chainchat-acceptance
+python3 installer/acceptance_posix.py --installer /reviewed/setup/CypherTempre-ChainChat-Setup-0.9.2-linux.tar.gz --work-root /var/tmp/chainchat-acceptance
 ```
 
 Use the macOS ZIP path on a macOS runner. Optional `--cache-dir` reuses only

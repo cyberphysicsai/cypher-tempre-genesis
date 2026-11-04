@@ -55,7 +55,6 @@ async function fixture(t, options = {}) {
   const registryBytes = Object.fromEntries(await Promise.all(['modalities.json', 'senses.json'].map(async name =>
     [name, await fs.readFile(path.join(root, 'registry', name))])));
   const app = await createApp({ dataDir: path.join(directory, 'application'), pairingCode: 'LOADOUT-REPAIR-FIXTURE',
-    licenseConfig: { mode: 'holdings', required: options.holdings === true },
     engine: async request => {
       const result = await engine(request);
       return options.inspect ? options.inspect(request, result) : result;
@@ -90,7 +89,7 @@ async function fixture(t, options = {}) {
   const paired = await call('/api/agents/pair', { root }); assert.equal(paired.status, 200, JSON.stringify(paired.body));
   const record = app.store.agents.find(agent => agent.root === root);
   assert.ok(record);
-  if (!options.holdings) assert.equal((await call('/api/provider', { provider: 'compatible', model: 'synthetic-fixture', baseUrl: 'http://127.0.0.1:1/v1',
+  if (options.provider !== false) assert.equal((await call('/api/provider', { provider: 'compatible', model: 'synthetic-fixture', baseUrl: 'http://127.0.0.1:1/v1',
     apiKey: 'synthetic-fixture-key' })).status, 200);
   return { ...app, root, directory, original, registryBytes, call, record, paired };
 }
@@ -139,11 +138,11 @@ test('refresh repairs persisted invalid IDs, retains valid choices, and never eq
   assert.equal((await engine({ op: 'verify', root: f.root })).verified, true);
 });
 
-test('authenticated equipment clearing remains available without model or verified holdings and grants no new capability', { timeout: 180000 }, async t => {
-  const f = await fixture(t, { holdings: true });
+test('authenticated equipment clearing remains available without a model and grants no new capability', { timeout: 180000 }, async t => {
+  const f = await fixture(t, { provider: false });
   const before = await fs.readFile(path.join(f.root, 'chain/rings.jsonl'));
   const configure = await f.call('/api/loadout', { modalities: ['2'], senses: ['5'] });
-  assert.ok(configure.status >= 400);
+  assert.equal(configure.status, 200, JSON.stringify(configure.body));
   const reset = await f.call('/api/loadout/reset', { confirm: true });
   assert.equal(reset.status, 200, JSON.stringify(reset.body));
   assert.deepEqual(reset.body.loadout, { modalities: [], senses: [] });

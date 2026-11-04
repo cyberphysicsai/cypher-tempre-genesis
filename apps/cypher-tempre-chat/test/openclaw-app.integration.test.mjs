@@ -24,8 +24,7 @@ test('actual app composes native runtime, owner pairing, fresh genesis and priva
   t.after(async () => { await app?.closeRuntime(); if (app?.server.listening) { app.server.closeAllConnections(); await new Promise(resolve => app.server.close(resolve)); }
     provider.closeAllConnections(); await new Promise(resolve => provider.close(resolve));
     assert.ok(path.basename(directory).startsWith('ct-native-app-smoke-')); await fs.rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); });
-  app = await createApp({ dataDir: path.join(directory, 'data'), pairingCode: 'NATIVE-APP-FIXTURE',
-    licenseConfig: { mode: 'holdings', required: false }, openclaw: { stateDir: runtime, packageRoot, nodePath,
+  app = await createApp({ dataDir: path.join(directory, 'data'), pairingCode: 'NATIVE-APP-FIXTURE', openclaw: { stateDir: runtime, packageRoot, nodePath,
       pluginPath: fileURLToPath(new URL('../openclaw/plugin', import.meta.url)) } });
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   const base = `http://127.0.0.1:${app.server.address().port}`;

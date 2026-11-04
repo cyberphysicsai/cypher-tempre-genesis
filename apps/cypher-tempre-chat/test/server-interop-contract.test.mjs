@@ -27,7 +27,7 @@ async function fixture(t, options = {}) {
   const inspected = () => ({ ok: true, verified: true, head: { index: 0, hash: HASH },
     genesis: { name: "Contract Fixture", covenant: FRUITS }, runtime: { supported: true, mode: "active" },
     faculties: [], history, operatorCompatibility });
-  const app = await createApp({ dataDir, pairingCode: "CONTRACT-FIXTURE", licenseConfig: { mode: "holdings", required: false },
+  const app = await createApp({ dataDir, pairingCode: "CONTRACT-FIXTURE",
     engine: async request => {
       calls.push(structuredClone(request));
       if (["inspect", "init", "verify"].includes(request.op)) return inspected();

@@ -61,7 +61,6 @@ upstream.listen(0, '127.0.0.1'); await once(upstream, 'listening');
 const results = [];
 try {
   app = await createApp({ dataDir: path.join(directory, 'data'), pairingCode: 'ACTIVE-REVIEW-DIAGNOSIS',
-    licenseConfig: { mode: 'holdings', required: false },
     openclaw: { stateDir: path.join(directory, 'gateway'),
       packageRoot: runtimePackage, nodePath: install.node,
       pluginPath: path.join(install.release, 'openclaw/plugin'), onDiagnostic: line => diagnostics.push(line) } });

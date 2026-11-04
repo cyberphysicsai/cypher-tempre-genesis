@@ -70,9 +70,9 @@ scheduler starts. One-shot, interval and five-field cron/timezone schedules are
 supported. The optional model automation tool can manage only the current agent's
 managed jobs and bindings, after its separate per-agent grant and PoI review.
 
-Automation requires the local app, a live eligible owner session and a connected
+Automation requires the local app, a live authenticated owner session and a connected
 model. Background work retains the exact authorizing session, provider and
-wallet-authorization epoch; it never borrows another client's API key. After a
+local-session authorization epoch; it never borrows another client's API key. After a
 restart or provider change, explicitly resume or wake the selected agent's work.
 Pausing a channel also revokes dependent scheduled deliveries. Pausing the chain
 or losing credentials holds work. Native history and the

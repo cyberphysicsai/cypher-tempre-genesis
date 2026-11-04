@@ -23,7 +23,7 @@ import {
 import { archetypes, chooseArchetypes } from "./lib/archetypes.mjs";
 import { StateStore, validateSettings, writeJSON, reconcileLoadout, defaultLoadout } from "./lib/state.mjs";
 import { sanitizeModelValue, sanitizeModelText } from "./lib/terminology.mjs";
-import { createHoldingsGate } from "./lib/holdings-gate.mjs";
+import { createSessionAuthority } from "./lib/session-authority.mjs";
 import { Activity, CAPABILITIES, cognitionFor, validateCognition } from "./lib/cognition.mjs";
 import { enrichPrepared, searchPerspectives } from "./lib/native-cognition.mjs";
 import { createPoIBroker } from "./openclaw/broker.mjs";
@@ -294,30 +294,20 @@ export async function createApp(options = {}) {
   }
   const protectedToolRoots = () => [appRoot, store.root, ...store.agents.map(agent => agent.root)];
   const authorityKey = identity => `${identity.agentId}:${identity.genesisHash}`;
-  const license = await createHoldingsGate({
-    root: store.root,
-    configPath: path.join(PUBLIC, "license-config.json"),
-    config: options.licenseConfig,
-    fetchImpl: options.licenseFetch,
-    now: options.licenseNow,
-  });
   const requestSession = new AsyncLocalStorage();
-  const requireHoldings = async () => {
+  const authority = createSessionAuthority({ resolveToken: token => sessions.get(token),
+    now: options.sessionNow || Date.now });
+  const requireLocalAccess = async () => {
     const current = requestSession.getStore();
-    if (
-      current?.session &&
-      (current.session.expires <= Date.now() ||
-        sessions.get(current.token) !== current.session)
-    ) {
-      abortSession(current.session);
-      license.revoke(current.session);
-      throw err(
-        "The paired bridge session expired. Pair this browser again.",
-        "PAIR_REQUIRED",
-        401,
-      );
+    try { authority.assertCurrent(current); }
+    catch (error) {
+      if (error.code === "PAIR_REQUIRED" && current?.session) {
+        abortSession(current.session);
+        forgetResume(current.session);
+        if (sessions.get(current.token) === current.session) sessions.delete(current.token);
+      }
+      throw error;
     }
-    await license.requireActive(current?.session, current?.epoch);
   };
   const runNativeEngine = options.engine || runEngine;
   const engine = async (request) => {
@@ -328,10 +318,10 @@ export async function createApp(options = {}) {
     );
     if (mutating && request.preview !== true) {
       checkCancelled(requestSession.getStore()?.signal);
-      if (!(request.op === "dormancy" && request.action === "pause")) await requireHoldings();
+      if (!(request.op === "dormancy" && request.action === "pause")) await requireLocalAccess();
     }
     // Authorization is checked at the native write boundary. Once an atomic
-    // append starts, preserve its receipt even if the wallet is revoked while
+    // append starts, preserve its receipt even if its local session is revoked while
     // it runs; discarding that receipt can cause a duplicate retry.
     const abilities = {
       prepare: ["verify", "faculties", ...(request.recall === false ? [] : ["recall"])],
@@ -384,7 +374,7 @@ export async function createApp(options = {}) {
   // retain their exact values. Injected transports obey the same boundary.
   const model = async (config, args) => {
     checkCancelled(args.signal);
-    await requireHoldings();
+    await requireLocalAccess();
     assertCredentialIsolation(config, args);
     assertServiceIsolation(args);
     const scope = requestSession.getStore();
@@ -411,7 +401,7 @@ export async function createApp(options = {}) {
         pluginTools: pluginCatalogue.map(tool => tool.name),
         toolProtectedRoots: protectedToolRoots(),
         authorize: () => requestSession.run(scope, async () => {
-          await requireHoldings();
+          await requireLocalAccess();
           if (identity && toolPermissions.get(authorityKey(identity)).revision !== tools.revision)
             throw err("Tool permissions changed during this run. Start a fresh turn.", "TOOL_AUTHORITY_CHANGED", 409);
           if (pluginCatalogue.length && JSON.stringify(await trustedPlugins.toolCatalogue({ identity })) !== JSON.stringify(pluginCatalogue))
@@ -428,7 +418,7 @@ export async function createApp(options = {}) {
       else error.stage ||= errorStage(error, 'generation');
       throw error;
     }
-    await requireHoldings();
+    await requireLocalAccess();
     checkCancelled(args.signal);
     assertCredentialIsolation(config, rawResult);
     assertServiceIsolation(rawResult);
@@ -442,7 +432,7 @@ export async function createApp(options = {}) {
   };
   const reviewer = async (config, args) => {
     checkCancelled(args.signal);
-    await requireHoldings();
+    await requireLocalAccess();
     assertCredentialIsolation(config, args);
     assertServiceIsolation(args);
     const boundedArgs = {
@@ -455,7 +445,7 @@ export async function createApp(options = {}) {
     let rawResult;
     try { rawResult = trace?.running ? await trace.step("review", "Semantic covenant review", action) : await action(); }
     catch (error) { error.stage ||= 'review'; throw error; }
-    await requireHoldings();
+    await requireLocalAccess();
     checkCancelled(args.signal);
     assertCredentialIsolation(config, rawResult);
     assertServiceIsolation(rawResult);
@@ -466,11 +456,11 @@ export async function createApp(options = {}) {
     poiBroker = createPoIBroker({ engine, review: async (config, args) =>
       strictReview(await reviewer(config, args), args.availableEvidence || []),
       generateSummary: async (config, { system, sourceMessages, instructions, signal }) => {
-        await requireHoldings();
+        await requireLocalAccess();
         const args = { system, messages: [{ role: 'user', content: JSON.stringify({ instructions, transcript: sourceMessages }) }], maxTokens: answerTokenAllowance(config), signal };
         assertCredentialIsolation(config, args); assertServiceIsolation(args);
         const result = await generateModel(config, args);
-        await requireHoldings(); assertCredentialIsolation(config, result); assertServiceIsolation(result);
+        await requireLocalAccess(); assertCredentialIsolation(config, result); assertServiceIsolation(result);
         return result;
       }, channelIngress: async request => {
         if (!automation) throw err('Managed channel ingress is not ready.', 'CHANNEL_HELD', 409);
@@ -528,7 +518,7 @@ export async function createApp(options = {}) {
       controllers: new Set(),
       agentId: store.agents[0]?.id || null,
     };
-    license.attach(paired);
+    authority.attach(paired);
     sessions.set(token, paired);
     return token;
   }
@@ -545,6 +535,7 @@ export async function createApp(options = {}) {
     return ticket;
   }
   const abortSession = (session) => {
+    authority.revoke(session);
     for (const controller of session.controllers || []) controller.abort();
     for (const [identity, lease] of automationOwners) if (lease.session === session) automationOwners.delete(identity);
     session.provider = null;
@@ -555,7 +546,6 @@ export async function createApp(options = {}) {
     for (const [token, session] of sessions)
       if (session.expires < now) {
         abortSession(session);
-        license.revoke(session);
         forgetResume(session);
         sessions.delete(token);
       }
@@ -897,7 +887,7 @@ export async function createApp(options = {}) {
         const latest = cognitionFor(record);
         if (!latest.learning || !latest.autoDream || latest.mode === "dormant") return;
         try {
-          await requireHoldings();
+          await requireLocalAccess();
           await exclusive(record, async () => {
             const inspected = await engine({ op: "inspect", root: record.root });
             requireAwake(inspected);
@@ -1198,7 +1188,7 @@ export async function createApp(options = {}) {
         "CANCELLED",
         499,
       );
-    await requireHoldings();
+    await requireLocalAccess();
     pending.exchanges.push(exchange);
     pending.bytes += bytes({ input: message, output: candidate });
     pending.expectedHead = prepared.head.hash;
@@ -1217,7 +1207,7 @@ export async function createApp(options = {}) {
         prepared.head.hash,
       );
     else {
-      await requireHoldings();
+      await requireLocalAccess();
       exchange.released = true;
       await store.savePending(record, pending);
     }
@@ -1254,11 +1244,11 @@ export async function createApp(options = {}) {
   function leaseAutomation(binding, session) {
     const scope = requestSession.getStore();
     if (scope?.session !== session || sessions.get(scope.token) !== session || !session.provider) throw err('Connect a model before authorizing background work.', 'PROVIDER_REQUIRED', 409);
-    automationOwners.set(authorityKey(binding), { session, token: scope.token, provider: session.provider, epoch: license.epoch(session) });
+    automationOwners.set(authorityKey(binding), { session, token: scope.token, provider: session.provider, epoch: authority.epoch(session) });
   }
   async function executeAgentService(record, identity, proposed) {
     if (!automation || !identity) throw err('This agent has no managed service authority.', 'MANAGED_SERVICE_SCOPE', 403);
-    await requireHoldings();
+    await requireLocalAccess();
     const params = validateManagedServiceTool(proposed), snapshot = await automation.status(serviceOwner);
     const binding = { ownerId: serviceOwner, agentId: record.id, genesisHash: identity.genesisHash };
     leaseAutomation(binding, requestSession.getStore().session);
@@ -1286,7 +1276,7 @@ export async function createApp(options = {}) {
       purpose: 'candidate', root: record.root, input: request.command, loadout: keys(record.loadout), settings: record.settings,
       nativeIdentity: { agentId: request.agentId, genesisHash: request.genesisHash },
       signal: scope.signal, modelCapabilities: { reasoning: scope.session.provider?.reasoningCapable === true },
-      authorize: () => requestSession.run(scope, requireHoldings), run: callback => requestSession.run(scope, callback),
+      authorize: () => requestSession.run(scope, requireLocalAccess), run: callback => requestSession.run(scope, callback),
       event: (ability, status, label) => scope.trace?.event(ability, status, label) });
     return { kind: 'control', action: 'sessions.compact', text: result.compacted ? 'Native conversation compacted after PoI review.' :
       result.reason || 'Compaction left the conversation unchanged.', result };
@@ -1297,11 +1287,11 @@ export async function createApp(options = {}) {
     if (!record) throw err('The scheduled Timechain is unavailable.', 'AGENT_REQUIRED', 409);
     const lease = automationOwners.get(authorityKey(binding));
     if (!lease || sessions.get(lease.token) !== lease.session || lease.session.expires <= Date.now() ||
-        lease.session.provider !== lease.provider || license.epoch(lease.session) !== lease.epoch)
-      throw err('Resume this agent’s background work from a live eligible session with your chosen model.', 'PROVIDER_REQUIRED', 409);
+        lease.session.provider !== lease.provider || authority.epoch(lease.session) !== lease.epoch)
+      throw err('Resume this agent’s background work from a live local session with your chosen model.', 'PROVIDER_REQUIRED', 409);
     const { token, session, epoch } = lease;
     return requestSession.run({ session, token, epoch, operationRecord: record, signal }, async () => {
-      checkCancelled(signal); await requireHoldings();
+      checkCancelled(signal); await requireLocalAccess();
       const inspected = await engine({ op: 'inspect', root: record.root, learning: false });
       if (!inspected.verified || inspected.genesis?.hash !== binding.genesisHash) throw err('The bound genesis changed.', 'CHAIN_INVALID', 409);
       requireAwake(inspected);
@@ -1310,7 +1300,7 @@ export async function createApp(options = {}) {
   }
   async function authorizeServiceAction(context, action) {
     const scope = requestSession.getStore(), record = context?.record || scope?.operationRecord || agentFor(scope?.session);
-    await requireHoldings(); checkCancelled(scope?.signal);
+    await requireLocalAccess(); checkCancelled(scope?.signal);
     assertCredentialIsolation(providerFor(scope.session), action); assertServiceIsolation(action);
     const actionText = JSON.stringify({ kind: 'proposed-host-service-action', action });
     if (Buffer.byteLength(actionText) > 512 * 1024) throw err('The service action exceeds the review limit.');
@@ -1319,7 +1309,7 @@ export async function createApp(options = {}) {
     requireAwake(await engine({ op: 'inspect', root: record.root, learning: false }));
     const assessment = await assess(providerFor(scope.session), prepared, input, actionText, [], scope.signal);
     await nativeEvaluation(record, prepared, { input, output: actionText, assessment, scores: assessment.scores, usedRings: assessment.usedRings });
-    await requireHoldings(); checkCancelled(scope.signal);
+    await requireLocalAccess(); checkCancelled(scope.signal);
     const current = await engine({ op: 'inspect', root: record.root, learning: false });
     if (current.head.hash !== prepared.head.hash || current.genesis.hash !== prepared.genesis.hash) throw err('The chain changed during action review.', 'STALE_HEAD', 409);
     return { allowed: true, permitId: randomUUID(), actionHash: createHash('sha256').update(JSON.stringify(action)).digest('hex'),
@@ -1539,7 +1529,7 @@ export async function createApp(options = {}) {
         if (!record || sessions.get(record.token) !== record.session || record.session.origin !== origin ||
             record.session.resumeDigest !== digest || record.session.expires < Date.now()) {
           if (record && record.session.expires < Date.now()) {
-            abortSession(record.session); license.revoke(record.session); forgetResume(record.session);
+            abortSession(record.session); forgetResume(record.session);
             sessions.delete(record.token);
           }
           throw err("This local resume ticket is invalid, expired or already used. Launch ChainChat again.", "RESUME_REJECTED", 403);
@@ -1572,8 +1562,7 @@ export async function createApp(options = {}) {
       if (!session || session.expires < Date.now()) {
         if (session) {
           abortSession(session);
-          license.revoke(session);
-          forgetResume(session);
+            forgetResume(session);
         }
         sessions.delete(token);
         throw err(
@@ -1589,7 +1578,7 @@ export async function createApp(options = {}) {
           403,
         );
       return await requestSession.run(
-        { session, token, epoch: license.epoch(session) },
+        { session, token, epoch: authority.epoch(session) },
         async () => {
           if (req.method === "GET" && url.pathname === "/api/openclaw") {
             const identity = await nativeControlIdentity(session);
@@ -1610,8 +1599,6 @@ export async function createApp(options = {}) {
               throw err("Pairing codes are available only in the local application.", "LOCAL_ONLY", 403);
             return send(200, { code: pairingCode });
           }
-          if (req.method === "GET" && url.pathname === "/api/license")
-            return send(200, await license.describe(session));
           if (req.method === "GET" && url.pathname === "/api/state")
             return send(200, await state(session));
           if (req.method === "POST" && url.pathname === "/api/agents/discover")
@@ -1633,7 +1620,7 @@ export async function createApp(options = {}) {
           if (url.pathname === '/api/openclaw/browser/install') {
             if (!browserBootstrap) throw err('Install the current OpenClaw edition to set up its owned browser.', 'OPENCLAW_REQUIRED', 409);
             if (Object.keys(input).length) throw err('Managed browser setup accepts no custom command or download URL.');
-            await requireHoldings();
+            await requireLocalAccess();
             const record = agentFor(session);
             return send(200, await exclusive(record, async () => {
               await authorizeServiceAction({ record }, { operation: 'browser.install', artifact: 'Chromium revision from the locked local Playwright package' });
@@ -1653,7 +1640,7 @@ export async function createApp(options = {}) {
               for (const record of store.agents) cancelAgent(record);
               return send(200, await trustedPlugins[operation](context, input));
             }
-            await requireHoldings();
+            await requireLocalAccess();
             if (busy.size) throw err('Stop active agent work before changing trusted native code.', 'AGENT_BUSY', 409);
             return send(200, await exclusive(identity.record, () => trustedPlugins[operation](context, input)));
           }
@@ -1665,7 +1652,7 @@ export async function createApp(options = {}) {
               if (Object.keys(input).some(key => !['kind', 'id'].includes(key))) throw err('Choose a job or channel to pause.');
               return send(200, await automation.setEnabled(serviceOwner, input.kind, input.id, false));
             }
-            await requireHoldings();
+            await requireLocalAccess();
             const record = agentFor(session), binding = await bindingFor(session);
             return send(200, await exclusive(record, async () => {
               await authorizeServiceAction({ record }, { operation: 'automation.' + action, binding, definition: input });
@@ -1682,7 +1669,7 @@ export async function createApp(options = {}) {
             if (Object.keys(input).some(key => !['channelId', 'accountId', 'pluginId', 'config', 'credentials'].includes(key)) ||
                 !/^[a-z][a-z0-9-]{0,127}$/.test(input.channelId || '') || !/^[a-zA-Z0-9_.:-]{1,128}$/.test(input.accountId || '') ||
                 !input.config || typeof input.config !== 'object' || Array.isArray(input.config)) throw err('Choose a native channel, account and configuration.');
-            await requireHoldings();
+            await requireLocalAccess();
             validateChannelConfiguration(input.config);
             const pluginId = input.pluginId || input.channelId;
             if (trustedPlugins && !await trustedPlugins.channelAllowed(pluginId, input.channelId))
@@ -1699,14 +1686,14 @@ export async function createApp(options = {}) {
           if (url.pathname === "/api/openclaw/config") {
             if (Object.keys(input).some(key => !["patch", "revision"].includes(key)))
               throw err("Only a native configuration patch and its current revision are accepted.");
-            await requireHoldings();
+            await requireLocalAccess();
             if (busy.size || session.controllers.size)
               throw err("Wait for active agent work to finish before changing native configuration.", "AGENT_BUSY", 409);
             assertCredentialIsolation(session.provider || {}, input.patch);
             const identity = await nativeControlIdentity(session);
             const authority = identity.agentId ? toolPermissions.get(authorityKey(identity)).grant : disabledToolAuthority();
             const result = await openclaw.updateControls({ patch: input.patch, revision: input.revision, authority });
-            await requireHoldings();
+            await requireLocalAccess();
             return send(200, result);
           }
           if (url.pathname === "/api/openclaw/tools") {
@@ -1719,7 +1706,7 @@ export async function createApp(options = {}) {
               return send(200, { toolAuthority: saved });
             }
             const identity = await nativeControlIdentity(session, true);
-            if (input.enabled !== false) await requireHoldings();
+            if (input.enabled !== false) await requireLocalAccess();
             const pluginTools = trustedPlugins ? await trustedPlugins.toolCatalogue({ identity }) : [];
             const grant = await validateToolAuthority(input, { protectedRoots: protectedToolRoots(), managedBrowser: !!browserService, pluginTools: pluginTools.map(tool => tool.name) });
             const saved = await toolPermissions.set(authorityKey(identity), grant);
@@ -1731,7 +1718,7 @@ export async function createApp(options = {}) {
             if (Object.keys(input).some(key => key !== "command")) throw err("Only a native command is accepted.");
             const command = text(input.command, "OpenClaw command", 20000);
             assertCredentialIsolation(session.provider || {}, command);
-            if (!/^\/(?:stop|goal\s+pause)\s*$/i.test(command)) await requireHoldings();
+            if (!/^\/(?:stop|goal\s+pause)\s*$/i.test(command)) await requireLocalAccess();
             const identity = await nativeControlIdentity(session);
             if (/^\/stop\s*$/i.test(command)) abortSession(session);
             if (/^\/goal\s+pause\s*$/i.test(command) && identity.record) cancelAgent(identity.record);
@@ -1741,34 +1728,6 @@ export async function createApp(options = {}) {
               ? await exclusive(identity.record, execute) : await execute();
             assertCredentialIsolation(session.provider || {}, result);
             return send(200, { ...result, state: await state(session) });
-          }
-          if (url.pathname === "/api/license/challenge") {
-            abortSession(session);
-            return send(200, license.challenge(session, input.address));
-          }
-          if (url.pathname === "/api/license/verify") {
-            await license.authenticate(session, input);
-            return send(
-              200,
-              await license.describe(session, { challenge: input.challenge }),
-            );
-          }
-          if (url.pathname === "/api/license/logout") {
-            abortSession(session);
-            license.revoke(session);
-            return send(
-              200,
-              await license.describe(session, { challenge: input.challenge }),
-            );
-          }
-          if (url.pathname === "/api/license/check") {
-            return send(
-              200,
-              await license.describe(session, {
-                force: true,
-                challenge: input.challenge,
-              }),
-            );
           }
           if (
             [
@@ -1782,7 +1741,7 @@ export async function createApp(options = {}) {
             ].includes(url.pathname) ||
             (url.pathname === "/api/provider" && input.disconnect !== true)
           )
-            await requireHoldings();
+            await requireLocalAccess();
           if (url.pathname === "/api/provider") {
             if (input.disconnect === true) {
               abortSession(session);
@@ -1796,8 +1755,7 @@ export async function createApp(options = {}) {
           }
           if (url.pathname === "/api/unpair") {
             abortSession(session);
-            license.revoke(session);
-            forgetResume(session);
+                forgetResume(session);
             sessions.delete(token);
             return send(200, { ok: true });
           }
@@ -1875,8 +1833,8 @@ export async function createApp(options = {}) {
             if (modeChange && input.confirm !== true)
               throw err("Use the deliberate pause or resume control.", "CONFIRMATION_REQUIRED", 409);
             const isPause = modeChange && next.mode === "dormant";
-            // Pausing never requires renewed token access. It can only halt work.
-            if (!isPause) await requireHoldings();
+            // Pausing never requires a model connection. It can only halt work.
+            if (!isPause) await requireLocalAccess();
             const identity = process.platform === "win32" ? record.root.toLowerCase() : record.root;
             if (isPause) {
               const allowed = new Set(["mode", "confirm", "reason"]);
@@ -1907,7 +1865,7 @@ export async function createApp(options = {}) {
           }
           if (url.pathname === "/api/faculties/lifecycle" || url.pathname === "/api/maintenance")
             return await exclusive(record, async () => {
-              if (input.confirm === true && input.preview !== true) await requireHoldings();
+              if (input.confirm === true && input.preview !== true) await requireLocalAccess();
               const lifecycle = url.pathname.endsWith("lifecycle");
               const reason = optionalControlReason(input);
               assertCredentialIsolation(session.provider, reason);
@@ -1925,7 +1883,7 @@ export async function createApp(options = {}) {
               const preview = await engine({ ...operation, preview: true, ...(input.confirm === true ? { confirmed: true } : {}) });
               if (input.preview === true) return send(200, { ...preview, preview: true });
               if (input.confirm !== true) throw err("Confirm the displayed native action.", "CONFIRMATION_REQUIRED", 409);
-              await requireHoldings();
+              await requireLocalAccess();
               const config = providerFor(session);
               const controller = new AbortController(); controller.agentRoot = record.root; session.controllers.add(controller);
               requestSession.getStore().signal = controller.signal;
@@ -2162,7 +2120,7 @@ export async function createApp(options = {}) {
                   );
                 next[field] = [...new Set(input[field])];
               }
-              await requireHoldings();
+              await requireLocalAccess();
               record.loadout = next;
               delete record.loadoutDefaultsPending;
               delete record.loadoutRepair;
@@ -2176,7 +2134,7 @@ export async function createApp(options = {}) {
               if (input.confirm !== true)
                 throw err("Confirm clearing the selected agent's equipped faculties.", "LOADOUT_RESET_CONFIRM", 400);
               // Removing app-side equipment grants no new action authority and
-              // remains available when provider or wallet authorization expires.
+              // remains available when provider or local authorization expires.
               record.loadout = { modalities: [], senses: [] };
               delete record.loadoutDefaultsPending;
               delete record.loadoutRepair;
@@ -2197,7 +2155,7 @@ export async function createApp(options = {}) {
                 )
               )
                 throw err("Unknown perspective archetype.");
-              await requireHoldings();
+              await requireLocalAccess();
               record.settings = next;
               await store.save();
               return send(200, await state(session));
@@ -2518,7 +2476,6 @@ export async function createApp(options = {}) {
     idleJobs.clear();
     for (const session of sessions.values()) {
       abortSession(session);
-      license.revoke(session);
     }
     sessions.clear();
     resumeTickets.clear();

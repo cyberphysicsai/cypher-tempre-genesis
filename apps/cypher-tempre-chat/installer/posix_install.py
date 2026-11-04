@@ -267,7 +267,8 @@ def launch(root, quiet=False):
             child = subprocess.Popen([active['node'], str(Path(active['release']) / 'openclaw/launcher.mjs')],
                 cwd=active['release'], env=environment(active), stdout=stream, stderr=subprocess.STDOUT,
                 start_new_session=True)
-        deadline = time.monotonic() + 180
+        # Allow the Gateway's 180-second cold start plus local restoration.
+        deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             owner = authenticated_status(root, active)
             exited = child.poll()

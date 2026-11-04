@@ -68,8 +68,8 @@ with zero lockfile findings would not itself prove embedded copies are fixed.
 
 ## Native controls and explicit local tools
 
-Native goals/preferences have durable local session state; BYOK keys and wallet
-authorization remain in parent-process memory. The operator token never reaches
+Native goals/preferences have durable local session state; BYOK keys and local
+session authority remain in parent-process memory. The operator token never reaches
 the browser. Native schema inspection is redacted; edits cannot remove required
 PoI enforcement or replace managed credentials, plugins or gateway bindings.
 Deterministic native slash-command results are control output, not model answers
@@ -88,7 +88,7 @@ Web-fetch grants retain
 native DNS/private-network checks and disable redirects. These checks do not
 constitute a system firewall or OS sandbox. Native channel text and scheduled
 turns use explicit immutable bindings and the shared review/commit pipeline;
-separate outgoing permits expire on source, wallet or provider revocation.
+separate outgoing permits expire on source, local-session or provider revocation.
 
 Compaction requires an exact-source summary receipt and native transcript CAS.
 Private, per-invocation model-route capabilities are added by the mandatory

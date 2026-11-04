@@ -61,20 +61,9 @@ def main():
     native_root = target / "data" / "agents" / "acceptance-agent"
     environment = {**os.environ, "CT_OPERATOR_TRUST_ROOT": str(target / "data/operator-approvals"),
                    "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1"}
-    frontend_policy = """import { requiresHoldings } from './public/chainchat-display.js';
-const bootstrap = ['/api/launch', '/api/local-resume', '/api/agents/discover', '/api/audit/read'];
-if (bootstrap.some(route => requiresHoldings(route, {})))
-  throw new Error('Local setup or read-only audit was gated before authentication');
-if (!requiresHoldings('/api/chat', {}) || !requiresHoldings('/api/provider', {}))
-  throw new Error('Model operations lost the holdings gate');
-process.stdout.write(JSON.stringify({ bootstrapRequiresHoldings: false, modelOperationsRequireHoldings: true }));
-"""
-    frontend = subprocess.run([active["node"], "--input-type=module", "-e", frontend_policy],
-        cwd=release, env=environment, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW)
-    if frontend.returncode:
-        raise RuntimeError("Installed frontend incorrectly gates bootstrap/audit or ungates model operations.")
-    json.loads(frontend.stdout)
+    removed_access_assets = ("holdings-wallet.js", "seat-wallet.js", "license-config.json", "seat-registry.json")
+    if any((release / "public" / name).exists() for name in removed_access_assets):
+        raise RuntimeError("The installed release still contains removed token-access assets.")
 
     def engine(op, **fields):
         result = subprocess.run([active["python"], str(release / "engine_bridge.py")],
@@ -101,7 +90,7 @@ process.stdout.write(JSON.stringify({ bootstrapRequiresHoldings: false, modelOpe
     probe_environment = {**environment, "CT_CHAT_NO_BROWSER": "1", "CT_CHAT_PORT": "0"}
     owner_file = target / "data/runtime-owner.json"
     launched = subprocess.run([str(target / "ChainChat.exe"), "--launch", "--quiet", "--install-root", str(target),
-        "--result-file", str(work / "launch-result.json")], env=probe_environment, timeout=150, creationflags=subprocess.CREATE_NO_WINDOW)
+        "--result-file", str(work / "launch-result.json")], env=probe_environment, timeout=300, creationflags=subprocess.CREATE_NO_WINDOW)
     if launched.returncode:
         raise RuntimeError("Installed one-click launcher failed.")
     if not owner_file.exists():
@@ -137,8 +126,10 @@ process.stdout.write(JSON.stringify({ bootstrapRequiresHoldings: false, modelOpe
         if not isinstance(nonce, str) or len(nonce) != 64:
             raise RuntimeError("Installed launcher did not supply a bounded local bootstrap credential.")
 
-        def local_post(route, fields, origin=local_origin, site="same-origin"):
+        def local_post(route, fields, origin=local_origin, site="same-origin", bearer=None):
             headers = {"Content-Type": "application/json"}
+            if bearer:
+                headers["Authorization"] = "Bearer " + bearer
             if origin is not None:
                 headers["Origin"] = origin
             if site is not None:
@@ -168,7 +159,25 @@ process.stdout.write(JSON.stringify({ bootstrapRequiresHoldings: false, modelOpe
         connected = local_post("/api/launch", {"nonce": nonce})
         if not all(isinstance(connected.get(key), str) and len(connected[key]) == 64 for key in ("token", "resumeTicket")):
             raise RuntimeError("Installed local UI could not authenticate automatically.")
+        fixture_key = "disposable-installer-onboarding-key"
+        try:
+            local_post("/api/provider", {"provider": "compatible", "model": "installer-onboarding-fixture",
+                "apiKey": fixture_key, "baseUrl": "http://127.0.0.1:9/v1"})
+        except urllib.error.HTTPError as rejected:
+            status = rejected.code
+            rejected.close()
+            if status not in (401, 403):
+                raise RuntimeError("Unauthenticated model setup returned an unexpected status.")
+        else:
+            raise RuntimeError("Model setup accepted a request without the local session credential.")
+        configured = local_post("/api/provider", {"provider": "compatible", "model": "installer-onboarding-fixture",
+            "apiKey": fixture_key, "baseUrl": "http://127.0.0.1:9/v1"}, bearer=connected["token"])
+        if configured.get("ok") is False or fixture_key in json.dumps(configured):
+            raise RuntimeError("Authenticated direct model setup failed or exposed its fixture credential.")
         before_resume = authenticated_state(connected["token"])
+        if (before_resume.get("agent") is not None or not before_resume.get("provider", {}).get("configured")
+                or fixture_key in json.dumps(before_resume)):
+            raise RuntimeError("Direct model setup did not retain a private process-memory provider session.")
         resumed = local_post("/api/local-resume", {"resumeTicket": connected["resumeTicket"]})
         if resumed.get("token") != connected["token"] or resumed.get("resumeTicket") == connected["resumeTicket"]:
             raise RuntimeError("Reload did not preserve the local session and rotate its resume credential.")
@@ -177,10 +186,11 @@ process.stdout.write(JSON.stringify({ bootstrapRequiresHoldings: false, modelOpe
         held_resume(resumed["resumeTicket"], origin=None, site=None)
         resumed_again = local_post("/api/local-resume", {"resumeTicket": resumed["resumeTicket"]})
         after_resume = authenticated_state(resumed_again.get("token", ""))
-        if resumed_again.get("token") != connected["token"] or before_resume.get("provider") != after_resume.get("provider"):
+        if (resumed_again.get("token") != connected["token"] or before_resume.get("provider") != after_resume.get("provider")
+                or fixture_key in json.dumps(after_resume)):
             raise RuntimeError("Reload changed the local session or its model configuration.")
         relaunched = subprocess.run([str(target / "ChainChat.exe"), "--launch", "--quiet", "--install-root", str(target),
-            "--result-file", str(work / "relaunch-result.json")], env=probe_environment, timeout=150,
+            "--result-file", str(work / "relaunch-result.json")], env=probe_environment, timeout=300,
             creationflags=subprocess.CREATE_NO_WINDOW)
         if relaunched.returncode or json.loads(owner_file.read_text(encoding="utf-8"))["pid"] != owner["pid"]:
             raise RuntimeError("Reopening ChainChat did not safely reuse the owned runtime.")
@@ -202,7 +212,7 @@ process.stdout.write(JSON.stringify({ bootstrapRequiresHoldings: false, modelOpe
         conflict_result = work / "occupied-port-result.json"
         conflict = subprocess.run([str(target / "ChainChat.exe"), "--launch", "--quiet", "--install-root", str(target),
             "--result-file", str(conflict_result)], env={**probe_environment, "CT_CHAT_PORT": str(occupied.getsockname()[1])},
-            timeout=150, creationflags=subprocess.CREATE_NO_WINDOW)
+            timeout=300, creationflags=subprocess.CREATE_NO_WINDOW)
         held_start = json.loads(conflict_result.read_text(encoding="utf-8"))
         if conflict.returncode != 1 or held_start.get("ok") is not False or owner_file.exists():
             raise RuntimeError("An occupied port was incorrectly reported as a successful launch.")
@@ -237,7 +247,8 @@ process.stdout.write(JSON.stringify({ bootstrapRequiresHoldings: false, modelOpe
         "launcherWaitedForAuthenticatedReady": True, "relaunchReusedRuntime": True, "occupiedPortReportedFailure": True,
         "localUiAutomaticallyAuthenticated": True, "localRefreshPreservedSession": True,
         "installedUiAssetsServed": True,
-        "frontendBootstrapDoesNotRequireHoldings": True, "frontendModelHoldingsGatePreserved": True,
+        "removedAccessAssetsAbsent": True, "providerSetupRequiresSession": True,
+        "providerSetupBeforeAgentSelection": True, "providerKeyRemainedPrivate": True,
         "localResumeRejectedReplay": True, "localResumeRejectedHostedOrigin": True,
         "localResumeRequiredExplicitOrigin": True,
         "ownedRuntimeStopped": True, "shortcutsCreated": False,

@@ -21,7 +21,6 @@ const alternate = "https://beta.cyphertempre.ai";
 async function fixture(t, publicOrigins = []) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "ct-hosted-bridge-"));
   const app = await createApp({
-    licenseConfig: { mode: "holdings", required: false },
     dataDir,
     publicOrigins,
     pairingCode: "HOSTED-TEST",

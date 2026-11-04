@@ -44,7 +44,6 @@ async function fixture(t, options = {}) {
   const root = path.join(dataDir, "agent"), calls = [], generated = [], reviewed = [];
   await nativeEngine({ op: "init", root, name: "Cognition Fixture" });
   const app = await createApp({ dataDir, pairingCode: "COGNITION-FIXTURE",
-    licenseConfig: { mode: "holdings", required: options.holdings === true },
     engine: async request => {
       calls.push(structuredClone(request));
       const result = await nativeEngine(request);
@@ -84,7 +83,7 @@ async function fixture(t, options = {}) {
     return { call, token };
   }
   const owner = await client();
-  if (!options.holdings) {
+  if (options.provider !== false) {
     const provider = await owner.call("/api/provider", { provider: "openai", model: "fixture-model", apiKey: "test-memory-only-key" });
     assert.equal(provider.status, 200);
     const controls = await owner.call("/api/cognition", { autoRoute: false, semanticRecall: false, autoSprout: false });
@@ -244,22 +243,15 @@ test("real engine: manual maintenance requires confirmation and cannot train wit
   assert.ok(asleep.status >= 400);
 });
 
-test("real engine: holdings gate protects enabling work while pause and cancellation stay available", { timeout: 180000 }, async t => {
-  const f = await fixture(t, { holdings: true }), before = await fingerprint(f.root);
-  for (const [endpoint, body] of [["/api/cognition", { learning: false }],
-    ["/api/maintenance", { action: "dream", confirm: true }],
-    ["/api/faculties/lifecycle", { action: "hibernate", key: "sense:5", confirm: true }]]) {
-    const denied = await f.call(endpoint, body);
-    assert.equal(denied.status, 403, `${endpoint}: ${denied.body.code}`);
-    assert.equal(denied.body.code, "HOLDINGS_REQUIRED");
-  }
+test("real engine: local controls pause and resume without wallet verification", { timeout: 180000 }, async t => {
+  const f = await fixture(t, { provider: false });
+  ok(await f.call("/api/cognition", { learning: false }));
   ok(await f.call("/api/cancel", {}));
-  assert.deepEqual(await fingerprint(f.root), before);
-  assert.equal(f.calls.some(c => ["dormancy", "maintenance", "faculty_action"].includes(c.op)), false);
+  assert.equal((await f.call("/api/cognition", { mode: "dormant" })).status, 409);
   ok(await f.call("/api/cognition", { mode: "dormant", confirm: true }));
   assert.equal((await nativeEngine({ op: "inspect", root: f.root })).runtime.mode, "dormant");
-  const resume = await f.call("/api/cognition", { mode: "active", confirm: true });
-  assert.equal(resume.status, 403); assert.equal(resume.body.code, "HOLDINGS_REQUIRED");
+  ok(await f.call("/api/cognition", { mode: "active", confirm: true }));
+  assert.equal((await nativeEngine({ op: "inspect", root: f.root })).runtime.mode, "active");
 });
 
 test("real engine: semantic memory toggles invoke shaped evidence and propagate canonical sources into generation", { timeout: 180000 }, async t => {

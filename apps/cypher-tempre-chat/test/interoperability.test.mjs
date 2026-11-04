@@ -63,7 +63,6 @@ async function fixture(t,{generate,review}={}){
   const initial=await original(root,'initialize');
   const generated=[],reviewed=[],native=[];
   const app=await createApp({dataDir:path.join(directory,'bridge'),pairingCode:'INTEROPERABILITY',
-    licenseConfig:{mode:'holdings',required:false},
     engine:async request=>{native.push(structuredClone(request));return engine(request);},
     generate:async(config,args)=>{generated.push({config,args});return generate?generate(config,args):{text:ANSWER};},
     review:async(config,args)=>{reviewed.push({config,args});return review?review(config,args):goodReview();}});

@@ -2,6 +2,12 @@
 
 Validation separates deterministic engine behavior, application orchestration and real-model observations. Passing a transport or gate test does not establish equal answer quality across models, perfect security or elimination of hallucinations.
 
+## Local onboarding and access
+
+The current application uses its authenticated local session for access. Provider setup does not require a token balance, payment, signature or selected agent. Chat still requires an agent and configured provider; active-chain actions and output retain their PoI checks.
+
+Installer acceptance preserves the real owner bootstrap, rotating resume credentials, exact-origin checks, replay rejection, read-only audit, native engine verification, data preservation, tamper rejection and rollback checks. It also configures a synthetic local provider immediately after authentication, checks that its key is absent from response/state JSON, and verifies the same provider session survives authenticated refresh. The retired access-dialog assets must be absent from the newly installed release. These checks make no paid model calls and do not touch a normal user installation.
+
 ## Active-chat reliability
 
 The focused regression suite exercises untouched default cognition through the actual pinned OpenClaw runtime and the default HTTP generation/review transports. Local provider fixtures reproduce output limits, complete fenced JSON, missing evidence, low fruitage scores and incomplete planning. It verifies accepted conversation sealing and unchanged integrity while failures remain held. These are controlled model responses, not evidence that every real provider judges requests correctly.
@@ -34,11 +40,11 @@ No new paid-model benchmark was run for these service changes. Semantic review r
 
 ## Automatic installed workflow: 0.7.1
 
-The local frontend previously classified its owner-authorized `/api/launch` request as a holdings-protected mutation. That opened the wallet dialog before any app session existed, preventing the installer's automatic connection. Bootstrap, authenticated resume, discovery and read-only audit requests now bypass that frontend wallet prompt; protected model calls and mutations still require holdings. The local app automatically loads PoI for active Timechain turns; optional hosted-site connection is kept under advanced mode.
+The local frontend previously blocked its owner-authorized `/api/launch` request behind an access dialog before any app session existed, preventing the installer's automatic connection. The owner bootstrap and authenticated resume now provide the local session directly. Discovery and read-only audit use that session, and active-chain model calls and mutations retain PoI enforcement. The local app automatically loads PoI for active Timechain turns; optional hosted-site connection is kept under advanced mode.
 
-The local suite passed **263 Node tests** with one expected Windows case-sensitivity skip (264 total), including actual pinned OpenClaw execution and independent original-skill references. **92 Python tests** passed with one symlink-privilege skip (93 total). New tests cover single-use owner-bound resume credentials, exact local Origin, rejected replay/expiry/foreign origins, preserved wallet revocation and provider memory, frontend storage restrictions, fixed read-only audit messages and bounded filesystem projections. The installer acceptance checks installed frontend bootstrap exemptions in addition to the real launch/resume endpoints.
+The local suite passed **263 Node tests** with one expected Windows case-sensitivity skip (264 total), including actual pinned OpenClaw execution and independent original-skill references. **92 Python tests** passed with one symlink-privilege skip (93 total). New tests covered single-use owner-bound resume credentials, exact local Origin, rejected replay/expiry/foreign origins, session revocation and provider memory, frontend storage restrictions, fixed read-only audit messages and bounded filesystem projections. Those historical counts describe that release's tests; the current installer checks the real launch/resume endpoints and direct provider setup.
 
-A real browser test against a disposable native chain and the actual OpenClaw-backed app connected automatically, cleared the launch fragment, resumed the same selected chain on page refresh, and opened the embedded auditor without another code or service. Native integrity displayed PASS and a registry blob preview verified its SHA-256. No wallet transaction, user API key, paid inference or personal chain was used. The local screenshot artifact is `chainchat-automatic-connection-0.7.1.jpg`.
+A real browser test against a disposable native chain and the actual OpenClaw-backed app connected automatically, cleared the launch fragment, resumed the same selected chain on page refresh, and opened the embedded auditor without another code or service. Native integrity displayed PASS and a registry blob preview verified its SHA-256. No user API key, paid inference or personal chain was used. The local screenshot artifact is `chainchat-automatic-connection-0.7.1.jpg`.
 
 The Windows front door waits for authenticated owned-runtime readiness rather than reporting success immediately after spawning Node. Isolated probes verified first launch, same-PID reuse, a visible fixed failure on an occupied port, and survival of the unrelated listener. Installation still preserves persistent data and selected external chains. The embedded auditor deliberately exposes only bounded reads; legacy mutations remain confined to the separately opened advanced auditor.
 
@@ -77,7 +83,7 @@ These checks use disposable chains and local model/reviewer fixtures. No new pai
 
 ## Earlier interoperability release: 0.6.0
 
-Eight independent interoperability acceptance cases pass against an unchanged original 3.30.08 installation. They use real Python engines, local HTTP, disposable chains and synthetic generation/review transports. No paid provider calls, personal chains or real wallet signatures were used for these new changes.
+Eight independent interoperability acceptance cases pass against an unchanged original 3.30.08 installation. They use real Python engines, local HTTP, disposable chains and synthetic generation/review transports. No paid provider calls or personal chains were used for these new changes.
 
 | Area | Evidence |
 | --- | --- |
@@ -124,7 +130,7 @@ A separate beta 0.5.0 run used OpenCode Go `muse-spark-1.3-contributor` for 181 
 - All 21 requested perspectives executed and were reviewed. Eight entered the tree and 13 were held. The first synthesis was held; a revision passed. The failed all-approved-branches expectation remains a failure.
 - Import and equipped chat succeeded, but hibernation was held because the review lacked sufficient user intent and reversible-scope context. Index and training controls succeeded; Dream was held for insufficient scope and consent context. The current change improves those review inputs; it has not yet been rerun with real Muse.
 - Recall, unknown-fact abstention, equipment, byte/source Continuum, learning on/off and pause/resume had passing functional cases. The unknown-fact case is not a hallucination-rate estimate.
-- The browser fixture paired, but its conflicting holdings policies disabled Send. That run did not establish successful paid browser chat.
+- The browser fixture paired, but an access-policy conflict in that earlier release disabled Send. That run did not establish successful paid browser chat.
 
 The raw results remain unchanged. Local deliverables are `chainchat-muse-live-abilities-results.json`, `chainchat-muse-verification-summary.json`, `chainchat-live-abilities-interpretation.json` and `chainchat-live-abilities-source-verification.json`. The interpretation's source checkpoint SHA-256 is `5ff8291c3fffb4cdbd2c00ab9c97fc4a1ad2a57a245f8539caa832d6bffeeb58`; its source verification records base commit `03ec44618e63eac84552fdaaeca3b91a179f3cbc` plus the then-local Windows maintenance path fix.
 
@@ -132,10 +138,10 @@ Those 181 calls predate the full portability and authored-operator approval chan
 
 ## Security and performance boundaries
 
-Regression coverage includes origin/host restrictions, memory-only credentials, active-key reflection rejection, source redaction, wallet challenge/session binding, holdings expiry and authorization races. Wallet fixtures exercise scoped message signatures; the interface does not request token spending approval, a permit or a transaction. Model and RPC providers remain external services, and wallet use is not anonymous.
+Regression coverage includes origin/host restrictions, memory-only credentials, active-key reflection rejection, source redaction, session binding, expiry, replay rejection and authorization races. Removing token access does not remove local authentication, per-agent grants or PoI enforcement. Model providers remain external services.
 
 Model reviews are semantic judgments and remain fallible. A deliberately false arithmetic answer can pass both native and wrapped gates if a synthetic reviewer supplies high scores. Mechanical parity alone cannot prove arbitrary factual truth, moral judgment or cross-model quality uplift.
 
 No ARC-AGI, LongMemEval, Pokemon, robotics or MazeBench result is reproduced by these application tests. Those tasks require their actual environments, datasets, tools, start states, budgets and scoring protocols. Local approved faculty operators do not supply a complete coding, browser, game or robotics agent harness.
 
-Production deployment and real-wallet checks are separate from local fixture results. Each release requires its matching installed runtime and public interface; earlier deployed asset checks do not establish that a later candidate is live.
+Production deployment and real-provider checks are separate from local fixture results. Each release requires its matching installed runtime and public interface; earlier deployed asset checks do not establish that a later candidate is live.
