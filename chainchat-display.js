@@ -2,7 +2,7 @@ export function supportedBridgeVersion(version) {
   if (typeof version !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) return false;
   const value = version.split(".").map(Number);
   if (!value.every(Number.isSafeInteger)) return false;
-  const minimum = [0, 9, 6];
+  const minimum = [0, 10, 0];
   for (let i = 0; i < minimum.length; i++) {
     if (value[i] > minimum[i]) return true;
     if (value[i] < minimum[i]) return false;
@@ -36,11 +36,14 @@ export function modelCatalogueView(value) {
         contextWindow: Number.isSafeInteger(item.contextWindow) && item.contextWindow > 0 ? item.contextWindow : null,
         maxOutputTokens: Number.isSafeInteger(item.maxOutputTokens) && item.maxOutputTokens > 0 ? item.maxOutputTokens : null,
         reasoningCapable: item.reasoningCapable === true,
+        access: item.access === 'byok' ? 'byok' : 'shared',
+        service: item.service === 'openrouter' ? 'openrouter' : item.service === 'opencode' ? 'opencode' : '',
+        connectionReady: item.connectionReady === true,
       }));
     return { id, label: text(source?.label, 128) || (id === 'byok' ? 'Your API connection' : 'Free models'),
       available: source?.available === true, notice: text(source?.notice, 2000), models };
   });
-  const active = ['byok', 'free'].includes(value?.active?.tier) && validId(value?.active?.model)
+  const active = ['byok', 'free', 'native'].includes(value?.active?.tier) && validId(value?.active?.model)
     ? { tier: value.active.tier, provider: text(value.active.provider, 128), model: value.active.model } : null;
   return { active, tiers };
 }

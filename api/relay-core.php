@@ -13,36 +13,50 @@ final class RelayError extends \RuntimeException {
 final class Policy {
     public const CATALOGUE = 'https://opencode.ai/inference/go/v1/models';
     public const BASE = 'https://opencode.ai/inference/go/openai/v1';
-    public const IDS = ['beam-free', 'iceman-contributor-free'];
+    // These exact service-owned origins are the only shared-key destinations.
+    public const SOURCES = [
+        'normal' => ['catalogue' => 'https://opencode.ai/inference/v1/models', 'base' => 'https://opencode.ai/inference/openai/v1'],
+        'go' => ['catalogue' => self::CATALOGUE, 'base' => self::BASE],
+    ];
+    public const MAX_MODELS = 2000;
+    public static function modelId(mixed $id): bool {
+        return is_string($id) && preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/D', $id) === 1;
+    }
     public const MAX_BODY = 2097152;
     public const MAX_RESPONSE = 4194304;
     public const MAX_REASONING_REPLAY = 131072;
     public static function zero(mixed $n): bool {
         return (is_int($n) || is_float($n)) && is_finite((float)$n) && (float)$n === 0.0;
     }
-    public static function models(array $catalogue): array {
+    public static function models(array $catalogue, string $source = 'go'): array {
+        if (!isset(self::SOURCES[$source])) return [];
         $out = [];
         $records = $catalogue['data'] ?? [];
         if (!is_array($records) || !array_is_list($records) || count($records) > 2000) return [];
         foreach ($records as $raw) {
-            if (!is_array($raw) || !in_array($raw['id'] ?? '', self::IDS, true) ||
+            if (!is_array($raw) || !self::modelId($raw['id'] ?? null) || ($raw['type'] ?? '') !== 'chat' ||
                 !self::zero($raw['cost']['text']['input']['price'] ?? null) ||
                 !self::zero($raw['cost']['text']['output']['price'] ?? null) ||
-                ($raw['api']['chat-completions']['base_url'] ?? '') !== self::BASE ||
+                ($raw['api']['chat-completions']['base_url'] ?? '') !== self::SOURCES[$source]['base'] ||
                 !is_array($raw['modalities']['input'] ?? null) || !in_array('text', $raw['modalities']['input'], true) ||
-                !is_array($raw['modalities']['output'] ?? null) || !in_array('text', $raw['modalities']['output'], true)) continue;
-            foreach (['read', 'write'] as $cache) {
-                if (isset($raw['cost']['text']['input']['cache'][$cache]) && !self::zero($raw['cost']['text']['input']['cache'][$cache])) continue 2;
-            }
+                ($raw['modalities']['output'] ?? null) !== ['text']) continue;
+            $inputCost = $raw['cost']['text']['input'];
+            if (array_key_exists('cache', $inputCost) && !is_array($inputCost['cache'])) continue;
+            $cachePrices = $inputCost['cache'] ?? [];
+            if (!is_array($cachePrices)) continue;
+            // Unsupported dimensions can be absent; every advertised cache price must be numeric zero.
+            foreach ($cachePrices as $price) if (!self::zero($price)) continue 2;
             $id = $raw['id'];
-            $out[$id] = ['id' => $id, 'name' => substr((string)($raw['name'] ?? $id), 0, 160),
+            $out[$id] = ['_source' => $source, 'id' => $id, 'name' => substr((string)($raw['name'] ?? $id), 0, 160),
                 'free' => true, 'pricing' => ['input' => 0, 'output' => 0], 'available' => true,
                 'provider' => 'compatible', 'reasoningCapable' => ($raw['capabilities']['reasoning']['supported'] ?? false) === true,
                 'contextWindow' => min(131072, max(4096, (int)($raw['limit']['context'] ?? 4096))),
                 'maxOutputTokens' => min(8192, max(128, (int)($raw['limit']['output'] ?? 8192))),
-                'privacyNotice' => $id === 'beam-free'
+                'privacyNotice' => $id === 'beam-free' && $source === 'go'
                     ? 'Requests and relevant chain context pass through Cypher Tempre to OpenCode. Beam does not train on prompts; its provider retains them for 30 days for safety. Regional restrictions apply.'
-                    : 'Contributor model: requests and relevant chain context pass through Cypher Tempre to OpenCode and may be collected to improve the model. Choose your own API for a different data policy.'];
+                    : (str_contains($id, 'contributor')
+                        ? 'Contributor model: requests and relevant chain context pass through Cypher Tempre to OpenCode and may be collected to improve the model. Choose your own API for a different data policy.'
+                        : 'Requests and relevant chain context pass through Cypher Tempre to OpenCode and its model provider. Retention and training policies depend on that provider; review its current policy before sharing sensitive content.')];
         }
         return $out;
     }
@@ -252,11 +266,11 @@ final class Store {
                         $value['count'] > ($global ? $this->globalDay : $this->perHour) || $value['expires'] > $now + 172800) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
                 } elseif ($field === 'leases') {
                     if (preg_match('/^[a-f0-9]{32}$/D', $key) !== 1 || $value['expires'] > $now + 300) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
-                } elseif (!in_array($key, Policy::IDS, true) || $value['expires'] > $now + 600) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
+                } elseif (!Policy::modelId($key) || $value['expires'] > $now + 600) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
                 if ($value['expires'] <= $now) unset($state[$field][$key]);
             }
         }
-        if (count($state['buckets']) > $this->globalDay + 2 || count($state['leases']) > $this->concurrency || count($state['blocks']) > count(Policy::IDS)) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
+        if (count($state['buckets']) > $this->globalDay + 2 || count($state['leases']) > $this->concurrency || count($state['blocks']) > Policy::MAX_MODELS) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
         return $state;
     }
     private function transaction(callable $fn): mixed {
@@ -284,6 +298,8 @@ final class Store {
             $state = $this->validateState($raw === '' ? [] : json_decode($raw, true, 64, JSON_THROW_ON_ERROR), $now);
             $result = $fn($state, $now);
             $encoded = json_encode($state, JSON_THROW_ON_ERROR);
+            // Preserve the last readable state if bounded dynamic cooldowns fill the file.
+            if (strlen($encoded) > 524288) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
             rewind($handle);
             if (!ftruncate($handle, 0) || fwrite($handle, $encoded) !== strlen($encoded) || !fflush($handle)) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
             return $result;
@@ -303,7 +319,7 @@ final class Store {
         });
     }
     public function release(string $lease): void { if (preg_match('/^[a-f0-9]{32}$/D', $lease) !== 1) throw new RelayError('FREE_SERVICE_UNAVAILABLE'); $this->transaction(function (&$s) use ($lease) { unset($s['leases'][$lease]); }); }
-    public function block(string $model): void { if (!in_array($model, Policy::IDS, true)) throw new RelayError('FREE_SERVICE_UNAVAILABLE'); $this->transaction(function (&$s, $now) use ($model) { $s['blocks'][$model] = ['expires' => $now + 300]; }); }
+    public function block(string $model): void { if (!Policy::modelId($model)) throw new RelayError('FREE_SERVICE_UNAVAILABLE'); $this->transaction(function (&$s, $now) use ($model) { $s['blocks'][$model] = ['expires' => $now + 300]; }); }
     public function blocked(): array { return $this->transaction(fn(&$s) => array_keys($s['blocks'])); }
 }
 
@@ -361,21 +377,30 @@ final class Relay {
     private \Closure $fetch;
     public function __construct(private string $secret, private Store $store, callable $fetch) { $this->fetch = \Closure::fromCallable($fetch); }
     private function models(): array {
-        $r = ($this->fetch)('GET', Policy::CATALOGUE, ['Accept: application/json'], null, 8);
-        if ($r['status'] !== 200) throw new RelayError('FREE_CATALOGUE_UNAVAILABLE');
-        if (strlen($r['body']) > Policy::MAX_RESPONSE) throw new RelayError('FREE_CATALOGUE_UNAVAILABLE');
-        Policy::isolate($this->secret, $r['body']);
-        $decoded = json_decode($r['body'], true, 64, JSON_THROW_ON_ERROR);
-        Policy::isolate($this->secret, $decoded);
-        if (!is_array($decoded)) throw new RelayError('FREE_CATALOGUE_UNAVAILABLE');
-        return Policy::models($decoded);
+        $models = []; $loaded = false;
+        // Later Go records win duplicates, so existing Beam users retain the reviewed Go route.
+        foreach (Policy::SOURCES as $source => $routes) {
+            try { $r = ($this->fetch)('GET', $routes['catalogue'], ['Accept: application/json'], null, 8); }
+            catch (\Throwable) { continue; }
+            if ($r['status'] !== 200 || strlen($r['body']) > Policy::MAX_RESPONSE) continue;
+            Policy::isolate($this->secret, $r['body']);
+            try { $decoded = json_decode($r['body'], true, 64, JSON_THROW_ON_ERROR); }
+            catch (\JsonException) { continue; }
+            Policy::isolate($this->secret, $decoded);
+            if (!is_array($decoded)) continue;
+            $loaded = true;
+            $models = array_replace($models, Policy::models($decoded, $source));
+            if (count($models) > Policy::MAX_MODELS) throw new RelayError('FREE_CATALOGUE_UNAVAILABLE');
+        }
+        if (!$loaded) throw new RelayError('FREE_CATALOGUE_UNAVAILABLE');
+        return $models;
     }
     public function catalogue(): array {
         $models = $this->models();
         foreach ($this->store->blocked() as $id) if (isset($models[$id])) { $models[$id]['available'] = false; $models[$id]['reason'] = 'Temporarily unavailable from the shared provider.'; }
         return ['relayVersion' => '1.0.1', 'freeOnly' => true, 'available' => count(array_filter($models, fn($m) => $m['available'])) > 0,
-            'notice' => 'Free model tier *when available. Shared limits apply; never falls back to a paid model. Your selected context passes through this relay to OpenCode.',
-            'limits' => ['requestsPerHour' => 120, 'outputTokens' => 8192, 'textOnly' => true], 'models' => array_values($models)];
+            'notice' => 'Free models — when available. Shared limits apply; never falls back to a paid model. Your selected context passes through this relay to OpenCode.',
+            'limits' => ['requestsPerHour' => 120, 'outputTokens' => 8192, 'textOnly' => true], 'models' => array_values(array_map(function ($model) { unset($model['_source']); return $model; }, $models))];
     }
     public function infer(array $body, string $ip, string $session, ?string $originalJson = null, ?callable $pending = null): array {
         if (!preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i', $session)) throw new RelayError('FREE_SESSION_REQUIRED', 400);
@@ -386,12 +411,15 @@ final class Relay {
             $wire = json_decode($originalJson, false, 64, JSON_THROW_ON_ERROR);
             if (!$wire instanceof \stdClass) throw new RelayError('FREE_REQUEST_INVALID', 400);
         }
-        $known = array_fill_keys(Policy::IDS, ['maxOutputTokens' => 8192]);
+        $model = $body['model'] ?? null;
+        if (!Policy::modelId($model)) throw new RelayError('FREE_MODEL_UNAVAILABLE', 409);
+        $known = [$model => ['maxOutputTokens' => 8192]];
         $body = Policy::request($body, $known); // Invalid models, hosted tools and media never reach an upstream endpoint.
         Policy::isolate($this->secret, $body);
         $lease = $this->store->reserve($ip);
         try {
-            $body = Policy::request($body, $this->models()); // Re-read current pricing for EVERY inference; no stale paid fallback.
+            $models = $this->models();
+            $body = Policy::request($body, $models); // Re-read current pricing for EVERY inference; no stale paid fallback.
             if (in_array($body['model'], $this->store->blocked(), true)) throw new RelayError('FREE_MODEL_UNAVAILABLE', 409);
             // Keep original JSON object/list distinctions inside validated tool/response schemas.
             // Only the bounded output budget and usage flag are rewritten by policy.
@@ -402,7 +430,7 @@ final class Relay {
             }
             $id = hash_hmac('sha256', $session, $this->secret);
             $uuid = substr($id,0,8).'-'.substr($id,8,4).'-4'.substr($id,13,3).'-a'.substr($id,17,3).'-'.substr($id,20,12);
-            $r = ($this->fetch)('POST', Policy::BASE . '/chat/completions', ['Authorization: Bearer ' . $this->secret,
+            $r = ($this->fetch)('POST', Policy::SOURCES[$models[$body['model']]['_source']]['base'] . '/chat/completions', ['Authorization: Bearer ' . $this->secret,
                 'Content-Type: application/json', 'User-Agent: CypherTempre-ChainChat', 'x-opencode-session: ' . $uuid], json_encode($wire ?? $body, JSON_THROW_ON_ERROR), 115, $pending);
             if ($r['status'] < 200 || $r['status'] >= 300) {
                 if (in_array($r['status'], [401,403,404], true)) $this->store->block($body['model']);
@@ -419,7 +447,8 @@ final class Relay {
 }
 
 function upstream(string $method, string $url, array $headers, ?string $body, int $timeout, ?callable $pending = null): array {
-    if (!in_array($url, [Policy::CATALOGUE, Policy::BASE . '/chat/completions'], true) || !function_exists('curl_init')) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
+    $allowed = array_map(fn($source) => $source[$method === 'GET' ? 'catalogue' : 'base'] . ($method === 'GET' ? '' : '/chat/completions'), Policy::SOURCES);
+    if (!in_array($method, ['GET', 'POST'], true) || !in_array($url, $allowed, true) || !function_exists('curl_init')) throw new RelayError('FREE_SERVICE_UNAVAILABLE');
     $curl = curl_init($url); $raw = '';
     curl_setopt_array($curl, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_HTTPHEADER => $headers, CURLOPT_RETURNTRANSFER => false,
         CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 8, CURLOPT_TIMEOUT => $timeout, CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,

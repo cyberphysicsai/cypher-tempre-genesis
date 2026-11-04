@@ -1,11 +1,15 @@
 import { initMotifs } from "./motifs.js";
 import { initThemes } from "./themes.js";
+import { modelChoiceAction, mountNativeModelPicker } from "./model-catalogue.js";
+import { mountNativeAuth } from "./native-auth.js";
+import { mountNativeMediaComposer, nativeChatPayload, nativeHistoryMedia, nativeMessageMedia, renderNativeMedia } from "./native-media.js";
+import { mergeHistoryMessages } from "./native-history.js";
 import { blockHeight, supportedBridgeVersion, modelCatalogueView, modelSwitchPayload } from "./chainchat-display.js";
 import {
   DEFAULT_COGNITION, normalizeCognition, normalizeActivity,
   abilityIndicators, facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
   activityLineState, pollWithDeadline, routeControlState, reviewReceipt, facultyExecutionView, portabilityView,
-  operatorCompatibilityView, facultyIsExportable,
+  operatorCompatibilityView, facultyIsExportable, cognitionModeView, messageIsReviewedPause,
 } from "./cognition-display.js";
 import {
   bridgeApiUrl,
@@ -21,7 +25,8 @@ const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
 let auditedAgent = null;
 let modelCatalogue = null, modelCatalogueLoading = false, modelSwitchBusy = false,
-  modelCatalogueRevision = 0, selectedModelTier = 'byok', modelCatalogueError = '', lastByokDetails = null;
+  modelCatalogueRevision = 0, selectedModelTier = 'byok', modelCatalogueError = '', lastByokDetails = null, nativeModelPicker = null, nativeAuthControls = null;
+let nativeMediaComposer = null, messageMediaDisposers = [];
 const FRUITS = [
   "Love",
   "Peace",
@@ -352,6 +357,7 @@ function applyState(result) {
     delete state.faculties;
     delete state.operatorCompatibility;
     delete state.loadoutRepair;
+    delete state.nativeCompletions;
     state.cognition = { ...DEFAULT_COGNITION };
     lifecycleSelection = null;
     runtimeActivity = null;
@@ -426,14 +432,15 @@ function trackFacultyGrowth(faculties) {
 function renderCognition() {
   const paired = !!token && !!state.agent, current = cognition(), dormant = current.mode === "dormant";
   const held = !!(state.agent?.locked || state.agent?.maintenancePending);
-  $("cognitionMode").textContent = !paired ? "TIMECHAIN UNPAIRED" : dormant ? "TIMECHAIN PAUSED · PLAIN CHAT" : held ? "TIMECHAIN HELD · LOCAL REVIEW" : "TIMECHAIN ACTIVE";
+  const modeView = cognitionModeView(current, { paired, held });
+  $("cognitionMode").textContent = modeView.status;
   $("cognitionMode").classList.toggle("dormant", paired && dormant);
   $("cognitionMode").closest(".cognition-strip").classList.toggle("dormant", paired && dormant);
   $("learningIndicator").textContent = !paired ? "LEARNING —" : dormant ? "LEARNING PAUSED" : current.learning ? "LEARNING ON" : "LEARNING OFF";
-  $("composerGateLabel").textContent = dormant && paired ? "Plain model chat · no Timechain review or recording" : "Proof of Interaction active with Timechain";
-  $("gateStatus").textContent = dormant && paired ? "PAUSED" : held ? "CHAIN HELD" : "ACTIVE WITH CHAIN";
-  $("gateAbility").classList.toggle("active", paired && !dormant);
-  $("gateAbility").classList.toggle("locked", !dormant);
+  $("composerGateLabel").textContent = modeView.composer;
+  $("gateStatus").textContent = modeView.gateStatus;
+  $("gateAbility").classList.toggle("active", modeView.gateActive);
+  $("gateAbility").classList.toggle("locked", true);
   const route = routeControlState(current, settings().recall);
   $("routeAbility").classList.toggle("active", paired && route.enabled);
   $("routeStatus").textContent = route.label;
@@ -441,15 +448,10 @@ function renderCognition() {
   $("learningStatus").textContent = dormant ? "PAUSED" : current.learning ? "ENABLED" : "OFF · HISTORY ON";
   $("dreamAbility").classList.toggle("active", paired && !dormant && current.learning && current.autoDream);
   $("dreamStatus").textContent = dormant ? "PAUSED" : current.autoDream && current.learning ? "EVERY 100 BLOCKS" : "MANUAL";
-  $("cognitionStatus").textContent = dormant ? "PLAIN CHAT" : "MONITOR";
-  $("cognitionModeTitle").textContent = dormant ? "Timechain paused · plain model chat" : held ? "Timechain held for local review" : "Timechain active";
-  $("cognitionModeDescription").textContent = dormant
-    ? "No Timechain context, faculty computations, PoI review, learning or new chain blocks. Each plain request is sent on its own; earlier displayed messages are not added as context. Resume whenever you choose."
-    : held ? "The native agent is locked or has an incomplete maintenance journal. Review and recover it locally before continuing chain work. Existing history is preserved; this interface will not clear the hold automatically."
-    : current.learning
-      ? "Memory, faculties, covenant review and accepted conversation blocks are active. Learning and growth follow your selected settings."
-      : "Memory, faculties, covenant review and accepted conversation blocks remain active. Learner training and automatic growth are off.";
-  $("toggleChainMode").textContent = dormant ? "Resume Timechain" : "Pause Timechain · plain model chat";
+  $("cognitionStatus").textContent = dormant ? "MEMORY PAUSED" : "MONITOR";
+  $("cognitionModeTitle").textContent = modeView.title;
+  $("cognitionModeDescription").textContent = modeView.description;
+  $("toggleChainMode").textContent = modeView.toggle;
   $("toggleChainMode").disabled = !paired || cognitionBusy;
   if (paired && dormant) {
     for (const id of ["recallAbility", "forkAbility", "continuumAbility", "loadoutAbility"])
@@ -458,7 +460,7 @@ function renderCognition() {
       $(id).querySelector(".slot-status").textContent = "PAUSED";
     $("loadoutAbility").querySelector(".slot-status").textContent = "LOADOUT SAVED";
   }
-  $("sessionTag").textContent = paired && dormant ? "PLAIN CHAT · CHAIN PAUSED" : $("sessionTag").textContent;
+  $("sessionTag").textContent = paired && dormant ? "MEMORY PAUSED · PoI ENFORCED" : $("sessionTag").textContent;
   renderOperatorCompatibility();
   renderRuntimeActivity();
 }
@@ -743,8 +745,12 @@ function historyMessages() {
       typeof turn.ring === "number"
         ? { index: turn.ring, hash: turn.hash }
         : turn.ring || { index: turn.index, hash: turn.ring_hash || turn.hash };
-    if (input && typeof input === "string")
-      result.push({ role: "user", content: input, fromHistory: true });
+    const nativeCompletion = (state.nativeCompletions?.rows || []).some(row =>
+      row.agentId === state.agent?.id && row.genesisHash === state.agent?.genesis?.hash &&
+      row.ringHash === (ring.hash || ring.ring_hash) && row.ringIndex === ring.index);
+    if (input && typeof input === "string" && !nativeCompletion)
+      result.push({ role: "user", content: input, attachments: nativeHistoryMedia(payload, 'input'),
+        ...(!output ? {unknownAttachments: nativeHistoryMedia(payload, 'unknown')} : {}), fromHistory: true });
     if (output && typeof output === "string")
       result.push({
         role: "assistant",
@@ -758,12 +764,16 @@ function historyMessages() {
         revisions: payload.revisions,
         facultyExecution: payload.facultyExecution,
         learning: payload.learning,
+        ...(nativeCompletion ? {nativeCompletion: true} : {}),
+        media: nativeHistoryMedia(payload, 'output'),
+        unknownAttachments: nativeHistoryMedia(payload, 'unknown'),
         fromHistory: true,
       });
   }
   for (const pending of state.pending?.exchanges || []) {
     if (typeof pending.input === "string")
-      result.push({ role: "user", content: pending.input, fromHistory: true });
+      result.push({ role: "user", content: pending.input, attachments: nativeHistoryMedia(pending, 'input'),
+        ...(!pending.output ? {unknownAttachments: nativeHistoryMedia(pending, 'unknown')} : {}), fromHistory: true });
     if (typeof pending.output === "string")
       result.push({
         role: "assistant",
@@ -777,6 +787,8 @@ function historyMessages() {
         revisions: pending.revisions,
         facultyExecution: pending.facultyExecution,
         learning: pending.learning,
+        media: nativeHistoryMedia(pending, 'output'),
+        unknownAttachments: nativeHistoryMedia(pending, 'unknown'),
         fromHistory: true,
       });
   }
@@ -924,6 +936,10 @@ function renderState() {
     renderConversation();
   }
   if (reconcilePending()) renderConversation();
+  if (!requestBusy && conversations.has(id)) {
+    const merged = mergeHistoryMessages(conversations.get(id), historyMessages());
+    if (merged.changed) { conversations.set(id, merged.messages); renderConversation(); }
+  }
   const repairNotice = loadoutRepairNotice(state.loadoutRepair);
   $("loadoutRepairNotice").textContent = repairNotice;
   $("loadoutRepairNotice").classList.toggle("hidden", !repairNotice);
@@ -931,17 +947,19 @@ function renderState() {
   if ($("exchangeDialog").open) renderExportFaculties();
   if (state.gate?.threshold)
     $("thresholdNote").textContent =
-      `While Timechain is active, every fruitage must meet the server-enforced minimum (${state.gate.threshold}/255), alongside native PoI acceptance. Deliberate dormancy uses plain model chat without this gate or chain recording.`;
+      `Every response must meet the server-enforced fruitage minimum (${state.gate.threshold}/255), alongside native PoI acceptance. Pausing real-time memory keeps this gate required and stops new chain recording.`;
   renderOperationControls();
   renderCognition();
+  nativeMediaComposer?.sync();
   nativePanel.syncConnection({ connected: !!token, agentId: agentId() });
 }
 function renderConversation() {
+  for (const cleanup of messageMediaDisposers) cleanup(); messageMediaDisposers = [];
   const messages = conversations.get(agentId()) || [];
   $("welcome").classList.toggle("hidden", messages.length > 0);
   const list = $("messages");
   list.replaceChildren();
-  for (const message of messages) {
+  for (const [messageIndex, message] of messages.entries()) {
     const node = el(
       "article",
       `message ${message.role}${message.held ? " held" : ""}${messageIsDormant(message) ? " plain" : ""}`,
@@ -956,12 +974,18 @@ function renderConversation() {
         message.held
           ? message.failure?.title || "RESPONSE HELD"
           : message.control ? "OPENCLAW CONTROL"
+          : message.nativeCompletion ? "NATIVE TASK COMPLETION"
           : message.role === "user"
             ? "YOU"
             : state.agent?.name?.toUpperCase() || "CYPHER AGENT",
       ),
     );
     node.append(label, messageBody(message));
+    const media = nativeMessageMedia(message, messages[messageIndex - 1]);
+    const mediaContext = () => `${token}:${agentId()}`;
+    messageMediaDisposers.push(renderNativeMedia({ document, mount: node, assets: media.inputs, label: 'Attached inputs', api, context: mediaContext }),
+      renderNativeMedia({ document, mount: node, assets: media.outputs, label: 'Native output media', api, context: mediaContext }),
+      renderNativeMedia({ document, mount: node, assets: media.unknown, label: 'Attachments · origin unspecified', api, context: mediaContext }));
     if (message.held && message.failure) {
       const diagnostic = el("div", "message-meta chat-error-meta");
       diagnostic.append(el("code", "", message.failure.code), el("span", "", `Stage: ${message.failure.stageLabel}`));
@@ -984,8 +1008,10 @@ function renderConversation() {
         el(
           "span",
           "",
-          messageIsDormant(message)
-            ? "Plain model chat · not reviewed or recorded in Timechain"
+          messageIsReviewedPause(message)
+            ? "Memory paused · PoI reviewed · no new Timechain block"
+            : messageIsDormant(message)
+            ? "Historical plain model chat · no Timechain review or block"
             : message.control ? "Native control result · Timechain history preserved"
             : message.pending
             ? "✓ Covenant accepted · pending block"
@@ -1125,7 +1151,7 @@ async function selectAgent(id) {
   try {
     applyState(await api("/api/agents/select", { id }));
     $("agentChoices").classList.add("hidden");
-    $("agentSidebar").classList.remove("mobile-open");
+    focusWorkspaceSection("chainchatWorkspace");
     toast("Agent Timechain selected.");
   } catch (error) {
     toast(error.message, true);
@@ -1249,7 +1275,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.9.6 or newer to use this interface. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.10.0 or newer to use this interface. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -1344,28 +1370,29 @@ function renderModelCatalogue() {
   $("modelCatalogueStatus").textContent = modelCatalogueLoading ? 'Checking advertised model availability…'
     : modelCatalogueError || `${shown.length} of ${tier.models.length} advertised models · ${tier.label}`;
   $("modelTierNotice").textContent = tier.notice || (selectedModelTier === 'free'
-    ? 'Free model tier when available. Availability must be confirmed by the local app; no paid fallback is selected here.'
+    ? 'Free models — when available. Availability must be confirmed by the local app; no paid fallback is selected here.'
     : 'Connect your API provider below. If it has no model-list endpoint, use its exact model ID with the current connection.');
   if (!tier.models.length) list.append(el('p', 'fine-print', selectedModelTier === 'free'
     ? 'No available free models are currently advertised.' : 'No model list is currently available. Manual API setup remains available below.'));
   else if (!shown.length) list.append(el('p', 'fine-print', 'No models match this search.'));
   for (const model of shown) {
-    const active = state.provider?.configured && view.active?.tier === selectedModelTier && view.active.model === model.id;
+    const ownFree = selectedModelTier === 'free' && model.access === 'byok';
+    const active = state.provider?.configured && view.active?.tier === (ownFree ? 'byok' : selectedModelTier) && view.active.model === model.id && (!ownFree || model.connectionReady);
     const button = el('button', `model-choice${active ? ' selected' : ''}`); button.type = 'button';
     button.disabled = !model.available || modelCatalogueLoading || modelSwitchBusy || requestBusy;
     button.setAttribute('aria-label', `${active ? 'Active' : 'Use'} ${model.name}${model.available ? '' : ' · unavailable'}`);
     button.setAttribute('aria-pressed', String(active));
-    const heading = el('span', 'model-choice-heading'); heading.append(el('strong', '', model.name), el('small', '', active ? 'ACTIVE' : model.available ? 'SELECT' : 'UNAVAILABLE'));
+    const heading = el('span', 'model-choice-heading'); heading.append(el('strong', '', model.name), el('small', '', active ? 'ACTIVE' : !model.available ? 'UNAVAILABLE' : ownFree ? model.connectionReady ? 'YOUR KEY · SELECT' : 'YOUR KEY · CONNECT' : selectedModelTier === 'free' ? 'SHARED · SELECT' : 'SELECT'));
     button.append(heading, el('span', 'model-choice-id', model.id));
     const limits = [model.contextWindow ? `${model.contextWindow.toLocaleString()} context` : '', model.maxOutputTokens ? `${model.maxOutputTokens.toLocaleString()} output` : '', model.reasoningCapable ? 'Reasoning settings supported' : ''].filter(Boolean);
     if (limits.length) button.append(el('span', 'model-choice-details', limits.join(' · ')));
     if (!model.available) button.append(el('span', 'model-choice-reason', model.reason || tier.notice || 'Not currently available.'));
     if (model.privacyNotice) button.append(el('span', 'model-choice-privacy', model.privacyNotice));
-    button.addEventListener('click', () => { void switchModel(selectedModelTier, model.id); });
+    button.addEventListener('click', () => { void chooseCatalogueModel(model, selectedModelTier); });
     list.append(button);
   }
   const byok = selectedModelTier === 'byok';
-  $("restoreByokModel").classList.toggle('hidden', !byok || !tier.available || view.active?.tier !== 'free');
+  $("restoreByokModel").classList.toggle('hidden', !byok || !tier.available || !['free', 'native'].includes(view.active?.tier));
   $("restoreByokModel").disabled = modelCatalogueLoading || modelSwitchBusy || requestBusy;
   $("modelCustomSwitch").classList.toggle('hidden', !byok);
   $("modelCustomId").disabled = !byok || !tier.available || modelCatalogueLoading || modelSwitchBusy || requestBusy;
@@ -1374,9 +1401,36 @@ function renderModelCatalogue() {
   $("byokConnectionFields").disabled = !byok || modelSwitchBusy;
   $("refreshModelCatalogue").disabled = modelCatalogueLoading || modelSwitchBusy;
   $("modelPrivacyNotice").textContent = byok ? 'Switching uses your current private API connection. Changing a provider or endpoint requires the connection form.'
-    : 'No personal API key is requested for this tier. Read the advertised model privacy notice before sending chat content.';
+    : 'Shared models use the hosted relay. OpenRouter entries use your own key and go directly to that provider; quotas and privacy policies apply. No paid fallback is selected.';
   $("modelKeyStatus").textContent = lastByokDetails?.configured
     ? lastByokDetails.provider === 'compatible' ? 'Provider connection active' : 'API key connected' : '';
+  nativeModelPicker?.sync();
+  nativeAuthControls?.sync();
+  nativeMediaComposer?.sync();
+}
+async function chooseCatalogueModel(model, tier) {
+  if (modelSwitchBusy || requestBusy) return;
+  let action;
+  try { action = modelChoiceAction(model, tier); }
+  catch (error) { $("modelForm").querySelector('.dialog-error').textContent = error.message; return; }
+  if (action.kind === 'switch') { await switchModel(action.tier, action.model); return; }
+  // Preparing a different service never sends or reuses the current provider's key.
+  selectedModelTier = 'byok';
+  $("provider").value = action.preset.provider;
+  $("baseUrl").value = action.preset.baseUrl;
+  $("modelId").value = action.preset.model;
+  $("modelCustomId").value = action.preset.model;
+  $("reasoningCapable").checked = action.preset.reasoningCapable;
+  $("modelContextWindow").value = '';
+  $("modelOutputLimit").value = '';
+  $("apiKey").value = '';
+  $("byokManualDetails").open = true;
+  updateProviderPlaceholder();
+  $("apiKey").required = true;
+  $("apiKey").placeholder = 'Enter your own OpenRouter API key';
+  renderModelCatalogue();
+  $("modelForm").querySelector('.dialog-error').textContent = 'Enter your own OpenRouter key and connect. Your existing provider key is not copied or sent.';
+  $("apiKey").focus();
 }
 async function refreshModelCatalogue(force = false) {
   if (!token || modelSwitchBusy) return;
@@ -1422,7 +1476,7 @@ async function switchModel(tier, model) {
 }
 function openModel() {
   rememberByokProvider(state.provider);
-  const provider = state.provider?.tier === 'free' ? lastByokDetails || {} : state.provider || {};
+  const provider = ['free', 'native'].includes(state.provider?.tier) || state.provider?.provider === 'native' ? lastByokDetails || {} : state.provider || {};
   $("provider").value = ['openai', 'anthropic', 'gemini', 'compatible'].includes(provider.provider) ? provider.provider : 'openai';
   $("modelId").value = provider.model || "";
   $("baseUrl").value = provider.baseUrl || "";
@@ -1430,6 +1484,8 @@ function openModel() {
   $("modelContextWindow").value = provider.contextWindow ?? "";
   $("modelOutputLimit").value = provider.maxOutputTokens ?? "";
   $("apiKey").value = "";
+  nativeModelPicker?.reset();
+  nativeAuthControls?.reset({ cancel: true });
   $("modelCustomId").value = provider.model || '';
   $("modelCatalogueSearch").value = '';
   selectedModelTier = state.provider?.tier === 'free' ? 'free' : 'byok';
@@ -1440,6 +1496,22 @@ function openModel() {
   openDialog("modelDialog");
   void refreshModelCatalogue();
 }
+nativeModelPicker = mountNativeModelPicker({ document, mount: $("nativeModelPickerMount"), api,
+  context: () => `${token}:${agentId()}`, activeModel: () => state.provider?.provider === 'native' ? state.provider.model : '',
+  isBusy: () => requestBusy || modelSwitchBusy,
+  onBusy(value) { modelSwitchBusy = value; if (value) { modelCatalogueRevision++; modelCatalogueLoading = false; $("apiKey").value = ''; } renderModelCatalogue(); },
+  onSelected(provider) {
+    state.provider = provider;
+    modelCatalogue = modelCatalogueView({ ...modelCatalogue, active: { tier: 'native', provider: 'native', model: provider.model } });
+    renderState(); closeDialog('modelDialog'); toast('Native OpenClaw model selected. Your Timechain stays the same.');
+  },
+});
+nativeAuthControls = mountNativeAuth({ document, mount: $("nativeModelPickerMount"), api,
+  context: () => `${token}:${agentId()}`, isBusy: () => requestBusy || modelSwitchBusy,
+  onBusy(value) { modelSwitchBusy = value; if (value) { modelCatalogueRevision++; modelCatalogueLoading = false; $("apiKey").value = ''; } renderModelCatalogue(); },
+  onUpdated: () => nativeModelPicker.refresh(),
+  openSettings() { closeDialog('modelDialog'); nativePanel.open('configuration'); $("nativeSchemaSearch").value = 'models.providers'; $("nativeSchemaSearch").dispatchEvent(new Event('input')); },
+});
 $("modelButton").addEventListener("click", () => requirePair(openModel));
 const modelTierTabs = [...document.querySelectorAll('[data-model-tier]')];
 function selectModelTier(tab) {
@@ -1515,7 +1587,7 @@ $("modelForm").addEventListener("submit", (event) => {
     }
   });
 });
-$("modelDialog").addEventListener("close", () => ($("apiKey").value = ""));
+$("modelDialog").addEventListener("close", () => { $("apiKey").value = ""; nativeAuthControls?.reset({ cancel: true }); });
 $("chatForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = $("messageInput").value.trim();
@@ -1526,6 +1598,7 @@ $("chatForm").addEventListener("submit", async (event) => {
     return;
   }
   if (requestBusy) return;
+  if (nativeMediaComposer?.snapshot().uploading) { toast('Wait for the local file uploads to finish before sending.'); return; }
   if (!token) {
     requirePair(() => $("messageInput").focus());
     return;
@@ -1554,24 +1627,28 @@ $("chatForm").addEventListener("submit", async (event) => {
     openModel();
     return;
   }
+  let mediaDraft, payload;
+  try { mediaDraft = nativeMediaComposer?.take() || { ids: [], assets: [] }; payload = nativeChatPayload(message, mediaDraft.ids, state.provider); }
+  catch (failure) { toast(failure.message, true); return; }
   requestBusy = true;
+  nativeMediaComposer?.sync();
   const turnMode = cognition().mode;
   const chatSession = token;
   const chatAgent = agentId();
   chatController = new AbortController();
   $("sendButton").disabled = true;
   $("messageInput").disabled = true;
-  addMessage({ role: "user", content: message });
+  addMessage({ role: "user", content: message, attachments: mediaDraft.assets });
   $("messageInput").value = "";
   activity(
-    turnMode === "dormant" ? "Starting plain model chat · no Timechain review or recording."
+    turnMode === "dormant" ? "Memory paused · starting required PoI review; no new chain block."
       : "Starting the Timechain run · waiting for live app activity…",
     "busy",
   );
   try {
     const result = await api(
       "/api/chat",
-      { message },
+      payload,
       { signal: chatController.signal },
     );
     if (token !== chatSession || agentId() !== chatAgent) return;
@@ -1584,8 +1661,10 @@ $("chatForm").addEventListener("submit", async (event) => {
     addMessage({ role: "assistant", input: message, mode: turnMode, ...response });
     activity(
       response.control ? "Native OpenClaw control completed."
+        : messageIsReviewedPause(response)
+        ? "PoI-reviewed response · memory remains paused; no new chain block."
         : messageIsDormant(response)
-        ? "Plain model response · Timechain remains paused and unchanged."
+        ? "Historical plain response · no new Timechain block."
         : response.pending
         ? `Covenant accepted · ${bytes(state.pending?.bytes)} pending toward the next block.`
         : `Accepted and sealed${response.ring?.index !== undefined ? ` in ring ${response.ring.index}` : ""}.`,
@@ -1995,30 +2074,30 @@ $("historyButton").addEventListener("click", () =>
     openDialog("historyDialog");
   }),
 );
+// Persistent workspace cards replace the former mobile side drawers.
+function focusWorkspaceSection(sectionId, focusId = sectionId) {
+  const section = $(sectionId);
+  if (!section) return;
+  $(focusId)?.focus({ preventScroll: true });
+  section.scrollIntoView({
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "instant" : "smooth",
+    block: "start",
+  });
+}
 function toggleLoadout() {
-  $("loadoutSidebar").classList.toggle("mobile-open");
-  $("facultySearch").focus();
-  $("agentSidebar").classList.remove("mobile-open");
+  focusWorkspaceSection("loadoutSidebar", "facultyTitle");
 }
 for (const id of ["loadoutAbility", "mobileLoadout"])
   $(id).addEventListener("click", toggleLoadout);
 $("closeLoadout").addEventListener("click", () => {
-  $("loadoutSidebar").classList.remove("mobile-open");
-  $("mobileLoadout").focus();
+  focusWorkspaceSection("chainchatWorkspace");
 });
 $("closeAgents").addEventListener("click", () => {
-  $("agentSidebar").classList.remove("mobile-open");
-  $("mobileAgents").focus();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !document.querySelector("dialog[open]")) {
-    $("loadoutSidebar").classList.remove("mobile-open");
-    $("agentSidebar").classList.remove("mobile-open");
-  }
+  focusWorkspaceSection("chainchatWorkspace");
 });
 $("mobileAgents").addEventListener("click", () => {
-  $("agentSidebar").classList.toggle("mobile-open");
-  $("loadoutSidebar").classList.remove("mobile-open");
+  focusWorkspaceSection("agentSidebar", "agentDetailsTitle");
 });
 for (const id of ["modalitiesTab", "sensesTab"])
   $(id).addEventListener("click", (event) => {
@@ -2096,8 +2175,8 @@ $("confirmPauseChain").addEventListener("click", async () => {
     await saveCognition({ mode: "dormant", confirm: true });
     chatController?.abort();
     closeDialog("pauseChainDialog");
-    activity("Timechain paused. Plain model chat does not change its history.");
-    toast("Timechain paused. Resume from Cognition controls at any time.");
+    activity("Real-time memory paused. PoI remains required; action tools are off and no new blocks are recorded.");
+    toast("Memory paused · PoI enforced. Resume memory from Cognition controls.");
   } catch (error) { $("pauseChainDialog").querySelector(".dialog-error").textContent = error.message; }
   finally { cognitionBusy = false; $("confirmPauseChain").disabled = false; renderCognition(); await refreshActivity(); }
 });
@@ -2528,7 +2607,7 @@ $("exportPackForm").addEventListener("submit", (event) => {
 function renderOperationControls() {
   const held = !!(state.agent?.locked || state.agent?.maintenancePending);
   const dormant = cognition().mode === "dormant";
-  $("sendButton").disabled = requestBusy || (held && !dormant);
+  $("sendButton").disabled = requestBusy || nativeMediaComposer?.snapshot().uploading === true || (held && !dormant);
   $("newAgentButton").disabled = requestBusy;
   for (const selector of ['#genesisForm button[type="submit"]', '#modelForm button[type="submit"]',
     '#continuumForm button[type="submit"]', '#ingestForm button[type="submit"]', '#saveFork', '#flushContinuum']) {
@@ -2548,6 +2627,7 @@ function renderOperationControls() {
   });
   $("toggleChainMode").disabled = !token || !state.agent || cognitionBusy;
   $("confirmLifecycle").disabled = !token || held || requestBusy || cognitionBusy || dormant || !cognition().learning || !lifecycleSelection?.allowed;
+  nativeMediaComposer?.sync();
 }
 $("loadAuditor").addEventListener("click", () => {
   requireAgent(() => {
@@ -2623,4 +2703,11 @@ const nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, 
     return result;
   },
 });
+nativeMediaComposer = mountNativeMediaComposer({ document, button: $("attachMedia"), input: $("nativeMediaFiles"), notice: $("nativeMediaNotice"), queueMount: $("nativeAttachmentQueue"), api,
+  context: () => `${token}:${agentId()}:${state.provider?.provider}:${state.provider?.tier}:${state.provider?.model}`,
+  provider: () => token && state.agent ? state.provider : { configured: false }, isBusy: () => requestBusy || modelSwitchBusy,
+  onError: message => { if (message) toast(message, true); }, onChange: () => renderOperationControls(),
+});
+window.addEventListener('pagehide', () => { nativeMediaComposer?.dispose(); for (const cleanup of messageMediaDisposers) cleanup(); messageMediaDisposers = []; });
+window.addEventListener('pageshow', event => { if (event.persisted) { renderConversation(); nativeMediaComposer?.sync(); } });
 start();

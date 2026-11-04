@@ -107,7 +107,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.9.6</span>
+        ><span class="mono" id="appVersion">v0.10.0</span>
       </div>
       <div class="top-actions">
         <div class="theme-selector" role="group" aria-label="Visual mode">
@@ -119,9 +119,10 @@
           class="icon-button native-settings-button" id="openclawSettingsButton" aria-label="OpenClaw control center" title="OpenClaw control center and chat controls" type="button"
         ><svg><use href="#i-settings" /></svg></button>
         <button
-          class="icon-button mobile-menu"
+          class="icon-button agent-details-button"
           id="mobileAgents"
-          aria-label="Show agent panel"
+          aria-label="Go to agent and Timechain details"
+          title="Agent and Timechain details"
         >
           <svg><use href="#i-blocks" /></svg></button
         ><button class="model-button" id="modelButton">
@@ -143,95 +144,8 @@
       <button id="getStartedButton" class="primary-button" type="button">Install ChainChat ↗</button>
     </section>
 
-    <main class="workspace" id="chainchatWorkspace">
-      <aside
-        class="agent-sidebar"
-        id="agentSidebar"
-        aria-label="Agent and timechain"
-      >
-        <div class="sidebar-section">
-          <div class="section-caption">
-            YOUR AGENT <span class="tiny-label">LOCAL</span
-            ><button
-              class="icon-button drawer-close"
-              id="closeAgents"
-              aria-label="Close agent panel"
-            >
-              <svg><use href="#i-close" /></svg>
-            </button>
-          </div>
-          <button class="agent-select" id="agentSelectButton">
-            <span class="agent-sigil"
-              ><svg><use href="#i-equip" /></svg></span
-            ><span
-              ><strong id="agentName">No agent paired</strong
-              ><small id="agentIdentity">A beginning awaits</small></span
-            ><span class="chevron">⌄</span>
-          </button>
-          <div class="agent-choices hidden" id="agentChoices"></div>
-          <button class="wide-button" id="newAgentButton">
-            <svg><use href="#i-plus" /></svg> New genesis</button
-          ><button class="text-button" id="existingAgentButton">
-            <svg><use href="#i-link" /></svg> Pair existing Timechain
-          </button>
-        </div>
-        <div class="sidebar-section chain-section">
-          <div class="section-caption">
-            TIMECHAIN
-            <button
-              class="tiny-button"
-              id="verifyMini"
-              aria-label="Verify timechain"
-            >
-              ↻
-            </button>
-          </div>
-          <div class="chain-vitals">
-            <div>
-              <span>Rings sealed</span><strong id="ringCount">—</strong>
-            </div>
-            <div>
-              <span>Integrity</span
-              ><strong class="integrity" id="integrityStatus">UNPAIRED</strong>
-            </div>
-          </div>
-          <div class="chain-diagram" aria-hidden="true">
-            <i></i><span></span><span></span><span></span><span></span><i></i>
-          </div>
-          <p class="chain-note" id="chainNote">
-            One identity. Across models.<br />Every accepted turn, a new ring.
-          </p>
-          <div class="hash-label">LATEST SEAL</div>
-          <code id="headHash">Awaiting genesis</code
-          ><button class="text-button full-width" id="historyButton">
-            <svg><use href="#i-blocks" /></svg> Inspect chain
-          </button>
-        </div>
-        <div class="sidebar-section covenant-mini">
-          <div class="section-caption">
-            GENESIS COVENANT
-            <svg class="small-icon"><use href="#i-shield" /></svg>
-          </div>
-          <p>Aligned at the roots.<br />Checked at every turn.</p>
-          <div class="fruit-mini">
-            <span>Love</span><span>Joy</span><span>Peace</span
-            ><span>Patience</span><span>Kindness</span><span>Goodness</span
-            ><span>Faith</span><span>Mildness</span><span>Self-control</span>
-          </div>
-          <button class="text-button" id="covenantLink">
-            View alignment gate <span>↗</span>
-          </button>
-        </div>
-        <div class="sidebar-foot">
-          <span class="privacy-mark"
-            ><svg><use href="#i-shield" /></svg> YOUR CHAIN STAYS LOCAL</span
-          >
-          <p>
-            Selected context goes only to<br />the model provider you choose.
-          </p>
-        </div>
-      </aside>
-
+    <div class="agent-card">
+    <main class="workspace" id="chainchatWorkspace" tabindex="-1">
       <section class="conversation-panel" aria-label="Chat workspace">
         <header class="conversation-header">
           <div>
@@ -243,7 +157,8 @@
             ><button
               class="icon-button"
               id="mobileLoadout"
-              aria-label="Open faculty loadout"
+              aria-label="Go to faculty inventory"
+              title="Faculty inventory"
             >
               <svg><use href="#i-equip" /></svg>
             </button>
@@ -306,6 +221,8 @@
               maxlength="200000"
             ></textarea>
             <div class="composer-bottom">
+              <button class="attach-button" id="attachMedia" type="button" aria-label="Attach files for native OpenClaw chat"><svg><use href="#i-plus" /></svg><span>Attach</span></button>
+              <input id="nativeMediaFiles" type="file" multiple hidden tabindex="-1" aria-hidden="true" />
               <span class="composer-context"
                 ><svg><use href="#i-shield" /></svg><span id="composerGateLabel">Proof of Interaction active with Timechain</span></span
               ><button
@@ -317,6 +234,8 @@
                 <svg><use href="#i-arrow" /></svg>
               </button>
             </div>
+            <p class="native-media-notice" id="nativeMediaNotice" role="status">Attachments require a paired agent and configured native OpenClaw model.</p>
+            <div class="native-attachment-queue hidden" id="nativeAttachmentQueue" aria-label="Files queued for the next native chat"></div>
           </form>
           <div class="skillbar-caption">
             <span>YOUR ABILITY BAR</span><span>OUTLINED = EQUIPPED · GLOWING = RUNNING</span>
@@ -385,25 +304,17 @@
           </div>
         </div>
       </section>
+    </main>
 
-      <aside
-        class="loadout-sidebar"
+      <section
+        class="loadout-sidebar agent-card-section faculty-workspace"
         id="loadoutSidebar"
-        aria-label="Equipped modalities and senses"
+        aria-labelledby="facultyTitle"
+        tabindex="-1"
       >
-        <header class="loadout-header">
-          <div class="section-caption">
-            FACULTY LOADOUT <svg class="small-icon"><use href="#i-equip" /></svg
-            ><button
-              class="icon-button drawer-close"
-              id="closeLoadout"
-              aria-label="Close faculty loadout"
-            >
-              <svg><use href="#i-close" /></svg>
-            </button>
-          </div>
-          <h2>Shape your thinking.</h2>
-          <p>Equip the lenses your agent brings<br />to each interaction.</p>
+        <header class="loadout-header section-heading">
+          <div><span class="eyebrow">01 / FACULTY INVENTORY</span><h2 id="facultyTitle" tabindex="-1">Shape your thinking.</h2><p>Equip modalities and senses, discover new growth, and exchange faculties with other agents.</p></div>
+          <button class="text-button section-return" id="closeLoadout" type="button">Back to chat ↑</button>
         </header>
         <div class="loadout-summary">
           <div><strong id="equippedCount">0</strong><span>EQUIPPED</span></div>
@@ -414,6 +325,7 @@
             >BASE<br />CATALOGUE</span
           >
         </div>
+        <div class="faculty-toolbar">
         <div class="faculty-tabs" role="tablist" aria-label="Faculty type">
           <button
             id="modalitiesTab"
@@ -431,8 +343,6 @@
             Senses <span id="senseCount">0</span>
           </button>
         </div>
-        <button class="faculty-growth-notice hidden" id="newFacultiesNotice" type="button"></button>
-        <p class="info-box fine-print hidden" id="loadoutRepairNotice" role="status"></p>
         <label class="faculty-search"
           ><svg><use href="#i-eye" /></svg
           ><input
@@ -441,12 +351,17 @@
             placeholder="Find a faculty…"
             aria-label="Search faculties"
         /></label>
+        </div>
+        <button class="faculty-growth-notice hidden" id="newFacultiesNotice" type="button"></button>
+        <p class="info-box fine-print hidden" id="loadoutRepairNotice" role="status"></p>
+
         <div
           class="faculty-list"
           id="facultyList"
           role="tabpanel"
           aria-label="Faculty catalogue"
         ></div>
+        <div class="faculty-management">
         <button class="exchange-button" id="manageFaculties" type="button">
           <svg><use href="#i-spark" /></svg><span>Growth & pruning</span><span>↗</span>
         </button>
@@ -455,6 +370,7 @@
           ><span>↗</span>
         </button>
         <button class="text-button" id="clearLoadout" type="button">Clear equipped faculties…</button>
+        </div>
         <div class="loadout-foot">
           <span class="status-dot"></span>
           <p id="growthNote">
@@ -469,11 +385,10 @@
             ↻
           </button>
         </div>
-      </aside>
-    </main>
+      </section>
 
-    <section id="openclawPanel" class="native-workspace" aria-labelledby="nativeTitle">
-      <div class="native-heading"><div><span class="eyebrow">OPENCLAW / CONTROL CENTER</span><h2 id="nativeTitle" tabindex="-1">Your runtime. In reach.</h2><p>Configure native OpenClaw below your Cypher Tempre chat.</p></div><button class="secondary-button" id="closeOpenclawPanel" type="button">Back to chat ↑</button></div>
+    <section id="openclawPanel" class="native-workspace agent-card-section" aria-labelledby="nativeTitle">
+      <div class="native-heading"><div><span class="eyebrow">02 / OPENCLAW CONTROL CENTER</span><h2 id="nativeTitle" tabindex="-1">Your runtime. In reach.</h2><p>Configure native OpenClaw below your Cypher Tempre chat.</p></div><button class="secondary-button" id="closeOpenclawPanel" type="button">Back to chat ↑</button></div>
       <div class="native-connection"><p id="nativeConnection" role="status">Open your installed ChainChat app to load authenticated native controls.</p><button id="connectNativeControls" class="secondary-button" type="button">Connect local app</button></div>
       <p class="native-boundary-note">Local authentication, private credentials, required PoI enforcement and explicit tool grants remain operator-protected. Every native configuration family is discoverable in Settings; managed paths explain their restrictions.</p>
       <div class="native-tabs" role="tablist" aria-label="OpenClaw settings sections">
@@ -492,6 +407,8 @@
       <fieldset id="nativeConnectedControls" class="native-connected-controls" disabled>
       <legend class="sr-only">Authenticated native configuration</legend>
       <section data-native-section="configuration">
+        <p id="nativeQueuePolicyNotice" class="info-box fine-print">ChainChat frontend messages use <code>followup</code>: each request keeps its own identity and PoI review, with commitment following the selected Timechain block policy. Native <code>/queue</code> preferences apply to other native events and channel inputs; frontend requests stay separate.</p>
+        <p id="nativeUtilityModelNotice" class="info-box fine-print">Automatic native metadata utilities are off by default. Explicitly configuring <code>agents.defaults.utilityModel</code> requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms, even while chat uses Free models. The shared free-tier key is not supplied. These metadata-only calls have no action tools; agent answers and actions retain canonical PoI review.</p>
         <div class="native-card native-family-card"><h3>Configuration families</h3><p>Browse the complete native schema. Managed families stay visible with the reason they require their dedicated control or local operator.</p><div id="nativeConfigFamilies" class="native-config-families" aria-label="Native configuration families"></div><p id="nativeFamilyNotice" class="native-family-notice" role="status">Connect the local app to load its exact OpenClaw schema.</p></div>
         <div class="native-card"><h2>Native configuration</h2><p>Edit a JSON settings overlay against OpenClaw's own schema. Provider keys stay in the model connection panel. Required PoI and private-service settings remain managed.</p><label class="field">Settings overlay<textarea id="nativeConfigEditor" rows="13" spellcheck="false" autocomplete="off">{}</textarea></label><div class="native-actions"><button id="saveNativeConfig" class="primary-button" type="button">Validate & apply settings</button><button id="refreshNativeControls" class="secondary-button" type="button" title="Reloading replaces unapplied editor contents">Reload saved settings</button></div><p id="nativeConfigNotice" class="fine-print"></p><details><summary>Operator-protected settings and reasons</summary><pre id="nativeProtectedPaths"></pre></details></div>
         <div class="native-card"><h2>OpenClaw settings reference</h2><label class="field">Find a setting<input id="nativeSchemaSearch" type="search" placeholder="messages.queue, session, agents.defaults…" autocomplete="off"></label><div id="nativeSchemaFields" class="native-schema-list"></div><details><summary>Full native schema</summary><pre id="nativeSchemaJson"></pre></details><details><summary>Current native configuration (credentials redacted)</summary><pre id="nativeEffectiveConfig"></pre></details></div>
@@ -508,6 +425,95 @@
       </fieldset>
     </section>
 
+      <section
+        class="agent-sidebar agent-card-section identity-workspace"
+        id="agentSidebar"
+        aria-labelledby="agentDetailsTitle"
+        tabindex="-1"
+      >
+        <header class="section-heading">
+          <div><span class="eyebrow">03 / AGENT &amp; TIMECHAIN</span><h2 id="agentDetailsTitle" tabindex="-1">One identity. A history of your own.</h2><p>Choose your agent, inspect its chain, and revisit its genesis covenant.</p></div>
+          <button class="text-button section-return" id="closeAgents" type="button">Back to chat ↑</button>
+        </header>
+        <div class="agent-details-grid">
+        <div class="sidebar-section">
+          <div class="section-caption">
+            YOUR AGENT <span class="tiny-label">LOCAL</span>
+          </div>
+          <button class="agent-select" id="agentSelectButton">
+            <span class="agent-sigil"
+              ><svg><use href="#i-equip" /></svg></span
+            ><span
+              ><strong id="agentName">No agent paired</strong
+              ><small id="agentIdentity">A beginning awaits</small></span
+            ><span class="chevron">⌄</span>
+          </button>
+          <div class="agent-choices hidden" id="agentChoices"></div>
+          <button class="wide-button" id="newAgentButton">
+            <svg><use href="#i-plus" /></svg> New genesis</button
+          ><button class="text-button" id="existingAgentButton">
+            <svg><use href="#i-link" /></svg> Pair existing Timechain
+          </button>
+        </div>
+        <div class="sidebar-section chain-section">
+          <div class="section-caption">
+            TIMECHAIN
+            <button
+              class="tiny-button"
+              id="verifyMini"
+              aria-label="Verify timechain"
+            >
+              ↻
+            </button>
+          </div>
+          <div class="chain-vitals">
+            <div>
+              <span>Rings sealed</span><strong id="ringCount">—</strong>
+            </div>
+            <div>
+              <span>Integrity</span
+              ><strong class="integrity" id="integrityStatus">UNPAIRED</strong>
+            </div>
+          </div>
+          <div class="chain-diagram" aria-hidden="true">
+            <i></i><span></span><span></span><span></span><span></span><i></i>
+          </div>
+          <p class="chain-note" id="chainNote">
+            One identity. Across models.<br />Every accepted turn, a new ring.
+          </p>
+          <div class="hash-label">LATEST SEAL</div>
+          <code id="headHash">Awaiting genesis</code
+          ><button class="text-button full-width" id="historyButton">
+            <svg><use href="#i-blocks" /></svg> Inspect chain
+          </button>
+        </div>
+        <div class="sidebar-section covenant-mini">
+          <div class="section-caption">
+            GENESIS COVENANT
+            <svg class="small-icon"><use href="#i-shield" /></svg>
+          </div>
+          <p>Aligned at the roots.<br />Checked at every turn.</p>
+          <div class="fruit-mini">
+            <span>Love</span><span>Joy</span><span>Peace</span
+            ><span>Patience</span><span>Kindness</span><span>Goodness</span
+            ><span>Faith</span><span>Mildness</span><span>Self-control</span>
+          </div>
+          <button class="text-button" id="covenantLink">
+            View alignment gate <span>↗</span>
+          </button>
+        </div>
+        </div>
+        <div class="sidebar-foot">
+          <span class="privacy-mark"
+            ><svg><use href="#i-shield" /></svg> YOUR CHAIN STAYS LOCAL</span
+          >
+          <p>
+            Selected context goes only to<br />the model provider you choose.
+          </p>
+        </div>
+      </section>
+    </div>
+
     <section class="beta-access" aria-labelledby="betaTitle">
       <div>
         <span class="eyebrow">CYPHER TEMPRE CHAINCHAT / LIVE BETA</span>
@@ -518,13 +524,13 @@
       <div class="beta-actions">
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.6/CypherTempre-ChainChat-Setup-0.9.6-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
         >
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.6/CypherTempre-ChainChat-Setup-0.9.6-macos.zip" rel="noopener noreferrer">Install for macOS</a>
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.6/CypherTempre-ChainChat-Setup-0.9.6-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-macos.zip" rel="noopener noreferrer">Install for macOS</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
     </section>
@@ -576,9 +582,9 @@
         <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
       </ol>
       <div class="platform-downloads">
-        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.6/CypherTempre-ChainChat-Setup-0.9.6-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.6/CypherTempre-ChainChat-Setup-0.9.6-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/cypher-tempre-genesis/releases/download/chat-beta-v0.9.6/CypherTempre-ChainChat-Setup-0.9.6-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
       </div>
       <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
       <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>
@@ -639,7 +645,7 @@
         <p class="fine-print">
           This optional website session reconnects with a code after reload.
           The installed chat can resume its authenticated tab automatically.
-          Model API keys remain in local process memory.
+          Direct API keys stay in local process memory. Native OpenClaw sign-in can save credentials privately on this machine.
         </p>
       </form>
       <section id="pairedSession" class="hidden">
@@ -769,9 +775,10 @@
         <div class="dialog-top"><span class="eyebrow">YOUR MODEL. YOUR TIMECHAIN.</span><button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button></div>
         <h2>Choose your model.</h2>
         <p>Switch models without changing your agent or its saved Timechain.</p>
+        <section id="nativeModelPickerMount" class="native-model-picker" aria-label="Native OpenClaw model connection"></section>
         <div class="model-tier-tabs" role="tablist" aria-label="Model source">
           <button id="modelTierByok" type="button" role="tab" data-model-tier="byok" aria-selected="true" aria-controls="modelCataloguePanel">Your API connection</button>
-          <button id="modelTierFree" type="button" role="tab" data-model-tier="free" aria-selected="false" aria-controls="modelCataloguePanel">Free model tier*</button>
+          <button id="modelTierFree" type="button" role="tab" data-model-tier="free" aria-selected="false" aria-controls="modelCataloguePanel">Free models — when available</button>
         </div>
         <section id="modelCataloguePanel" role="tabpanel" aria-labelledby="modelTierByok">
           <div class="model-catalogue-heading"><p id="modelCatalogueStatus" role="status">Loading advertised models…</p><button id="refreshModelCatalogue" type="button" class="text-button">Refresh models</button></div>
@@ -782,7 +789,7 @@
           <div id="modelCustomSwitch" class="model-custom-switch"><label class="field">Custom model ID on your current API connection<input id="modelCustomId" maxlength="256" spellcheck="false" autocomplete="off" placeholder="Enter your provider's exact model ID"></label><button id="switchCustomModel" class="secondary-button" type="button">Use current connection</button></div>
           <p id="modelPrivacyNotice" class="fine-print"></p>
         </section>
-        <p class="fine-print">* Free model tier when available. Unavailable models cannot be selected. Your own API connection remains available separately.</p>
+        <p class="fine-print">Free models are offered when available. Shared access has limits; OpenRouter entries require your own key. Your API connection remains available.</p>
         <fieldset id="byokConnectionFields" class="model-connection-fields"><legend class="sr-only">Connect your API provider</legend>
           <details id="byokManualDetails" open><summary>Connect or change your API provider</summary>
           <p id="modelKeyStatus" class="model-key-status"></p>
@@ -822,7 +829,7 @@
         </details>
         <div class="info-box">
           In active Timechain mode, your prompt, selected memories and candidate answer go to this
-          provider for generation and alignment review. Plain mode sends only your current message.
+          provider for generation and alignment review. Paused memory sends your current input and candidate for required PoI review without adding chain history.
           More perspectives and search iterations use more tokens.
         </div>
 
@@ -1033,8 +1040,8 @@
         rather than guaranteeing factual accuracy or moral judgment.
       </div>
       <p class="fine-print" id="thresholdNote">
-        Deliberate dormancy pauses the complete Timechain loop, including this
-        gate, for plain model chat. Resume the Timechain to restore its review and recording.
+        Pausing real-time memory stops recall, learning and new chain recording.
+        Every response still requires PoI review. Action tools remain off until memory resumes.
       </p>
     </dialog>
     <dialog id="exchangeDialog" class="modal exchange-modal">
@@ -1207,7 +1214,7 @@
       <div class="cognition-mode-card">
         <strong id="cognitionModeTitle">Timechain active</strong>
         <p id="cognitionModeDescription">Memory, faculties, covenant review and accepted conversation blocks are active.</p>
-        <button class="secondary-button" id="toggleChainMode" type="button">Pause Timechain · plain model chat</button>
+        <button class="secondary-button" id="toggleChainMode" type="button">Pause real-time memory · keep PoI enforced</button>
       </div>
       <form id="cognitionForm">
         <label class="toggle-row"><span>Real-time learning<small>Train from accepted experience and allow faculty growth. When off, active Timechain conversations still record history.</small></span><input id="learningEnabled" type="checkbox" role="switch" checked /></label>
@@ -1232,11 +1239,11 @@
     </dialog>
     <dialog id="pauseChainDialog" class="modal compact-modal">
       <div class="dialog-top"><span class="eyebrow">DELIBERATE DORMANCY</span><button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button></div>
-      <h2>Pause the Timechain?</h2>
-      <p>Plain model chat will use your chosen provider without Timechain recall, faculties, PoI review, learning or new chain blocks. Each request is sent on its own without earlier chat context. Existing history remains intact.</p>
-      <p class="info-box">A current run will be stopped before pausing. An atomic block commit already underway may finish. Your model provider still receives plain-chat messages.</p>
+      <h2>Pause real-time memory?</h2>
+      <p>Memory, recall, faculty computations, learning and new chain blocks will pause. Every response still passes semantic and native PoI review. Action tools are off. Each request uses its current input without earlier chat context; existing history remains intact.</p>
+      <p class="info-box">A current run will be stopped before pausing. An atomic block commit already underway may finish. Your selected provider still receives the input and candidate needed for generation and required review.</p>
       <div class="dialog-error" role="alert"></div>
-      <button class="primary-button full-width" id="confirmPauseChain" type="button">Pause & use plain model chat</button>
+      <button class="primary-button full-width" id="confirmPauseChain" type="button">Pause memory · keep PoI enforced</button>
     </dialog>
     <dialog id="facultyLifecycleDialog" class="modal faculty-lifecycle-modal">
       <div class="dialog-top"><span class="eyebrow">FACULTY GROWTH & HIBERNATION</span><button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button></div>

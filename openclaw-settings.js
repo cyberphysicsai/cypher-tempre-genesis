@@ -1,4 +1,11 @@
 const pretty = value => JSON.stringify(value ?? null, null, 2);
+const nativeUtilityModelNotice = 'Automatic native metadata utilities are off by default. Explicitly configuring agents.defaults.utilityModel requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms, even while chat uses Free models. The shared free-tier key is not supplied. These metadata-only calls have no action tools; agent answers and actions retain canonical PoI review.';
+const nativeQueuePolicyNotice = 'ChainChat frontend messages use followup: each request keeps its own identity and PoI review, with commitment following the selected Timechain block policy. Native /queue preferences apply to other native events and channel inputs; frontend requests stay separate.';
+export function nativeCommandDescription(item = {}) {
+  const original = `${String(item.description || '')}${item.mode ? ` · ${item.mode}` : ''}`;
+  return String(item.name || '').trim().split(/\s/)[0].replace(/^\//, '') === 'queue'
+    ? `${nativeQueuePolicyNotice} ${original}` : original;
+}
 export function buildAutomationSchedule({ kind, at, minutes, expr, tz }, now = Date.now()) {
   if (kind === 'at') {
     const timestamp = new Date(at).getTime();
@@ -23,7 +30,9 @@ export function schemaFields(schema, query = '', family = '') {
     if (!node || typeof node !== 'object' || depth > 15 || result.length > 500) return;
     for (const [key, child] of Object.entries(node.properties || {})) {
       const name = prefix ? `${prefix}.${key}` : key;
-      const description = String(child.description || child.title || '');
+      const original = String(child.description || child.title || '');
+      const description = name === 'agents.defaults.utilityModel' ? `${nativeUtilityModelNotice} ${original}` :
+        name === 'messages.queue' || name.startsWith('messages.queue.') ? `${nativeQueuePolicyNotice} ${original}` : original;
       if (!filter || `${name} ${description}`.toLowerCase().includes(filter)) result.push({ name, description: description.slice(0, 1500), type: child.type || (child.properties ? 'object' : '') });
       walk(child, name, depth + 1);
     }
@@ -36,7 +45,7 @@ export function schemaFamilies(schema, guards = {}, sections = []) {
   const root = schema?.schema || schema;
   return Object.keys(root?.properties || {}).slice(0, 500).sort().map(name => {
     const metadata = Array.isArray(sections) ? sections.find(item => item.key === name) : null;
-    const classification = ['editable', 'managed', 'supervisor-owned'].includes(metadata?.classification)
+    const classification = ['editable', 'owner-admitted', 'managed', 'supervisor-owned'].includes(metadata?.classification)
       ? metadata.classification : Object.hasOwn(guards, name) ? 'managed' : 'reference';
     return {
     name,
@@ -54,11 +63,394 @@ export function contextPolicyText(policy) {
     return 'Retrieve relevant history for each request and keep the full saved conversation. Automatic summary compaction is off. Each model still has a bounded context window; oversized requests are held rather than silently discarding history.';
   return 'This runtime has not reported a recognized context policy. Inspect its runtime version before relying on a particular retrieval or summary mode. Each model context window remains bounded.';
 }
+const scopedNativeTools = new Set(['read', 'write', 'edit', 'web_fetch', 'browser', 'exec', 'process', 'chainchat_automation', 'get_goal', 'update_goal']);
+const validNativeName = value => typeof value === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$/.test(value) && !['__proto__', 'constructor', 'prototype'].includes(value);
+export function nativeCapabilityCatalogue(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).slice(0, 2048).filter(row => row?.source === 'native' && validNativeName(row.name) && !seen.has(row.name) && seen.add(row.name))
+    .map(row => ({ name: row.name, source: 'native', description: typeof row.description === 'string' ? row.description.slice(0, 1500) : '',
+      available: row.available === true, scopedHostTool: row.scopedHostTool === true || scopedNativeTools.has(row.name) }));
+}
+export function nativeCapabilityPayload({ enabled, acknowledged, tools, settingsText = '', allSettings, delegatedRuns, backgroundRuns }, catalogue) {
+  const known = new Set(nativeCapabilityCatalogue(catalogue).filter(row => row.available && !row.scopedHostTool).map(row => row.name));
+  if (!Array.isArray(tools) || tools.length > 128 || new Set(tools).size !== tools.length || tools.some(name => !known.has(name)))
+    throw new Error('Choose available discovered native tools; scoped host tools keep their separate permissions.');
+  const settings = allSettings === true ? ['*'] : settingsText.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (settings.length > 256 || new Set(settings).size !== settings.length || settings.some(path => path.length > 256 ||
+      path !== '*' && (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(path) || path.split('.').some(part => ['__proto__', 'prototype', 'constructor'].includes(part)))))
+    throw new Error('Use unique exact native setting paths, one per line.');
+  if (!allSettings && settings.includes('*')) throw new Error('Use the explicit all-native-settings checkbox to grant *.');
+  if (enabled === true && acknowledged !== true) throw new Error('Acknowledge the OpenClaw host privileges before enabling native capabilities.');
+  return { enabled: enabled === true, acknowledged: acknowledged === true, tools: [...tools], settings,
+    delegatedRuns: delegatedRuns === true, backgroundRuns: backgroundRuns === true };
+}
+export function mountNativeCapabilityCard({ document: doc, mount, api, onSaved = async () => {}, onError = () => {}, context = () => '' }) {
+  const make = (tag, text = '', className = '') => {
+    const node = doc.createElement(tag); node.textContent = text; if (className) node.className = className; return node;
+  };
+  const form = make('form', '', 'native-card native-capability-card'); form.id = 'nativeCapabilityForm';
+  form.append(make('h2', 'Additional native OpenClaw capabilities'), make('p',
+    "Native tools run with OpenClaw's host privileges. This is not an OS or filesystem sandbox. Scoped file, browser, execution and goal tools keep their separate controls above. PoI, credentials and private transport stay protected."));
+  const status = make('p', '', 'native-capability-status'); status.id = 'nativeCapabilityStatus'; status.setAttribute('role', 'status');
+  const controls = make('fieldset', '', 'native-capability-controls'); controls.append(make('legend', 'Native owner grant', 'sr-only'));
+  function check(id, text) {
+    const label = make('label', '', 'native-check'), input = make('input'); input.type = 'checkbox'; input.id = id;
+    label.append(input, make('span', text)); controls.append(label); return input;
+  }
+  const enabled = check('nativeCapabilitiesEnabled', 'Enable selected additional native capabilities for this agent');
+  const tools = make('div', '', 'native-capability-tools'); tools.id = 'nativeAdditionalToolChoices'; controls.append(tools);
+  const pathLabel = make('label', 'Native setting paths · one exact path per line', 'field'), paths = make('textarea');
+  paths.id = 'nativeSettingPaths'; paths.rows = 3; paths.placeholder = 'agents.defaults.timeoutSeconds'; paths.spellcheck = false; pathLabel.append(paths); controls.append(pathLabel);
+  const allSettings = check('nativeAllSettings', 'Allow all native setting paths (*) except operator-protected core paths');
+  controls.append(make('p', 'These paths admit schema-validated settings edits; they cannot disable PoI, expose credentials, replace private transport or change the managed model route. The Settings tab lists the protected paths and reasons.', 'fine-print'));
+  const delegated = check('nativeDelegatedRuns', 'Permit delegated runs when an inherited PoI binding is available');
+  const background = check('nativeBackgroundRuns', 'Permit background runs when a registered PoI binding is available');
+  controls.append(make('p', 'These are owner permissions, not execution indicators. A selected tool still needs current runtime admission, concrete action review and any required delegated or background binding.', 'fine-print'));
+  const acknowledged = check('nativeCapabilitiesAcknowledged', 'I authorize these additional native capabilities with OpenClaw host privileges and understand that they are not sandboxed.');
+  const actions = make('div', '', 'native-actions'), save = make('button', 'Apply native capability grant', 'primary-button'); save.type = 'submit'; save.id = 'saveNativeCapabilities';
+  const revoke = make('button', 'Revoke additional native capabilities', 'secondary-button'); revoke.type = 'button'; revoke.id = 'revokeNativeCapabilities';
+  actions.append(save, revoke); form.append(status, controls, actions); mount.append(form);
+  let catalogue = [], last = null, ready = false, busy = false, epoch = 0;
+  const choices = new Map();
+  const availability = () => { controls.disabled = !ready || busy; save.disabled = !ready || busy; revoke.disabled = !ready || busy; paths.disabled = allSettings.checked; };
+  function render(next) {
+    last = next;
+    ready = !!(next?.sessionKey || next?.selectedAgentId) && Array.isArray(next?.nativeToolCatalogue);
+    catalogue = nativeCapabilityCatalogue(next?.nativeToolCatalogue); choices.clear(); tools.replaceChildren();
+    const grant = next?.toolAuthority?.grant?.nativeCapabilities || {};
+    enabled.checked = grant.enabled === true; acknowledged.checked = false;
+    allSettings.checked = Array.isArray(grant.settings) && grant.settings.includes('*');
+    paths.value = (Array.isArray(grant.settings) ? grant.settings : []).filter(path => typeof path === 'string' && path !== '*').join('\n');
+    delegated.checked = grant.delegatedRuns === true; background.checked = grant.backgroundRuns === true;
+    for (const row of catalogue) {
+      const label = make('label', '', 'native-check native-capability-choice'), input = make('input'); input.type = 'checkbox';
+      input.dataset.nativeExtraTool = row.name; input.checked = (grant.tools || []).includes(row.name);
+      input.disabled = !row.available || row.scopedHostTool; choices.set(row.name, input);
+      const copy = make('span'); copy.append(make('strong', row.name), make('small', row.scopedHostTool ? 'Separate scoped host-tool controls' : !row.available ? 'Not available in this runtime' : row.description || 'Discovered native tool'));
+      label.append(input, copy); tools.append(label);
+    }
+    if (!catalogue.length) tools.append(make('p', ready ? 'No additional native tools are currently discovered. Native settings admission remains available.' : 'Select a local agent in a runtime that advertises native capabilities.', 'fine-print'));
+    status.textContent = !ready ? 'Connect a selected agent to inspect its native capability catalogue.' : grant.enabled === true
+      ? 'Owner grant saved · every call still requires PoI and current runtime admission.' : 'Additional native capabilities are disabled. Scoped host-tool permissions remain separate.';
+    availability();
+  }
+  function reset() { epoch++; busy = false; render(null); }
+  async function apply(revoking = false) {
+    if (!ready || busy) return;
+    let payload;
+    try { payload = revoking ? { enabled: false, acknowledged: false, tools: [], settings: [], delegatedRuns: false, backgroundRuns: false }
+      : nativeCapabilityPayload({ enabled: enabled.checked, acknowledged: acknowledged.checked,
+        tools: [...choices].filter(([, input]) => input.checked && !input.disabled).map(([name]) => name), settingsText: paths.value,
+        allSettings: allSettings.checked, delegatedRuns: delegated.checked, backgroundRuns: background.checked }, catalogue); }
+    catch (failure) { onError(failure.message); return; }
+    const owner = context(), version = epoch; busy = true; availability(); onError('');
+    try {
+      const result = await api('/api/openclaw/native-capabilities', payload);
+      if (version !== epoch || owner !== context()) return;
+      render({ ...last, toolAuthority: result.toolAuthority, nativeToolCatalogue: result.catalogue });
+      status.textContent = revoking ? 'Additional native capabilities revoked. The local app requested cancellation of active calls.' : 'Native capability grant saved. Each action still requires fresh PoI and runtime admission.';
+      await onSaved();
+    } catch (failure) { if (version === epoch && owner === context()) onError(failure.message); }
+    finally { if (version === epoch && owner === context()) { busy = false; availability(); } }
+  }
+  form.addEventListener('submit', event => { event.preventDefault(); return apply(); });
+  revoke.addEventListener('click', () => apply(true)); allSettings.addEventListener('change', availability);
+  render(null);
+  return { render, reset };
+}
+
+const nativeSourceAgent = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value) && !['__proto__', 'constructor', 'prototype'].includes(value);
+const nativeSourceOpaque = (value, limit = 128) => typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\x00-\x1f\x7f\u2028\u2029]/.test(value);
+const nativeSourceLabel = value => typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 240) : '';
+function nativeSourceRow(value) {
+  if (!nativeSourceAgent(value?.agentId)) return null;
+  if (value.kind === 'channel' && nativeSourceOpaque(value.channelId) && nativeSourceOpaque(value.accountId))
+    return { kind: 'channel', agentId: value.agentId, channelId: value.channelId, accountId: value.accountId };
+  if (value.kind === 'heartbeat') return { kind: 'heartbeat', agentId: value.agentId };
+  if (value.kind === 'background' && nativeSourceOpaque(value.nativeSessionKey, 2048) && value.nativeSessionKey.startsWith(`agent:${value.agentId}:`))
+    return { kind: 'background', agentId: value.agentId, nativeSessionKey: value.nativeSessionKey };
+  return null;
+}
+export function nativeSourceView(value) {
+  const agents = new Map(), sources = new Map(), channels = new Map(), sessions = new Map();
+  for (const row of (Array.isArray(value?.available?.agents) ? value.available.agents : []).slice(0, 1024)) {
+    if (nativeSourceAgent(row?.id)) agents.set(row.id, { id: row.id, name: nativeSourceLabel(row.name) || row.id, heartbeat: row.heartbeat === true });
+  }
+  for (const row of (Array.isArray(value?.available?.channels) ? value.available.channels : []).slice(0, 1024)) {
+    if (!nativeSourceOpaque(row?.channelId) || !nativeSourceOpaque(row.accountId)) continue;
+    const key = JSON.stringify([row.channelId, row.accountId]);
+    channels.set(key, { channelId: row.channelId, accountId: row.accountId });
+  }
+  for (const row of (Array.isArray(value?.available?.sessions) ? value.available.sessions : []).slice(0, 1024)) {
+    if (!nativeSourceAgent(row?.agentId) || !nativeSourceOpaque(row.key, 2048) || !row.key.startsWith(`agent:${row.agentId}:`)) continue;
+    sessions.set(row.key, { agentId: row.agentId, key: row.key, label: nativeSourceLabel(row.label) || row.key });
+  }
+  for (const row of (Array.isArray(value?.sources) ? value.sources : []).slice(0, 1024)) {
+    const source = nativeSourceRow(row);
+    if (source && typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id)) sources.set(row.id, { id: row.id, ...source });
+  }
+  return { agents: [...agents.values()], channels: [...channels.values()], sessions: [...sessions.values()], sources: [...sources.values()] };
+}
+export function nativeSourceEnrollment(source, available) {
+  const selected = nativeSourceRow(source), view = nativeSourceView({ available });
+  if (!selected || !view.agents.some(row => row.id === selected.agentId)) throw new Error('Choose a configured native agent from the refreshed list.');
+  if (selected.kind === 'channel' && !view.channels.some(row => row.channelId === selected.channelId && row.accountId === selected.accountId) ||
+      selected.kind === 'heartbeat' && !view.agents.some(row => row.id === selected.agentId && row.heartbeat) ||
+      selected.kind === 'background' && !view.sessions.some(row => row.key === selected.nativeSessionKey && row.agentId === selected.agentId))
+    throw new Error('Choose a configured native source from the refreshed list.');
+  return { action: 'enroll', source: selected };
+}
+export function nativeHeartbeatScratch(value, source) {
+  if (source?.kind !== 'heartbeat' || value?.sourceId !== source.id || value.agentId !== source.agentId ||
+      !Number.isSafeInteger(value.currentRevision) || value.currentRevision < 0 || !Number.isSafeInteger(value.maxBytes) ||
+      value.maxBytes < 1 || value.maxBytes > 262144 || value.content !== null && (typeof value.content !== 'string' ||
+      new TextEncoder().encode(value.content).length > value.maxBytes || value.content.includes('\0')))
+    throw new Error('The native heartbeat notes do not match the selected enrolled source.');
+  return {sourceId: source.id, agentId: source.agentId, content: value.content, currentRevision: value.currentRevision, maxBytes: value.maxBytes};
+}
+export function mountNativeSourceCard({ document: doc, mount, api, context = () => '' }) {
+  const make = (tag, content = '', className = '') => { const node = doc.createElement(tag); node.textContent = content; node.className = className; return node; };
+  const card = make('section', '', 'native-card native-source-card'); card.id = 'nativeSourceCard';
+  card.append(make('h2', 'Native run source enrollment'), make('p', 'Bind an existing native source to the selected Timechain. Enrollment does not start it or grant extra tools. Each independent run still needs current owner authority, a verified chain and fresh PoI review. Native tools retain OpenClaw host privileges.'));
+  card.append(make('p', 'Configured native authentication and explicit background grants can admit enrolled sources while this browser is disconnected. Direct API and shared-proxy tasks require a live provider session. Pausing parent memory, disabling background permission or revoking enrollment stops new admission; disconnecting the browser does not erase native authentication.', 'fine-print'));
+  const status = make('p', '', 'native-capability-status'); status.id = 'nativeSourcesStatus'; status.setAttribute('role', 'status');
+  const refresh = make('button', 'Refresh configured native sources', 'secondary-button'); refresh.type = 'button'; refresh.id = 'refreshNativeSources';
+  const form = make('form'), fields = make('fieldset', '', 'native-capability-controls'); form.id = 'nativeSourceForm';
+  fields.append(make('legend', 'Enroll a verified native source', 'sr-only'));
+  function select(id, label) { const holder = make('label', label, 'field'), input = make('select'); input.id = id; holder.append(input); fields.append(holder); return { holder, input }; }
+  const kind = select('nativeSourceKind', 'Source kind'), agent = select('nativeSourceAgent', 'Configured native agent'), target = select('nativeSourceTarget', 'Configured source');
+  for (const [value, label] of [['channel', 'Channel account'], ['heartbeat', 'Heartbeat'], ['background', 'Existing background session']]) {
+    const option = make('option', label); option.value = value; kind.input.append(option);
+  }
+  kind.input.value = 'channel';
+  const explanation = make('p', '', 'fine-print'); fields.append(explanation);
+  const consentLabel = make('label', '', 'native-check'), consent = make('input'); consent.type = 'checkbox'; consent.id = 'nativeSourceAcknowledged';
+  consentLabel.append(consent, make('span', 'Bind this configured source to the selected Timechain for independently reviewed native runs.')); fields.append(consentLabel);
+  const enroll = make('button', 'Enroll selected native source', 'primary-button'); enroll.type = 'submit'; enroll.id = 'enrollNativeSource';
+  form.append(fields, enroll);
+  const list = make('div', '', 'native-service-list'); list.id = 'nativeEnrolledSources'; list.setAttribute('aria-label', 'Enrolled native run sources');
+  const scratch = make('section', '', 'native-heartbeat-scratch'); scratch.id = 'nativeHeartbeatScratch'; scratch.hidden = true;
+  const scratchTitle = make('h3', 'Heartbeat monitor notes'), scratchStatus = make('p', '', 'native-capability-status'); scratchStatus.id = 'nativeHeartbeatScratchStatus'; scratchStatus.setAttribute('role', 'status');
+  const scratchForm = make('form'); scratchForm.id = 'nativeHeartbeatScratchForm';
+  const scratchLabel = make('label', 'Owner monitor notes', 'field'), scratchNotes = make('textarea'); scratchNotes.id = 'nativeHeartbeatScratchNotes'; scratchNotes.rows = 6; scratchNotes.maxLength = 262144; scratchNotes.spellcheck = false; scratchLabel.append(scratchNotes);
+  const scratchActions = make('div', '', 'native-actions');
+  const scratchSave = make('button', 'Save monitor notes', 'primary-button'); scratchSave.id = 'saveNativeHeartbeatScratch'; scratchSave.type = 'submit';
+  const scratchRefresh = make('button', 'Reload notes', 'secondary-button'); scratchRefresh.id = 'refreshNativeHeartbeatScratch'; scratchRefresh.type = 'button';
+  const scratchConfigured = make('button', 'Use configured prompt', 'secondary-button'); scratchConfigured.id = 'resetNativeHeartbeatScratch'; scratchConfigured.type = 'button';
+  const scratchClose = make('button', 'Close notes', 'text-button'); scratchClose.type = 'button'; scratchClose.id = 'closeNativeHeartbeatScratch';
+  scratchActions.append(scratchSave, scratchRefresh, scratchConfigured, scratchClose); scratchForm.append(scratchLabel, scratchActions);
+  scratch.append(scratchTitle, make('p', 'A heartbeat needs monitor notes or a configured prompt to perform scheduled model work. Saving empty notes skips that work. Use configured prompt removes this note override. Notes grant no tools; each scheduled agent turn still needs current enrollment, an owner background grant and PoI review.', 'fine-print'), scratchStatus, scratchForm);
+  card.append(status, refresh, form, make('h3', 'Enrolled sources'), list, scratch); mount.append(card);
+  let view = nativeSourceView(null), ready = false, permitted = false, busy = false, loaded = false, epoch = 0, owner = context();
+  let scratchSource = null, scratchRevision = null, scratchMaxBytes = 262144;
+  function options(input, entries, placeholder, selected = input.value) {
+    input.replaceChildren(); const blank = make('option', placeholder); blank.value = ''; input.append(blank);
+    for (const row of entries) { const option = make('option', row.label); option.value = row.value; input.append(option); }
+    input.value = entries.some(row => row.value === selected) ? selected : '';
+  }
+  function candidates() {
+    if (kind.input.value === 'channel') return view.channels.map((row, index) => ({ value: String(index), label: `${row.channelId} / ${row.accountId}`, row }));
+    if (kind.input.value === 'background') return view.sessions.filter(row => row.agentId === agent.input.value).map(row => ({ value: row.key, label: row.label, row }));
+    return [];
+  }
+  function selection() {
+    const value = { kind: kind.input.value, agentId: agent.input.value }, chosen = candidates().find(row => row.value === target.input.value)?.row;
+    if (value.kind === 'channel' && chosen) Object.assign(value, { channelId: chosen.channelId, accountId: chosen.accountId });
+    if (value.kind === 'background' && chosen) value.nativeSessionKey = chosen.key;
+    return value;
+  }
+  function availability() {
+    refresh.disabled = !ready || busy; fields.disabled = !ready || !loaded || !permitted || busy;
+    let valid = false; try { nativeSourceEnrollment(selection(), view); valid = true; } catch { /* Only discovered selections can be submitted. */ }
+    enroll.disabled = fields.disabled || !consent.checked || !valid;
+    for (const row of list.children) for (const button of row.children) if (button.tagName?.toLowerCase() === 'button') button.disabled = !ready || busy;
+    scratchNotes.disabled = !ready || busy || scratchRevision === null; scratchNotes.readOnly = !permitted;
+    scratchSave.disabled = !ready || !permitted || busy || scratchRevision === null;
+    scratchConfigured.disabled = scratchSave.disabled; scratchRefresh.disabled = !ready || busy || !scratchSource; scratchClose.disabled = busy;
+  }
+  function targets() {
+    options(target.input, candidates(), kind.input.value === 'channel' ? 'Choose a configured channel account' : 'Choose an existing native session');
+    target.holder.hidden = kind.input.value === 'heartbeat';
+    const eligible = view.agents.find(row => row.id === agent.input.value)?.heartbeat === true;
+    explanation.textContent = !permitted ? 'To enroll a source, first apply an acknowledged additional native capability grant with background runs enabled. Existing enrollments can still be inspected and revoked.'
+      : kind.input.value === 'heartbeat' ? eligible ? 'The selected native agent has a configured heartbeat. Enrollment does not start or reschedule it.' : 'Select an agent with a configured heartbeat; configure it in native settings first if none is listed.'
+      : kind.input.value === 'channel' ? 'Select an existing enabled native channel account. This enrollment does not configure channel credentials or start a connection.'
+      : 'Only existing native sessions for the selected agent appear. Enrollment does not create a session or inherit another agent’s tools.';
+    availability();
+  }
+  function renderList() {
+    list.replaceChildren();
+    if (!view.sources.length) list.append(make('p', loaded ? 'No native run sources are enrolled for this Timechain.' : 'Refresh to inspect this Timechain’s enrolled sources.', 'fine-print'));
+    for (const source of view.sources) {
+      const row = make('article', '', 'native-service-row'); row.append(make('h4', `${source.kind} · ${source.agentId}`));
+      row.append(make('p', source.kind === 'channel' ? `${source.channelId} / ${source.accountId}` : source.kind === 'background' ? source.nativeSessionKey : 'Configured native heartbeat'));
+      row.append(make('p', 'Enrolled binding · execution and every action remain independently reviewed.', 'fine-print'));
+      const revoke = make('button', 'Revoke this source enrollment', 'text-button'); revoke.type = 'button'; revoke.dataset.nativeSourceId = source.id;
+      revoke.addEventListener('click', () => request({ action: 'revoke', id: source.id }, 'Source enrollment revoked. This does not stop or erase its native session.'));
+      row.append(revoke); list.append(row);
+      if (source.kind === 'heartbeat') {
+        const edit = make('button', 'Edit heartbeat monitor notes', 'text-button'); edit.type = 'button'; edit.dataset.nativeScratchSource = source.id;
+        edit.addEventListener('click', () => openScratch(source)); row.append(edit);
+      }
+    }
+  }
+  function accept(result) {
+    const available = result?.available ? result.available : { agents: view.agents, channels: view.channels, sessions: view.sessions };
+    view = nativeSourceView({ sources: result?.sources, available }); loaded = true;
+    if (scratchSource && !view.sources.some(source => source.id === scratchSource.id && source.kind === 'heartbeat')) closeScratch();
+    options(agent.input, view.agents.map(row => ({ value: row.id, label: `${row.name}${row.heartbeat ? ' · heartbeat configured' : ''}` })), 'Choose a configured native agent');
+    consent.checked = false; renderList(); targets();
+  }
+  async function request(payload, success) {
+    if (!ready || busy) return; const bound = context(), version = epoch; busy = true; availability();
+    status.textContent = payload.action === 'list' ? 'Loading configured native sources…' : 'Applying the selected source binding…';
+    try {
+      const result = await api('/api/openclaw/sources', payload);
+      if (version !== epoch || bound !== context()) return;
+      accept(result); status.textContent = success || `${view.sources.length} enrolled source${view.sources.length === 1 ? '' : 's'} · configure native sources before enrollment when none are listed.`;
+    } catch (failure) {
+      if (version === epoch && bound === context()) {
+        const codes = new Set(['OPENCLAW_NATIVE_BINDING_REQUIRED', 'OPENCLAW_CONTROL_BUSY', 'OPENCLAW_CONTROL_CLOSED', 'PAIR_REQUIRED', 'SESSION_CHANGED']);
+        status.textContent = `The source request did not complete. Check the current native configuration and owner grant, then refresh.${codes.has(failure?.code) ? ` Code: ${failure.code}.` : ''}`;
+      }
+    } finally { if (version === epoch && bound === context()) { busy = false; availability(); } }
+  }
+  function closeScratch() { scratchSource = null; scratchRevision = null; scratchNotes.value = ''; scratchStatus.textContent = ''; scratch.hidden = true; }
+  function openScratch(source) {
+    if (!ready || busy || source.kind !== 'heartbeat' || !view.sources.some(row => row.id === source.id && row.kind === 'heartbeat')) return;
+    scratchSource = source; scratchRevision = null; scratchNotes.value = ''; scratch.hidden = false; scratchTitle.textContent = `Heartbeat monitor notes · ${source.agentId}`;
+    return requestScratch('scratch-get');
+  }
+  async function requestScratch(action, content) {
+    if (!ready || busy || !scratchSource || action === 'scratch-set' && (!permitted || scratchRevision === null)) return;
+    if (action === 'scratch-set' && content !== null && (typeof content !== 'string' || new TextEncoder().encode(content).length > scratchMaxBytes || content.includes('\0'))) {
+      scratchStatus.textContent = `Use at most ${scratchMaxBytes} UTF-8 bytes of monitor notes.`; return;
+    }
+    const source = scratchSource, bound = context(), version = epoch;
+    const payload = {action, id: source.id, ...(action === 'scratch-set' ? {content, expectedRevision: scratchRevision} : {})};
+    busy = true; availability(); scratchStatus.textContent = action === 'scratch-get' ? 'Reading this enrolled heartbeat’s monitor notes…' : 'Saving monitor notes against the current native revision…';
+    try {
+      const result = nativeHeartbeatScratch(await api('/api/openclaw/sources', payload), source);
+      if (version !== epoch || bound !== context() || scratchSource?.id !== source.id) return;
+      scratchRevision = result.currentRevision; scratchMaxBytes = result.maxBytes; scratchNotes.value = result.content ?? '';
+      scratchStatus.textContent = result.content === null ? 'No note override · the native configured prompt applies.' : result.content === '' ? 'Empty monitor notes saved · scheduled model work is skipped.' : `Monitor notes loaded · native revision ${result.currentRevision}.`;
+    } catch {
+      if (version === epoch && bound === context() && scratchSource?.id === source.id)
+        scratchStatus.textContent = 'The heartbeat notes request did not complete. Reload notes to inspect the current revision and owner background grant before retrying.';
+    } finally { if (version === epoch && bound === context()) { busy = false; availability(); } }
+  }
+  function reset() {
+    epoch++; owner = context(); ready = false; permitted = false; busy = false; loaded = false; view = nativeSourceView(null);
+    consent.checked = false; closeScratch(); options(agent.input, [], 'Choose a configured native agent'); renderList(); targets();
+    status.textContent = 'Connect a selected Timechain to inspect native source bindings.';
+  }
+  function render(next) {
+    if (owner !== context()) reset();
+    const wasReady = ready; ready = !!(next?.sessionKey || next?.selectedAgentId);
+    const grant = next?.toolAuthority?.grant?.nativeCapabilities;
+    permitted = grant?.enabled === true && grant.acknowledged === true && grant.backgroundRuns === true;
+    consent.checked = false; targets();
+    if (!ready) { reset(); return; }
+    if (!wasReady && !loaded) void request({ action: 'list' });
+  }
+  for (const input of [kind.input, agent.input]) input.addEventListener('change', () => { consent.checked = false; targets(); });
+  target.input.addEventListener('change', () => { consent.checked = false; availability(); }); consent.addEventListener('change', availability);
+  refresh.addEventListener('click', () => request({ action: 'list' }));
+  scratchForm.addEventListener('submit', event => { event.preventDefault(); return requestScratch('scratch-set', scratchNotes.value); });
+  scratchRefresh.addEventListener('click', () => requestScratch('scratch-get'));
+  scratchConfigured.addEventListener('click', () => requestScratch('scratch-set', null));
+  scratchClose.addEventListener('click', () => { closeScratch(); availability(); });
+  form.addEventListener('submit', event => { event.preventDefault(); if (!ready || !permitted || !consent.checked || busy) return; try { return request(nativeSourceEnrollment(selection(), view), 'Source enrolled. Each run still requires current owner authority and fresh PoI review.'); } catch (failure) { status.textContent = failure.message; } });
+  reset(); return { render, reset };
+}
+
+const nativeSecretName = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
+const nativeSecretTarget = value => typeof value === 'string' && value.length <= 256 && /^tts\.(?:providers\.[A-Za-z0-9_-]+|personas\.[A-Za-z0-9_-]+\.providers\.[A-Za-z0-9_-]+)\.apiKey$/.test(value) && value.split('.').every(part => !['constructor', 'prototype', '__proto__'].includes(part));
+export function nativeSecretView(value) {
+  const targets = new Map(), bindings = new Map();
+  for (const row of (Array.isArray(value?.targets) ? value.targets : []).slice(0, 256)) {
+    if (nativeSecretTarget(row?.target)) targets.set(row.target, { target: row.target,
+      label: typeof row.label === 'string' ? row.label.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 240) : row.target });
+  }
+  for (const row of (Array.isArray(value?.bindings) ? value.bindings : []).slice(0, 64)) {
+    if (nativeSecretName(row?.name) && nativeSecretTarget(row.target) && row.configured === true)
+      bindings.set(row.name, { name: row.name, target: row.target, configured: true, available: row.available === true && targets.has(row.target) });
+  }
+  return { targets: [...targets.values()], bindings: [...bindings.values()] };
+}
+export function nativeSecretPayload({ name, target, value }, view) {
+  if (!nativeSecretName(name) || !nativeSecretView(view).targets.some(row => row.target === target) ||
+      typeof value !== 'string' || !value.length || new TextEncoder().encode(value).length > 16384 || value.includes('\0') || value === 'chainchat-free-tier')
+    throw new Error('Choose a configured native target, a binding name and a dedicated credential.');
+  return { action: 'set', name, target, value };
+}
+export function mountNativeSecretCard({ document: doc, mount, api, context = () => '' }) {
+  const make = (tag, text = '', className = '') => { const node = doc.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
+  const card = make('section', '', 'native-card native-secret-card'); card.append(make('h2', 'Dedicated native service credentials'));
+  card.append(make('p', 'Add a dedicated credential for a configured native TTS provider. Credentials are stored in a local owner-protected plaintext file, not an encrypted vault. Only allowlisted secret references appear in native settings; the local app supplies values to its managed native process.', 'fine-print'));
+  card.append(make('p', 'Choose targets discovered from the native configuration. Set or remove restarts the managed runtime and cancels dynamic runs; finish the current primary turn first. Model API keys and the shared free-tier credential are not reused here.', 'fine-print'));
+  const status = make('p', '', 'native-capability-status'); status.id = 'nativeSecretsStatus'; status.setAttribute('role', 'status');
+  const refresh = make('button', 'Refresh native credential targets', 'secondary-button'); refresh.type = 'button'; refresh.id = 'refreshNativeSecrets';
+  const form = make('form'); form.id = 'nativeSecretForm';
+  const fields = make('fieldset', '', 'native-capability-controls'); fields.append(make('legend', 'Dedicated native credential', 'sr-only'));
+  function field(id, label, tag = 'input') { const holder = make('label', label, 'field'), input = make(tag); input.id = id; holder.append(input); fields.append(holder); return input; }
+  const name = field('nativeSecretName', 'Local binding name'); name.type = 'text'; name.maxLength = 64; name.autocomplete = 'off'; name.placeholder = 'speech-service'; name.required = true;
+  const target = field('nativeSecretTarget', 'Configured native credential target', 'select'); target.required = true;
+  const credential = field('nativeSecretValue', 'Dedicated credential'); credential.type = 'password'; credential.autocomplete = 'new-password'; credential.maxLength = 16384; credential.required = true; credential.spellcheck = false;
+  const save = make('button', 'Save dedicated credential locally', 'primary-button'); save.id = 'saveNativeSecret'; save.type = 'submit';
+  const list = make('div', '', 'native-service-list'); list.id = 'nativeSecretBindings'; list.setAttribute('aria-label', 'Configured dedicated native credentials');
+  form.append(fields, save); card.append(status, refresh, form, make('h3', 'Local credential bindings'), list); mount.append(card);
+  let ready = false, busy = false, loaded = false, epoch = 0, owner = context(), view = nativeSecretView(null);
+  const removals = [];
+  function availability() { fields.disabled = !ready || busy || !view.targets.length; save.disabled = fields.disabled; refresh.disabled = !ready || busy; for (const button of removals) button.disabled = !ready || busy; }
+  function accept(result) {
+    view = nativeSecretView(result); loaded = true; target.replaceChildren(); const empty = make('option', 'Choose a configured native target'); empty.value = ''; target.append(empty);
+    for (const row of view.targets) { const option = make('option', row.label); option.value = row.target; target.append(option); }
+    target.value = ''; removals.length = 0; list.replaceChildren();
+    for (const binding of view.bindings) {
+      const row = make('article', '', 'native-service-row'); row.append(make('h4', binding.name), make('p', binding.target), make('p', binding.available ? 'Credential configured locally · value is hidden' : 'Credential configured locally · target is no longer configured'));
+      const remove = make('button', 'Remove local credential', 'secondary-button'); remove.type = 'button'; remove.dataset.nativeSecretName = binding.name;
+      remove.addEventListener('click', () => request({ action: 'remove', name: binding.name }, 'Dedicated credential removed. The managed native runtime was restarted.'));
+      removals.push(remove); row.append(remove); list.append(row);
+    }
+    if (!view.bindings.length) list.append(make('p', 'No dedicated native credentials are configured.', 'fine-print'));
+    availability();
+  }
+  async function request(payload, success) {
+    if (!ready || busy) return; const bound = context(), version = epoch; busy = true; credential.value = ''; availability();
+    status.textContent = payload.action === 'list' ? 'Inspecting configured native credential targets…' : 'Updating the dedicated local credential binding…';
+    try {
+      const result = await api('/api/openclaw/secrets', payload);
+      if (version !== epoch || bound !== context()) return;
+      accept(result); status.textContent = success || (view.targets.length ? `${view.targets.length} configured native credential target${view.targets.length === 1 ? '' : 's'} available.` : 'No credential targets are configured. Configure a native TTS provider in Settings, then refresh.');
+    } catch (failure) {
+      if (version === epoch && bound === context()) {
+        const codes = new Set(['OPENCLAW_NATIVE_SECRET_INVALID', 'OPENCLAW_CONTROL_BUSY', 'OPENCLAW_CONTROL_CLOSED', 'PAIR_REQUIRED', 'SESSION_CHANGED']);
+        status.textContent = `The native credential request did not complete. Check its configured target and finish active turns before retrying.${codes.has(failure?.code) ? ` Code: ${failure.code}.` : ''}`;
+      }
+    } finally { if (version === epoch && bound === context()) { busy = false; credential.value = ''; availability(); } }
+  }
+  function reset() { epoch++; owner = context(); ready = false; busy = false; loaded = false; name.value = ''; credential.value = ''; view = nativeSecretView(null); accept(null); loaded = false; status.textContent = 'Connect a selected Timechain to configure dedicated native credentials.'; availability(); }
+  function render(next) {
+    if (owner !== context()) reset(); const wasReady = ready; ready = !!(next?.sessionKey || next?.selectedAgentId);
+    if (!ready) { reset(); return; } availability(); if (!wasReady && !loaded) void request({ action: 'list' });
+  }
+  refresh.addEventListener('click', () => request({ action: 'list' }));
+  form.addEventListener('submit', event => {
+    event.preventDefault(); if (!ready || busy) { credential.value = ''; return; }
+    let payload; try { payload = nativeSecretPayload({ name: name.value.trim(), target: target.value, value: credential.value }, view); }
+    catch { status.textContent = 'Choose a configured native target, a valid local binding name and a dedicated credential.'; credential.value = ''; return; }
+    credential.value = ''; return request(payload, 'Dedicated credential saved locally. The managed native runtime was restarted.');
+  });
+  doc.defaultView?.addEventListener('pagehide', () => { credential.value = ''; });
+  reset(); return { render, reset };
+}
+
 export function initOpenClawSettings({ api, requireConnection, executeCommand, isConnected = () => false, document: doc = globalThis.document, onClose }) {
   const $ = id => doc.getElementById(id), panel = $('openclawPanel');
   let snapshot = null, loading = false, activeSection = 'configuration', selectedFamily = '';
   let connectionKey = '', connectionRevision = 0, pendingRefresh = false;
-  let configDirty = false, configEditRevision = null;
+  let configDirty = false, configEditRevision = null, nativeCapabilityControls = null, nativeSourceControls = null, nativeSecretControls = null;
   function error(message = '') { $('nativeError').textContent = message; }
   function close() {
     doc.querySelector('main.workspace')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
@@ -173,7 +565,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     for (const item of next.commands || []) {
       const button = doc.createElement('button'); button.type = 'button'; button.className = 'native-command';
       const name = doc.createElement('strong'); name.textContent = item.name;
-      const description = doc.createElement('span'); description.textContent = `${item.description}${item.mode ? ` · ${item.mode}` : ''}`;
+      const description = doc.createElement('span'); description.textContent = nativeCommandDescription(item);
       button.append(name, description); button.addEventListener('click', () => { $('nativeCommandInput').value = item.name; $('nativeCommandInput').focus(); }); commands.append(button);
     }
     const grant = next.toolAuthority?.grant || {};
@@ -198,6 +590,9 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
       const text = doc.createElement('span'); text.textContent = typeof entry === 'string' ? name : `${name}${entry.description ? ` · ${entry.description}` : ''}`;
       label.append(checkbox, text); tools.append(label);
     }
+    nativeCapabilityControls?.render(next);
+    nativeSourceControls?.render(next);
+    nativeSecretControls?.render(next);
     families(); reference(); renderServices(next);
   }
   async function refresh() {
@@ -222,6 +617,9 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     if (next === connectionKey) return;
     connectionKey = next; connectionRevision++; configDirty = false; configEditRevision = null;
     snapshot = null; selectedFamily = ''; $('nativeConnectedControls').disabled = true;
+    nativeCapabilityControls?.reset();
+    nativeSourceControls?.reset();
+    nativeSecretControls?.reset();
     pluginPreview = null; pluginNotices = {}; trustCheckbox.checked = false; consentCheckbox.checked = false;
     applyPlugin.disabled = true; previewText.textContent = ''; noticeText.textContent = '';
     consentLabel.classList.add('hidden'); noticeText.classList.add('hidden');
@@ -281,6 +679,12 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     try { await api('/api/openclaw/tools', { enabled: false, tools: [], roots: [], networkHosts: [], allowExecution: false, acknowledged: false }); await refresh(); }
     catch (failure) { error(failure.message); }
   });
+  nativeCapabilityControls = mountNativeCapabilityCard({ document: doc, mount: $('nativeToolsForm').parentElement,
+    api, onSaved: refresh, onError: error, context: () => connectionRevision });
+  nativeSourceControls = mountNativeSourceCard({ document: doc, mount: $('nativeToolsForm').parentElement,
+    api, context: () => connectionRevision });
+  nativeSecretControls = mountNativeSecretCard({ document: doc, mount: $('nativeToolsForm').parentElement,
+    api, context: () => connectionRevision });
   $('nativeScheduleTimezone').value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   $('nativeScheduleKind').addEventListener('change', () => {
     for (const item of doc.querySelectorAll('[data-native-schedule]')) item.classList.toggle('hidden', item.dataset.nativeSchedule !== $('nativeScheduleKind').value);

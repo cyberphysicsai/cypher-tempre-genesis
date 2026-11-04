@@ -76,3 +76,53 @@
   .native-tabs { margin: 18px 0; }
   .native-family-choice { font-size: 8px; padding: 8px; }
 }
+
+/* Owner-admitted native additions remain separate from scoped host tools. */
+.native-capability-controls { border: 0; margin: 0; padding: 0; min-width: 0; }
+.native-capability-status { border-left: 2px solid var(--line-light); padding: 9px 13px; overflow-wrap: anywhere; }
+.native-capability-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 8px 20px; max-height: 480px; overflow: auto; margin: 18px 0 24px; padding: 3px; scrollbar-width: thin; border-block: 1px solid var(--line); }
+.native-capability-choice { align-items: flex-start; margin: 0; padding: 12px 5px; min-width: 0; }
+.native-capability-choice input { margin-top: 3px; }
+.native-capability-choice > span { min-width: 0; }
+.native-capability-choice strong { display: block; font-size: 10px; font-weight: 500; line-height: 1.8; overflow-wrap: anywhere; }
+.native-capability-choice small { display: block; color: var(--muted); font-size: 8px; line-height: 1.9; overflow-wrap: anywhere; }
+.native-capability-card .native-actions { margin-top: 22px; }
+.native-capability-controls:disabled { opacity: .65; }
+@media(max-width: 700px) {
+  .native-capability-tools { grid-template-columns: minmax(0, 1fr); max-height: 400px; }
+  .native-capability-card .native-actions { align-items: stretch; flex-direction: column; }
+}
+
+.native-model-picker { margin: 22px 0; padding: 18px; border: 1px solid var(--line-light); border-radius: 6px; min-width: 0; }
+.native-model-picker > .fine-print { font-size: 9px; line-height: 1.9; margin: 12px 0 0; color: var(--muted); }
+.native-model-picker .model-catalogue-list { margin: 12px 0; }
+.native-model-picker .model-choice { font-size: 10px; }
+.native-auth { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; min-width: 0; }
+.native-auth summary { cursor: pointer; font-size: 11px; line-height: 1.9; margin-bottom: 16px; }
+.native-auth .field { font-size: 10px; margin-top: 18px; }
+.native-auth input:not([type="checkbox"]), .native-auth textarea { width: 100%; min-width: 0; }
+.native-auth .secondary-button { margin-block: 10px; max-width: 100%; overflow-wrap: anywhere; }
+.native-auth-options, .native-auth-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; max-height: 360px; overflow: auto; }
+.native-auth-provider { padding: 14px; border: 1px solid var(--line); min-width: 0; }
+.native-auth h4 { font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; margin: 0 0 12px; }
+.native-auth .fine-print { font-size: 9px; line-height: 1.9; overflow-wrap: anywhere; }
+.native-auth-wizard:not(:empty) { margin-block: 22px; padding: 18px; border: 1px solid var(--accent); }
+.native-wizard-message { white-space: pre-wrap; font-size: 10px; line-height: 1.9; overflow-wrap: anywhere; }
+.native-device-code { display: block; padding: 15px; border: 1px dashed var(--line-light); font-size: 18px; letter-spacing: 2px; overflow-wrap: anywhere; }
+.native-auth-configuration { margin-top: 24px; }
+.native-source-card form { display: grid; gap: 16px; margin-block: 20px 26px; }
+.native-source-card .native-capability-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+.native-source-card .fine-print, .native-source-card .native-check, .native-source-card .field:last-of-type { grid-column: 1 / -1; }
+.native-source-card .native-service-row h4 { font-size: 11px; line-height: 1.9; margin: 0 0 8px; overflow-wrap: anywhere; }
+.native-source-card #nativeEnrolledSources { max-height: 480px; overflow: auto; }
+.native-source-card [hidden] { display: none; }
+.native-heartbeat-scratch { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 22px; }
+.native-heartbeat-scratch textarea { min-height: 150px; resize: vertical; }
+.native-heartbeat-scratch .native-actions { flex-wrap: wrap; }
+@media(max-width: 700px) { .native-source-card .native-capability-controls { grid-template-columns: minmax(0, 1fr); } }
+.native-secret-card form { display: grid; gap: 18px; margin-block: 20px 26px; }
+.native-secret-card .native-capability-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+.native-secret-card .field:last-of-type { grid-column: 1 / -1; }
+.native-secret-card .native-service-row h4 { font-size: 11px; line-height: 1.9; margin: 0 0 8px; overflow-wrap: anywhere; }
+.native-secret-card #nativeSecretBindings { max-height: 440px; overflow: auto; }
+@media(max-width: 700px) { .native-secret-card .native-capability-controls { grid-template-columns: minmax(0, 1fr); } }

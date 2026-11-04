@@ -92,8 +92,26 @@ export function routeControlState(cognition, recallEnabled) {
   return { enabled: cognition?.autoRoute === true, label: cognition?.autoRoute === true ? "AUTOMATIC" : "OFF" };
 }
 
+export function cognitionModeView(current, { paired = false, held = false } = {}) {
+  const paused = current?.mode === 'dormant';
+  return { paused, gateActive: paired,
+    status: !paired ? 'TIMECHAIN UNPAIRED' : held ? 'TIMECHAIN HELD · LOCAL REVIEW' : paused ? 'MEMORY PAUSED · PoI ENFORCED' : 'TIMECHAIN ACTIVE',
+    gateStatus: held ? 'CHAIN HELD' : paired ? 'ENFORCED' : 'REQUIRES CHAIN',
+    composer: paused && paired ? 'Memory paused · Proof of Interaction enforced · action tools off' : 'Proof of Interaction active with Timechain',
+    title: paused ? 'Memory paused · PoI enforced' : held ? 'Timechain held for local review' : 'Timechain active',
+    description: paused ? 'Real-time memory, recall, faculty computations, learning and new blocks are paused. Every response still passes semantic and native PoI review. Action tools are off. Each request uses its current input without earlier chat context. Resume memory any time.'
+      : held ? 'The native agent is locked or has an incomplete maintenance journal. Review and recover it locally before continuing chain work. Existing history is preserved; this interface will not clear the hold automatically.'
+      : current?.learning ? 'Memory, faculties, covenant review and accepted conversation blocks are active. Learning and growth follow your selected settings.'
+      : 'Memory, faculties, covenant review and accepted conversation blocks remain active. Learner training and automatic growth are off.',
+    toggle: paused ? 'Resume real-time memory' : 'Pause real-time memory · keep PoI enforced',
+  };
+}
+export function messageIsReviewedPause(message) {
+  return message?.memoryPaused === true && message?.raw === false;
+}
+
 export function reviewReceipt(message) {
-  if (messageIsDormant(message)) return [];
+  if (messageIsDormant(message) && !messageIsReviewedPause(message)) return [];
   const labels = [];
   if (message?.replayed === true)
     labels.push("Reviewed memory replay");
