@@ -17,7 +17,7 @@ export function buildAutomationSchedule({ kind, at, minutes, expr, tz }, now = D
   }
   throw new Error('Choose a schedule type.');
 }
-export function schemaFields(schema, query = '') {
+export function schemaFields(schema, query = '', family = '') {
   const result = [], filter = query.trim().toLowerCase();
   function walk(node, prefix = '', depth = 0) {
     if (!node || typeof node !== 'object' || depth > 15 || result.length > 500) return;
@@ -28,24 +28,56 @@ export function schemaFields(schema, query = '') {
       walk(child, name, depth + 1);
     }
   }
-  walk(schema?.schema || schema);
+  const root = schema?.schema || schema;
+  walk(family && root?.properties?.[family] ? { properties: { [family]: root.properties[family] } } : root);
   return result.slice(0, 500);
 }
-export function initOpenClawSettings({ api, requireConnection, executeCommand, document: doc = globalThis.document, onClose }) {
+export function schemaFamilies(schema, guards = {}, sections = []) {
+  const root = schema?.schema || schema;
+  return Object.keys(root?.properties || {}).slice(0, 500).sort().map(name => {
+    const metadata = Array.isArray(sections) ? sections.find(item => item.key === name) : null;
+    const classification = ['editable', 'managed', 'supervisor-owned'].includes(metadata?.classification)
+      ? metadata.classification : Object.hasOwn(guards, name) ? 'managed' : 'reference';
+    return {
+    name,
+    description: String(root.properties[name]?.description || root.properties[name]?.title || '').slice(0, 1500),
+    classification, reason: String(metadata?.reason || '').slice(0, 2000),
+    protected: ['managed', 'supervisor-owned'].includes(classification),
+    guards: Object.entries(guards).filter(([path]) => path === name || path.startsWith(name + '.'))
+      .map(([path, reason]) => ({ path, reason: String(reason).slice(0, 2000) })),
+  }; });
+}
+export function contextPolicyText(policy) {
+  if (policy?.mode === 'reviewed-native-compaction' && policy?.automaticSummary === true && policy?.storedHistory === 'preserved')
+    return 'Timechain recall retrieves relevant verified history. When model context pressure requires a summary, native compaction reviews its exact source and proposed summary through PoI before saving. Saved history stays preserved, and two recent complete turns remain in view. Each model still has a bounded context window.';
+  if (policy?.mode === 'timechain-retrieval' && policy?.automaticSummary === false && policy?.storedHistory === 'preserved')
+    return 'Retrieve relevant history for each request and keep the full saved conversation. Automatic summary compaction is off. Each model still has a bounded context window; oversized requests are held rather than silently discarding history.';
+  return 'This runtime has not reported a recognized context policy. Inspect its runtime version before relying on a particular retrieval or summary mode. Each model context window remains bounded.';
+}
+export function initOpenClawSettings({ api, requireConnection, executeCommand, isConnected = () => false, document: doc = globalThis.document, onClose }) {
   const $ = id => doc.getElementById(id), panel = $('openclawPanel');
-  let snapshot = null, loading = false, activeSection = 'configuration';
+  let snapshot = null, loading = false, activeSection = 'configuration', selectedFamily = '';
+  let connectionKey = '', connectionRevision = 0, pendingRefresh = false;
+  let configDirty = false, configEditRevision = null;
   function error(message = '') { $('nativeError').textContent = message; }
   function close() {
-    panel.classList.add('hidden');
-    doc.querySelector('main.workspace')?.classList.remove('hidden');
-    doc.querySelector('.beta-access')?.classList.remove('hidden');
-    $('chain-auditor')?.classList.remove('hidden');
+    doc.querySelector('main.workspace')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     onClose?.();
   }
   function section(name) {
+    if (!doc.querySelector(`[data-native-tab="${name}"]`)) name = 'configuration';
     activeSection = name;
-    for (const button of doc.querySelectorAll('[data-native-tab]')) button.setAttribute('aria-selected', String(button.dataset.nativeTab === name));
-    for (const item of doc.querySelectorAll('[data-native-section]')) item.classList.toggle('hidden', item.dataset.nativeSection !== name);
+    for (const button of doc.querySelectorAll('[data-native-tab]')) {
+      const selected = button.dataset.nativeTab === name;
+      button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
+      button.setAttribute('aria-controls', `native-section-${button.dataset.nativeTab}`);
+      button.id ||= `native-tab-${button.dataset.nativeTab}`;
+    }
+    for (const item of doc.querySelectorAll('[data-native-section]')) {
+      item.classList.toggle('hidden', item.dataset.nativeSection !== name);
+      item.id = `native-section-${item.dataset.nativeSection}`; item.setAttribute('role', 'tabpanel');
+      item.setAttribute('aria-labelledby', `native-tab-${item.dataset.nativeSection}`);
+    }
   }
   const lines = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   async function serviceAction(action, input, button) {
@@ -98,25 +130,45 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, d
   }
   function reference() {
     const list = $('nativeSchemaFields'); list.replaceChildren();
-    for (const field of schemaFields(snapshot?.schema, $('nativeSchemaSearch').value)) {
+    for (const field of schemaFields(snapshot?.schema, $('nativeSchemaSearch').value, selectedFamily)) {
       const row = doc.createElement('div'); row.className = 'native-schema-field';
       const title = doc.createElement('strong'); title.textContent = `${field.name}${field.type ? ` · ${field.type}` : ''}`;
       const description = doc.createElement('p'); description.textContent = field.description;
       row.append(title, description); list.append(row);
     }
   }
+  function families() {
+    const list = $('nativeConfigFamilies'); list.replaceChildren();
+    const entries = schemaFamilies(snapshot?.schema, snapshot?.config?.guards, snapshot?.config?.sections);
+    if (selectedFamily && !entries.some(item => item.name === selectedFamily)) selectedFamily = '';
+    for (const family of [{ name: '', description: 'All native schema families', guards: [] }, ...entries]) {
+      const button = doc.createElement('button'); button.type = 'button'; button.className = 'native-family-choice';
+      button.setAttribute('aria-pressed', String(family.name === selectedFamily));
+      button.textContent = `${family.name || 'All settings'}${family.protected ? ' · managed' : ''}`;
+      button.title = family.description;
+      button.addEventListener('click', () => { selectedFamily = family.name; $('nativeSchemaSearch').value = ''; families(); reference(); });
+      list.append(button);
+    }
+    const chosen = entries.find(item => item.name === selectedFamily);
+    $('nativeFamilyNotice').textContent = chosen ? [chosen.reason, chosen.description,
+      ...chosen.guards.map(item => `${item.path}: ${item.reason}`),
+      !chosen.guards.length ? 'Native schema reference. Settings are applied only when the local managed facade accepts them.' : '',
+    ].filter(Boolean).join('\n') : 'All native configuration families are listed. Protected settings remain visible with their managed reasons; this browser does not grant raw operator access.';
+  }
   function render(next) {
     snapshot = next;
     $('nativeConnection').textContent = `OpenClaw ${next.runtime?.version || ''} · ${next.sessionKey ? 'Selected agent session' : 'Select a Timechain to use session controls'}`;
-    $('nativeConfigEditor').value = pretty(next.config?.editable || {});
+    if (!configDirty) { $('nativeConfigEditor').value = pretty(next.config?.editable || {}); configEditRevision = next.config?.revision; }
     $('nativeConfigNotice').textContent = next.config?.notice || 'Changes are validated against the pinned native schema.';
-    $('nativeProtectedPaths').textContent = (next.config?.protectedPaths || []).join('\n');
+    $('nativeProtectedPaths').textContent = (next.config?.protectedPaths || []).map(path => `${path}\n  ${next.config?.guards?.[path] || 'Managed by the local operator facade.'}`).join('\n\n');
     $('nativeSchemaJson').textContent = pretty(next.schema);
     $('nativeEffectiveConfig').textContent = pretty(next.nativeConfig);
     $('nativeRuntimeState').textContent = pretty({ runtime: next.runtime, sessionKey: next.sessionKey, session: next.session });
     $('nativeGoalState').textContent = next.goal ? pretty(next.goal) : 'No native goal is set for this agent.';
     $('startNativeGoal').disabled = !next.sessionKey;
-    $('compactNativeSession').disabled = !next.sessionKey;
+    const contextPolicy = next.contextPolicy || next.runtime?.contextPolicy;
+    $('compactNativeSession').disabled = !next.sessionKey || (contextPolicy && contextPolicy.manualSummary !== 'reviewed-optional');
+    $('nativeContextPolicy').textContent = contextPolicyText(contextPolicy);
     const commands = $('nativeCommandCatalogue'); commands.replaceChildren();
     for (const item of next.commands || []) {
       const button = doc.createElement('button'); button.type = 'button'; button.className = 'native-command';
@@ -146,18 +198,42 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, d
       const text = doc.createElement('span'); text.textContent = typeof entry === 'string' ? name : `${name}${entry.description ? ` · ${entry.description}` : ''}`;
       label.append(checkbox, text); tools.append(label);
     }
-    reference(); renderServices(next);
+    families(); reference(); renderServices(next);
   }
   async function refresh() {
-    if (loading) return; loading = true; error();
-    try { render(await api('/api/openclaw')); } catch (failure) { error(failure.message); }
-    finally { loading = false; }
+    if (!isConnected()) return;
+    if (loading) { pendingRefresh = true; return; }
+    loading = true; error(); const revision = connectionRevision;
+    try {
+      const next = await api('/api/openclaw');
+      if (revision !== connectionRevision || !isConnected()) return;
+      render(next); $('nativeConnectedControls').disabled = false;
+    } catch (failure) { if (revision === connectionRevision) error(failure.message); }
+    finally { loading = false; if (pendingRefresh) { pendingRefresh = false; void refresh(); } }
   }
-  function open() {
-    requireConnection(() => {
-      for (const item of doc.querySelectorAll('main.workspace,.beta-access,#chain-auditor,#installNotice')) item.classList.add('hidden');
-      panel.classList.remove('hidden'); section('configuration'); void refresh();
-    });
+  function open(name = 'configuration') {
+    section(typeof name === 'string' ? name : 'configuration');
+    panel.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    $('nativeTitle').focus?.({ preventScroll: true });
+    if (isConnected()) void refresh();
+  }
+  function syncConnection({ connected, agentId = '' }) {
+    const next = connected ? `connected:${agentId}` : 'disconnected';
+    if (next === connectionKey) return;
+    connectionKey = next; connectionRevision++; configDirty = false; configEditRevision = null;
+    snapshot = null; selectedFamily = ''; $('nativeConnectedControls').disabled = true;
+    pluginPreview = null; pluginNotices = {}; trustCheckbox.checked = false; consentCheckbox.checked = false;
+    applyPlugin.disabled = true; previewText.textContent = ''; noticeText.textContent = '';
+    consentLabel.classList.add('hidden'); noticeText.classList.add('hidden');
+    for (const input of panel.querySelectorAll('input[type="password"]')) input.value = '';
+    for (const id of ['nativeRuntimeState', 'nativeEffectiveConfig', 'nativeSchemaJson', 'nativeProtectedPaths', 'nativeGoalState']) $(id).textContent = '';
+    for (const id of ['nativeSchemaFields', 'nativeConfigFamilies', 'nativeCommandCatalogue', 'nativeServicesJobs', 'nativeServicesChannels', 'nativeServicesRuns']) $(id).replaceChildren();
+    $('nativeConfigEditor').value = '{}'; $('nativeToolRoots').value = ''; $('nativeToolHosts').value = '';
+    $('nativeConnection').textContent = connected ? 'Loading the authenticated local OpenClaw controls…' : 'Open your installed ChainChat app to load authenticated native controls.';
+    $('connectNativeControls').classList.toggle('hidden', connected);
+    $('nativeFamilyNotice').textContent = 'Connect the local app to load its exact OpenClaw schema.';
+    $('nativeContextPolicy').textContent = 'Connect the runtime to read its context policy. A model context window remains bounded.';
+    if (connected) void refresh();
   }
   async function run(command) {
     error();
@@ -169,12 +245,24 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, d
   }
   $('openclawSettingsButton').addEventListener('click', open);
   $('closeOpenclawPanel').addEventListener('click', close);
-  for (const button of doc.querySelectorAll('[data-native-tab]')) button.addEventListener('click', () => section(button.dataset.nativeTab));
-  $('refreshNativeControls').addEventListener('click', refresh);
+  $('connectNativeControls').addEventListener('click', () => requireConnection(() => refresh()));
+  const tabs = [...doc.querySelectorAll('[data-native-tab]')];
+  for (const button of tabs) {
+    button.addEventListener('click', () => section(button.dataset.nativeTab));
+    button.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault(); const current = tabs.indexOf(button);
+      const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      section(tabs[index].dataset.nativeTab); tabs[index].focus();
+    });
+  }
+  section('configuration');
+  $('refreshNativeControls').addEventListener('click', () => { configDirty = false; void refresh(); });
+  $('nativeConfigEditor').addEventListener('input', () => { if (!configDirty) configEditRevision = snapshot?.config?.revision; configDirty = true; });
   $('nativeSchemaSearch').addEventListener('input', reference);
   $('saveNativeConfig').addEventListener('click', async () => {
     error();
-    try { const patch = JSON.parse($('nativeConfigEditor').value); await api('/api/openclaw/config', { patch, revision: snapshot?.config?.revision }); await refresh(); }
+    try { const patch = JSON.parse($('nativeConfigEditor').value); await api('/api/openclaw/config', { patch, revision: configDirty ? configEditRevision : snapshot?.config?.revision }); configDirty = false; await refresh(); }
     catch (failure) { error(failure.message); }
   });
   $('nativeCommandForm').addEventListener('submit', event => { event.preventDefault(); void run($('nativeCommandInput').value.trim()); });
@@ -308,7 +396,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, d
     } catch (failure) { error(failure.message); }
     finally { for (const input of doc.querySelectorAll('[data-credential-value]')) input.value = ''; button.disabled = false; }
   });
-  const servicePoll = setInterval(() => { if (!panel.classList.contains('hidden') && activeSection === 'services') void refresh(); }, 5000);
+  const servicePoll = setInterval(() => { if (isConnected() && doc.visibilityState !== 'hidden' && ['channels', 'schedules', 'activity'].includes(activeSection)) void refresh(); }, 5000);
   servicePoll.unref?.();
-  return { open, close, refresh, isOpen: () => !panel.classList.contains('hidden') };
+  return { open, close, refresh, syncConnection, isOpen: () => !panel.classList.contains('hidden') };
 }

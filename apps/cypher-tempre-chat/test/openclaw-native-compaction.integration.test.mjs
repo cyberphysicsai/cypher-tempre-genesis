@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createOpenClawGateway } from '../openclaw/gateway.mjs';
 import { createPoIBroker } from '../openclaw/broker.mjs';
@@ -70,6 +71,9 @@ test('real native compaction persists only an exact PoI-approved summary and pre
       fruitages: Object.fromEntries(FRUITS.map(key => [key, lowFruit ? 20 : 240])), usedRings: [],
       rationale: 'Synthetic local fixture summary preserves the exact observed greeting and its user request.' }) });
   await broker.start();
+  const patch = { logging: { level: 'warn', consoleLevel: 'warn' } }, revision = createHash('sha256').update(JSON.stringify(patch)).digest('hex');
+  await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
+  await fs.writeFile(path.join(stateDir, 'controls.json'), JSON.stringify({ version: 1, revision, patch }), { mode: 0o600 });
   const create = modelContextTokens => createOpenClawGateway({ stateDir, packageRoot, nodePath, broker, modelContextTokens,
     pluginPath,
     onDiagnostic: line => diagnostics.push(line) });

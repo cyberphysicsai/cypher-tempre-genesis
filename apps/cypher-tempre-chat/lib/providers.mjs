@@ -94,6 +94,11 @@ function openCodeGoEndpoint(config) {
     : null;
 }
 
+function freeRelayEndpoint(config) {
+  return config.provider === 'compatible' && config.apiKey === 'chainchat-free-tier' &&
+    config.baseUrl === 'https://cyphertempre.ai/api/free-model/v1';
+}
+
 function usesMuseGoResponses(config) {
   const normalized = validateProvider(config);
   const endpoint = openCodeGoEndpoint(normalized);
@@ -233,7 +238,7 @@ function requestFor(config, system, messages, maxTokens) {
   const key = config.apiKey;
   if (config.openCodeSession) {
     headers["user-agent"] = "CypherTempre-ChainChat";
-    headers["x-opencode-session"] = config.openCodeSession;
+    headers[freeRelayEndpoint(config) ? 'x-chainchat-session' : 'x-opencode-session'] = config.openCodeSession;
   }
   let path, body;
   if (config.provider === "openai") {
@@ -424,7 +429,7 @@ export async function generate(
 ) {
   const config = validateProvider(rawConfig);
   assertCredentialIsolation(config, { system, messages });
-  if (openCodeGoEndpoint(config)) {
+  if (openCodeGoEndpoint(config) || freeRelayEndpoint(config)) {
     // A provider configuration belongs to one bridge session. Weak ownership
     // keeps the random identifier stable across generation/review without
     // persisting it or linking it to a wallet, machine, or Timechain.

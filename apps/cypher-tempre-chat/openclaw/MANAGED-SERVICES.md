@@ -90,6 +90,13 @@ context are sent to the user's chosen provider, as with ordinary BYOK chat.
 
 ## Compaction
 
+Timechain recall and native summaries serve different roles. Relevant verified
+memories can improve a turn's context, but do not make the provider's context
+window unlimited. The current runtime reports `reviewed-native-compaction`:
+necessary automatic native compaction remains enabled, and **Optional reviewed
+summary** invokes the same explicit reviewed path. The interface displays the
+connected runtime's actual policy rather than assuming compaction is disabled.
+
 `/compact` and native context pressure use the mandatory reviewed context engine.
 It summarizes complete older transcript turns while preserving recent complete
 turns and tool-call/result relationships. The parent reviews the exact selected

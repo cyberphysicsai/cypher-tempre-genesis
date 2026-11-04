@@ -1,6 +1,6 @@
 import { initMotifs } from "./motifs.js";
 import { initThemes } from "./themes.js";
-import { blockHeight, supportedBridgeVersion } from "./chainchat-display.js";
+import { blockHeight, supportedBridgeVersion, modelCatalogueView, modelSwitchPayload } from "./chainchat-display.js";
 import {
   DEFAULT_COGNITION, normalizeCognition, normalizeActivity,
   abilityIndicators, facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
@@ -20,6 +20,8 @@ const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
 let auditedAgent = null;
+let modelCatalogue = null, modelCatalogueLoading = false, modelSwitchBusy = false,
+  modelCatalogueRevision = 0, selectedModelTier = 'byok', modelCatalogueError = '', lastByokDetails = null;
 const FRUITS = [
   "Love",
   "Peace",
@@ -490,6 +492,7 @@ function renderRuntimeActivity() {
     let badge = button.querySelector(".slot-live");
     if (!badge) { badge = el("span", "slot-live"); button.append(badge); }
     badge.textContent = paired ? indicator.status : "IDLE";
+    button.setAttribute('aria-label', `${button.dataset.abilityLabel || button.querySelector('.slot-title').textContent} · ${button.querySelector('.slot-status').textContent} · ${badge.textContent}`);
   }
   $("monitorConnection").textContent = !paired ? "NOT CONNECTED" : fresh ? "LIVE APP" : "ACTIVITY UNAVAILABLE";
   const running = fresh && runtimeActivity?.running;
@@ -830,11 +833,11 @@ function renderState() {
     : "Install & open";
   $("modelLabel").textContent =
     paired && state.provider?.configured
-      ? state.provider.model
+      ? `${state.provider.tier === 'free' ? 'Free · ' : ''}${state.provider.model}`
       : "Connect a model";
   $("modelButton").title = state.provider?.configured
     ? `${state.provider.provider} · ${state.provider.model}`
-    : "Connect your own model API";
+    : "Choose an API model or the free tier when available";
   $("agentName").textContent =
     paired && agent
       ? agent.name || agent.genesis?.payload?.name || "Cypher agent"
@@ -931,6 +934,7 @@ function renderState() {
       `While Timechain is active, every fruitage must meet the server-enforced minimum (${state.gate.threshold}/255), alongside native PoI acceptance. Deliberate dormancy uses plain model chat without this gate or chain recording.`;
   renderOperationControls();
   renderCognition();
+  nativePanel.syncConnection({ connected: !!token, agentId: agentId() });
 }
 function renderConversation() {
   const messages = conversations.get(agentId()) || [];
@@ -1176,6 +1180,8 @@ function clearLocalSession() {
   clearLocalResume(localBridgePage ? localTabStorage() : null);
   chatController?.abort();
   token = "";
+  modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false; modelSwitchBusy = false;
+  modelCatalogueError = ''; selectedModelTier = 'byok'; lastByokDetails = null;
   pendingAction = null;
   state = {
     agent: null,
@@ -1220,6 +1226,7 @@ $("disconnectModel").addEventListener("click", async () => {
     const result = await api("/api/provider", { disconnect: true });
     chatController?.abort();
     state.provider = result.provider || { configured: false };
+    modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false; lastByokDetails = null;
     $("apiKey").value = "";
     $("modelId").value = "";
     $("baseUrl").value = "";
@@ -1242,7 +1249,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.9.3 or newer to use this interface. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.9.4 or newer to use this interface. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
@@ -1318,20 +1325,140 @@ $("discoverChains").addEventListener("click", async () => {
 $("agentSelectButton").addEventListener("click", () =>
   requirePair(() => $("agentChoices").classList.toggle("hidden")),
 );
+function rememberByokProvider(provider) {
+  if (!provider?.configured || provider.tier === 'free' || !['openai', 'anthropic', 'gemini', 'compatible'].includes(provider.provider)) return;
+  lastByokDetails = Object.fromEntries(['provider', 'model', 'baseUrl', 'reasoningCapable', 'contextWindow', 'maxOutputTokens', 'configured', 'tier']
+    .filter(key => provider[key] !== undefined).map(key => [key, provider[key]]));
+}
+function renderModelCatalogue() {
+  const view = modelCatalogueView(modelCatalogue), tier = view.tiers.find(item => item.id === selectedModelTier);
+  const query = $("modelCatalogueSearch").value.trim().toLowerCase();
+  const shown = tier.models.filter(model => `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(query));
+  const list = $("modelCatalogueList"); list.replaceChildren();
+  for (const tab of document.querySelectorAll('[data-model-tier]')) {
+    const selected = tab.dataset.modelTier === selectedModelTier;
+    tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1;
+    tab.disabled = modelSwitchBusy;
+  }
+  $("modelCataloguePanel").setAttribute('aria-labelledby', selectedModelTier === 'free' ? 'modelTierFree' : 'modelTierByok');
+  $("modelCatalogueStatus").textContent = modelCatalogueLoading ? 'Checking advertised model availability…'
+    : modelCatalogueError || `${shown.length} of ${tier.models.length} advertised models · ${tier.label}`;
+  $("modelTierNotice").textContent = tier.notice || (selectedModelTier === 'free'
+    ? 'Free model tier when available. Availability must be confirmed by the local app; no paid fallback is selected here.'
+    : 'Connect your API provider below. If it has no model-list endpoint, use its exact model ID with the current connection.');
+  if (!tier.models.length) list.append(el('p', 'fine-print', selectedModelTier === 'free'
+    ? 'No available free models are currently advertised.' : 'No model list is currently available. Manual API setup remains available below.'));
+  else if (!shown.length) list.append(el('p', 'fine-print', 'No models match this search.'));
+  for (const model of shown) {
+    const active = state.provider?.configured && view.active?.tier === selectedModelTier && view.active.model === model.id;
+    const button = el('button', `model-choice${active ? ' selected' : ''}`); button.type = 'button';
+    button.disabled = !model.available || modelCatalogueLoading || modelSwitchBusy || requestBusy;
+    button.setAttribute('aria-label', `${active ? 'Active' : 'Use'} ${model.name}${model.available ? '' : ' · unavailable'}`);
+    button.setAttribute('aria-pressed', String(active));
+    const heading = el('span', 'model-choice-heading'); heading.append(el('strong', '', model.name), el('small', '', active ? 'ACTIVE' : model.available ? 'SELECT' : 'UNAVAILABLE'));
+    button.append(heading, el('span', 'model-choice-id', model.id));
+    const limits = [model.contextWindow ? `${model.contextWindow.toLocaleString()} context` : '', model.maxOutputTokens ? `${model.maxOutputTokens.toLocaleString()} output` : '', model.reasoningCapable ? 'Reasoning settings supported' : ''].filter(Boolean);
+    if (limits.length) button.append(el('span', 'model-choice-details', limits.join(' · ')));
+    if (!model.available) button.append(el('span', 'model-choice-reason', model.reason || tier.notice || 'Not currently available.'));
+    if (model.privacyNotice) button.append(el('span', 'model-choice-privacy', model.privacyNotice));
+    button.addEventListener('click', () => { void switchModel(selectedModelTier, model.id); });
+    list.append(button);
+  }
+  const byok = selectedModelTier === 'byok';
+  $("restoreByokModel").classList.toggle('hidden', !byok || !tier.available || view.active?.tier !== 'free');
+  $("restoreByokModel").disabled = modelCatalogueLoading || modelSwitchBusy || requestBusy;
+  $("modelCustomSwitch").classList.toggle('hidden', !byok);
+  $("modelCustomId").disabled = !byok || !tier.available || modelCatalogueLoading || modelSwitchBusy || requestBusy;
+  $("switchCustomModel").disabled = $("modelCustomId").disabled;
+  $("byokConnectionFields").classList.toggle('hidden', !byok);
+  $("byokConnectionFields").disabled = !byok || modelSwitchBusy;
+  $("refreshModelCatalogue").disabled = modelCatalogueLoading || modelSwitchBusy;
+  $("modelPrivacyNotice").textContent = byok ? 'Switching uses your current private API connection. Changing a provider or endpoint requires the connection form.'
+    : 'No personal API key is requested for this tier. Read the advertised model privacy notice before sending chat content.';
+  $("modelKeyStatus").textContent = lastByokDetails?.configured
+    ? lastByokDetails.provider === 'compatible' ? 'Provider connection active' : 'API key connected' : '';
+}
+async function refreshModelCatalogue(force = false) {
+  if (!token || modelSwitchBusy) return;
+  const owner = token, revision = ++modelCatalogueRevision;
+  modelCatalogueLoading = true; modelCatalogueError = ''; renderModelCatalogue();
+  try {
+    let result;
+    if (force) {
+      try { result = await api('/api/models/refresh', {}); }
+      catch (error) { if (error.code !== 'NOT_FOUND') throw error; }
+    }
+    result ||= await api('/api/models');
+    if (owner !== token || revision !== modelCatalogueRevision) return;
+    modelCatalogue = modelCatalogueView(result);
+  } catch {
+    if (owner === token && revision === modelCatalogueRevision) {
+      modelCatalogue = null;
+      modelCatalogueError = 'The model catalogue could not be refreshed. Manual API setup remains available.';
+    }
+  } finally {
+    if (owner === token && revision === modelCatalogueRevision) { modelCatalogueLoading = false; renderModelCatalogue(); }
+  }
+}
+async function switchModel(tier, model) {
+  if (requestBusy || modelSwitchBusy) { toast('Finish or stop the current operation before switching models.'); return; }
+  const errors = $("modelForm").querySelector('.dialog-error'); errors.textContent = '';
+  let payload;
+  try { payload = modelSwitchPayload(modelCatalogue, tier, model); }
+  catch (error) { errors.textContent = error.message; return; }
+  const owner = token, revision = ++modelCatalogueRevision;
+  modelSwitchBusy = true; modelCatalogueLoading = false; $("apiKey").value = ''; renderModelCatalogue();
+  try {
+    const result = await api('/api/model', payload);
+    if (owner !== token || revision !== modelCatalogueRevision) return;
+    state.provider = result.provider || { configured: false };
+    rememberByokProvider(state.provider);
+    if (result.active) modelCatalogue = modelCatalogueView({ ...modelCatalogue, active: result.active });
+    renderState(); closeDialog('modelDialog'); toast('Model switched. Your Timechain stays the same.');
+  } catch (error) { if (owner === token && revision === modelCatalogueRevision) errors.textContent = error.message; }
+  finally {
+    if (owner === token && revision === modelCatalogueRevision) { modelSwitchBusy = false; renderModelCatalogue(); }
+  }
+}
 function openModel() {
-  const provider = state.provider || {};
-  $("provider").value = provider.provider || "openai";
+  rememberByokProvider(state.provider);
+  const provider = state.provider?.tier === 'free' ? lastByokDetails || {} : state.provider || {};
+  $("provider").value = ['openai', 'anthropic', 'gemini', 'compatible'].includes(provider.provider) ? provider.provider : 'openai';
   $("modelId").value = provider.model || "";
   $("baseUrl").value = provider.baseUrl || "";
   $("reasoningCapable").checked = provider.reasoningCapable === true;
   $("modelContextWindow").value = provider.contextWindow ?? "";
   $("modelOutputLimit").value = provider.maxOutputTokens ?? "";
   $("apiKey").value = "";
+  $("modelCustomId").value = provider.model || '';
+  $("modelCatalogueSearch").value = '';
+  selectedModelTier = state.provider?.tier === 'free' ? 'free' : 'byok';
+  $("byokManualDetails").open = !provider.configured;
   updateProviderPlaceholder();
   renderOperationControls();
+  renderModelCatalogue();
   openDialog("modelDialog");
+  void refreshModelCatalogue();
 }
 $("modelButton").addEventListener("click", () => requirePair(openModel));
+const modelTierTabs = [...document.querySelectorAll('[data-model-tier]')];
+function selectModelTier(tab) {
+  selectedModelTier = tab.dataset.modelTier; $("apiKey").value = ''; $("modelCatalogueSearch").value = '';
+  $("modelForm").querySelector('.dialog-error').textContent = ''; renderModelCatalogue();
+}
+for (const tab of modelTierTabs) {
+  tab.addEventListener('click', () => selectModelTier(tab));
+  tab.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || modelSwitchBusy) return;
+    event.preventDefault(); const index = event.key === 'Home' ? 0 : event.key === 'End' ? modelTierTabs.length - 1 : (modelTierTabs.indexOf(tab) + 1) % modelTierTabs.length;
+    selectModelTier(modelTierTabs[index]); modelTierTabs[index].focus();
+  });
+}
+$("modelCatalogueSearch").addEventListener('input', renderModelCatalogue);
+$("refreshModelCatalogue").addEventListener('click', () => { void refreshModelCatalogue(true); });
+$("switchCustomModel").addEventListener('click', () => { void switchModel('byok', $("modelCustomId").value); });
+$("restoreByokModel").addEventListener('click', () => { void switchModel('byok'); });
+$("modelCustomId").addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); void switchModel('byok', $("modelCustomId").value); } });
 function updateProviderPlaceholder() {
   const provider = $("provider").value;
   const bases = {
@@ -1357,6 +1484,7 @@ $("provider").addEventListener("change", () => {
 });
 $("modelForm").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (selectedModelTier !== 'byok' || modelSwitchBusy) return;
   runForm(event.currentTarget, async () => {
     let data;
     try {
@@ -1371,10 +1499,13 @@ $("modelForm").addEventListener("submit", (event) => {
       const result = await api("/api/provider", data);
       state.provider = result.provider ||
         result.state?.provider || {
-          ...data,
-          apiKey: undefined,
+          provider: data.provider, model: data.model, baseUrl: data.baseUrl, tier: 'byok',
+          reasoningCapable: data.reasoningCapable,
+          ...providerLimits(data),
           configured: true,
         };
+      rememberByokProvider(state.provider);
+      modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false;
       applyState(result);
       closeDialog("modelDialog");
       toast("Model configured. Your Timechain stays the same.");
@@ -1925,7 +2056,7 @@ document
   .querySelectorAll(".skill-slot")
   .forEach(
     (button) =>
-      (button.title = `${button.querySelector(".slot-title").textContent} · Alt + ${button.dataset.shortcut}`),
+      (button.title = `${button.dataset.abilityLabel || button.querySelector(".slot-title").textContent} · Alt + ${button.dataset.shortcut}`),
   );
 
 for (const id of ["quickCognition", "cognitionAbility", "routeAbility", "learningAbility", "dreamAbility"])
@@ -2478,7 +2609,7 @@ async function start() {
   } catch {}
   setInterval(refreshState, 10000);
 }
-const nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, onClose: renderState,
+const nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, isConnected: () => !!token, onClose: renderState,
   executeCommand: async command => {
     const result = await api('/api/openclaw/command', { command });
     if (result.state) applyState(result.state);

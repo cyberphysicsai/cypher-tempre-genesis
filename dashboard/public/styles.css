@@ -3033,3 +3033,73 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
   .suggestions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .native-workspace .native-tool-choices, .native-workspace .native-command-list { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* One compact ability row at every breakpoint; each native status stays visible. */
+.skillbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  gap: 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 1px 8px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-light) transparent;
+}
+.skillbar:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+.skill-slot {
+  flex: 1 0 65px;
+  min-width: 65px;
+  min-height: 58px;
+  padding: 6px 3px 5px;
+  scroll-snap-align: start;
+}
+.skill-slot > svg { width: 16px; height: 16px; margin-bottom: 4px; }
+.slot-title { max-width: 100%; font-size: 6.8px; line-height: 1.4; white-space: nowrap; overflow-wrap: normal; }
+.slot-status { max-width: 100%; margin-top: 3px; font-size: 5.1px; line-height: 1.4; letter-spacing: 0; white-space: nowrap; overflow-wrap: normal; }
+.slot-live { max-width: 100%; font-size: 5px; line-height: 1.4; white-space: nowrap; overflow-wrap: normal; }
+.slot-key { top: 3px; left: 4px; font-size: 6px; }
+@media (min-width: 701px) {
+  .skillbar { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); overflow: visible; gap: 4px; }
+  .skill-slot { min-width: 0; padding-inline: 2px; }
+  .slot-title { font-size: 6.4px; }
+  .slot-status { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (max-width: 700px) {
+  .skillbar { gap: 5px; overflow-x: auto; }
+  .skill-slot { flex-basis: 69px; min-width: 69px; min-height: 60px; }
+  .slot-title { font-size: 7px; }
+  .slot-status, .slot-live { font-size: 5.2px; }
+}
+
+.model-selector-modal { max-width: 700px; }
+.model-tier-tabs { display: flex; gap: 8px; margin: 22px 0 16px; }
+.model-tier-tabs button { flex: 1; border: 1px solid var(--line-light); background: var(--panel-2); color: var(--muted); padding: 13px 10px; font-size: 10px; }
+.model-tier-tabs button[aria-selected="true"] { color: var(--text); border-color: var(--accent); }
+.model-catalogue-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.model-catalogue-heading p, .model-tier-notice { font-size: 10px; line-height: 1.8; color: var(--muted); }
+.model-catalogue-heading button { flex-shrink: 0; font-size: 9px; }
+.model-search { margin-bottom: 10px; }
+.model-catalogue-list { display: grid; gap: 8px; max-height: 280px; overflow: auto; scrollbar-width: thin; padding: 2px; }
+.model-choice { display: block; width: 100%; min-width: 0; padding: 14px; text-align: left; border: 1px solid var(--line-light); background: var(--panel-2); color: var(--text); }
+.model-choice.selected { border-color: var(--accent); }
+.model-choice:disabled { opacity: .6; cursor: default; }
+.model-choice-heading { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.model-choice-heading strong { font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.model-choice-heading small { font-size: 7px; color: var(--muted); flex-shrink: 0; }
+.model-choice-id, .model-choice-details, .model-choice-reason, .model-choice-privacy { display: block; font-size: 8px; line-height: 1.9; overflow-wrap: anywhere; color: var(--muted); margin-top: 5px; }
+.model-custom-switch { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; }
+.model-custom-switch .field { margin-bottom: 10px; }
+.model-custom-switch button { width: 100%; }
+.model-connection-fields { border: 0; border-top: 1px solid var(--line); min-width: 0; padding: 20px 0 0; margin: 22px 0 14px; }
+.model-connection-fields summary { font-size: 11px; cursor: pointer; line-height: 1.8; margin-bottom: 17px; }
+.model-key-status { color: var(--text); font-size: 9px; }
+@media (max-width: 700px) {
+  .model-tier-tabs { gap: 5px; }
+  .model-tier-tabs button { font-size: 9px; padding: 12px 8px; }
+  .model-catalogue-heading { gap: 10px; }
+  .model-catalogue-heading p { font-size: 8px; }
+}

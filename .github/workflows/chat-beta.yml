@@ -21,6 +21,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify hosted free relay policy with PHP
+        run: |
+          php -r 'if (PHP_VERSION_ID < 80100) { fwrite(STDERR, "PHP 8.1 or newer is required.\n"); exit(1); }'
+          php -l public/api/relay-core.php
+          php test/free-relay-php.test.php
+        working-directory: apps/cypher-tempre-chat
       - name: Install exact OpenClaw pin and enable real runtime tests
         run: |
           npm ci --ignore-scripts --prefix openclaw/runtime

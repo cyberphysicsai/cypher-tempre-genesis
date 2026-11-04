@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { CONTEXT_POLICY } from '../openclaw/plugin/compaction.mjs';
 
 const fail = (message, code = 'OPENCLAW_CONTROL_INVALID', status = 400) => Object.assign(new Error(message), { code, status });
 const plain = value => value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -26,6 +27,9 @@ export const CONTROL_GUARDS = Object.freeze({
   'browser.attachOnly': 'The model uses only its owned isolated browser.',
   'browser.defaultProfile': 'The model uses only its owned isolated browser.',
   'browser.noSandbox': 'Native Chromium sandbox protection remains enabled.',
+  'browser.allowSystemProfileImport': 'Personal signed-in browser profiles are outside the owned-browser grant.',
+  'browser.extensionRelay': 'Personal browser relays require a separate explicit managed adapter.',
+  'browser.profiles': 'Browser endpoints and profiles are owned by the managed isolated browser service.',
   'tools.web.fetch.maxRedirects': 'Fetch redirects remain disabled to preserve the exact requested-host grant.',
   'tools.web.fetch.ssrfPolicy': 'Upstream DNS and private-network protections remain enabled.',
   'tools.toolSearch': 'The managed direct tool surface preserves exact per-action PoI enforcement without a generic dispatcher grant.',
@@ -34,17 +38,58 @@ export const CONTROL_GUARDS = Object.freeze({
   hooks: 'External hooks require a managed admission adapter and explicit authorization.',
   bindings: 'Additional agent bindings require managed admission and explicit authorization.',
   'agents.list': 'Additional agents require their own verified Timechain and enforcement binding.',
+  'agents.entries': 'The native agent roster requires a verified Timechain and enforcement binding for each agent.',
   'agents.defaults.workspace': 'The managed workspace belongs to this installed runtime.',
+  'agents.defaults.cwd': 'Changing working directories requires an explicit reviewed filesystem/execution adapter.',
+  'agents.defaults.repoRoot': 'Repository bootstrap reads require an explicit scoped filesystem adapter.',
   'agents.defaults.agentDir': 'Private agent state belongs to this installed runtime.',
   'agents.defaults.model': 'Choose the connected provider and model through the BYOK selector.',
+  'agents.defaults.models': 'Alternate model routes and runtime selection belong to the managed model selector.',
+  'agents.defaults.modelPolicy': 'Model fallback and runtime policy must preserve the managed private provider route.',
+  'agents.defaults.utilityModel': 'Utility inference uses the privately admitted model route.',
+  'agents.defaults.decisionModel': 'Decision inference requires the same privately admitted model route.',
+  'agents.defaults.imageModel': 'Additional model modalities require a managed provider adapter.',
+  'agents.defaults.mediaModels': 'Additional model modalities require a managed provider adapter.',
+  'agents.defaults.voiceModel': 'Voice inference requires a managed provider and output-review adapter.',
+  'agents.defaults.pdfModel': 'Additional model modalities require a managed provider adapter.',
+  'agents.defaults.systemAgent': 'Ambient agent work must retain its verified Timechain and model admission.',
+  'agents.defaults.authInheritance': 'Agent authentication ownership is supervisor-managed.',
+  'agents.defaults.sessionStore': 'Native transcript ownership is supervisor-managed.',
+  'agents.defaults.sandbox': 'Process startup, mounts and sandbox commands require a reviewed execution adapter.',
+  'agents.defaults.embeddedAgent': 'Project runtime trust and failover must preserve managed model and execution admission.',
+  'agents.defaults.elevatedDefault': 'Host permission elevation requires a separate explicit reviewed authority adapter.',
+  'agents.defaults.subagents': 'Child agents require their own verified chain and action-admission adapter.',
+  'agents.defaults.memorySearch': 'Background memory file access and embedding providers require a scoped managed adapter.',
   'agents.defaults.heartbeat': 'Unattended model runs require a managed admission adapter.',
+  'agents.defaults.compaction': 'Native summaries require exact PoI review, trusted transcript fences and the managed context lifecycle.',
   'agents.defaults.compaction.memoryFlush': 'Native pre-compaction file writes require their own reviewed action adapter; the Timechain remains the managed memory source.',
+  'session.store': 'Native transcript paths and storage ownership remain managed.',
+  'session.maintenance': 'Saved conversation retention is not changed through the context settings editor.',
+  'logging.file': 'Log file destinations require a scoped filesystem adapter.',
+  'logging.redactSensitive': 'Private credential redaction cannot be disabled through settings.',
+  'logging.redactPatterns': 'Private credential redaction remains supervisor-managed.',
+  'memory.backend': 'External memory backends require scoped file/process/provider admission.',
+  'memory.qmd': 'External memory commands require a reviewed execution adapter.',
+  'skills.load': 'Additional skill paths require a scoped local installation adapter.',
+  'skills.install': 'Skill installation executes native package actions and requires a reviewed adapter.',
+  'skills.entries': 'Skill credentials and environment configuration require a private managed adapter.',
+  'skills.workshop': 'Autonomous skill writes require an explicit reviewed action adapter.',
 });
 const protectedRoots = Object.keys(CONTROL_GUARDS);
 const credentialKey = /^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passphrase|secret|client[_-]?secret|credential|credentials|authorization|auth[_-]?token|broker[_-]?token)$/i;
 const COMMAND_ALIASES = Object.freeze({ thinking: 'think', t: 'think', reason: 'reasoning', v: 'verbose' });
-const editableRoots = new Set(['messages', 'session', 'ui', 'audio', 'talk', 'logging', 'agents', 'browser', 'canvas', 'media', 'memory', 'skills']);
+const editableRoots = new Set(['messages', 'session', 'ui', 'logging', 'agents', 'browser', 'memory', 'skills']);
 const grantedConfigurationRoots = new Set(['tools', 'browser']);
+const supervisorRoots = new Set(['gateway', 'env', 'auth', 'secrets', 'update', 'discovery', 'meta']);
+export function nativeConfigSections(schema) {
+  const properties = schema?.schema?.properties || schema?.properties || {};
+  return Object.keys(properties).filter(key => key !== '$schema').sort().map(key => ({ key,
+    classification: supervisorRoots.has(key) ? 'supervisor-owned' : editableRoots.has(key) && key !== 'browser' ? 'editable' : 'managed',
+    reason: CONTROL_GUARDS[key] || (editableRoots.has(key) && key !== 'browser'
+      ? 'Schema-backed settings are editable except for the protected paths listed below.'
+      : 'This native family requires a managed adapter; showing it does not grant process, provider or delivery authority.'),
+    guardedPaths: protectedRoots.filter(field => field === key || field.startsWith(key + '.')) }));
+}
 export const NATIVE_PREFERENCES = Object.freeze(['thinkingLevel', 'fastMode', 'verboseLevel', 'traceLevel', 'reasoningLevel', 'responseUsage', 'contextWindow']);
 const safeSessionFields = new Set(['key', 'sessionKey', 'sessionId', 'updatedAt', 'label', 'goal', 'totalTokens', 'inputTokens', 'outputTokens', 'contextTokens', 'model', 'modelProvider', 'compactionCount', ...NATIVE_PREFERENCES]);
 function safeSession(entry) { return entry ? Object.fromEntries(Object.entries(entry).filter(([key]) => safeSessionFields.has(key))) : null; }
@@ -64,7 +109,7 @@ export const CONTROL_COMMANDS = Object.freeze([
   ['tools', 'Inspect native effective tool policy and current managed action authority.', 'system'],
   ['queue', 'Read or set the selected native session queue policy.', 'native'],
   ['context', 'Read the actual native context assembly report: list/detail/map/json.', 'native'],
-  ['compact', 'Compact the selected native conversation after exact-summary PoI review; retain two recent complete turns.', 'native'],
+  ['compact', 'Optional reviewed summary of the native conversation; retains two recent complete turns. Context pressure may also require a reviewed summary.', 'native'],
   ['new', 'Reset native conversation context; the Timechain is preserved.', 'native'],
   ['reset', 'Reset native conversation context; the Timechain is preserved.', 'native'],
   ['stop', 'Cancel the current ChainChat operation.', 'host'],
@@ -157,9 +202,9 @@ export function createNativeControls({ rpc, getRuntime, readOverlay, saveOverlay
           description: supported ? `Alias of /${aliasOf}. ${supported.description}` : `${item.description || 'Native OpenClaw command.'} This command requires a managed adapter before it can run in ChainChat.` });
       }
     }
-    return { runtime: getRuntime(), sessionKey: selected?.key || null, session: selected?.entry || null,
+    return { runtime: getRuntime(), contextPolicy: structuredClone(CONTEXT_POLICY), sessionKey: selected?.key || null, session: selected?.entry || null,
       goal: selected?.entry?.goal || null, schema, nativeConfig: safeConfig,
-      config: { revision: overlay.revision, editable: overlay.patch, protectedPaths: protectedRoots, guards: CONTROL_GUARDS,
+      config: { revision: overlay.revision, editable: overlay.patch, protectedPaths: protectedRoots, guards: CONTROL_GUARDS, sections: nativeConfigSections(schema),
         notice: 'Execution authority, provider credentials, required PoI enforcement, loopback binding and updater pins remain managed. Supported presentation/session/agent defaults can be edited here. Integrations that can initiate unattended actions require managed admission.' }, commands: catalogue, nativeCommands };
   }
   async function updateControls({ patch, revision, authority }) {

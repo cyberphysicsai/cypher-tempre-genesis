@@ -84,6 +84,19 @@ test("OpenCode Go uses an in-memory random session header without changing nativ
   assert.equal(JSON.stringify(forwarded.body).includes(session), false);
 });
 
+test('the exact managed free route carries a public random session correlation without exposing it in model content', () => {
+  const config = { provider: 'compatible', model: 'free', apiKey: 'chainchat-free-tier', baseUrl: 'https://cyphertempre.ai/api/free-model/v1' };
+  const session = '219e618c-8c96-42a6-ade0-b5ec58cc66ed', body = { messages: [{ role: 'user', content: 'Hello' }] };
+  assert.throws(() => providerRequest(config, '/compatible/v1/chat/completions', body), error => error.code === 'OPENCLAW_PROVIDER_SESSION');
+  const forwarded = providerRequest(config, '/compatible/v1/chat/completions', body, { openCodeSession: session });
+  assert.equal(forwarded.headers['x-chainchat-session'], session); assert.equal(forwarded.headers['user-agent'], 'CypherTempre-ChainChat');
+  assert.equal(JSON.stringify(forwarded.body).includes(session), false);
+  for (const altered of [{ apiKey: 'different' }, { baseUrl: 'https://cyphertempre.ai/api/other/v1' }, { baseUrl: 'https://other.example/api/free-model/v1' }]) {
+    const ordinary = providerRequest({ ...config, ...altered }, '/compatible/v1/chat/completions', body, { openCodeSession: session });
+    assert.equal(ordinary.headers['x-chainchat-session'], undefined);
+  }
+});
+
 test("unregistered model invocations fail before any process startup", async () => {
   let spawned = false;
   const manager = createOpenClawGateway({ stateDir: "/unused", packageRoot: "/unused", pluginPath: "/unused", broker: {

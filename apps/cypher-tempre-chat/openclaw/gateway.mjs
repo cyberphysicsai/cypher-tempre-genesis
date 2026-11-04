@@ -16,6 +16,8 @@ import { createPrivateNativeServices } from '../lib/openclaw-services.mjs';
 import { createNativeBrowserInspector } from '../lib/native-browser-inspection.mjs';
 import { safeInvocationError, invocationError } from '../lib/runtime-errors.mjs';
 
+import { CONTEXT_POLICY } from './plugin/compaction.mjs';
+
 export const OPENCLAW_VERSION = "2026.10.9";
 const MAX_BYTES = 24 * 1024 * 1024;
 const PROVIDERS = Object.freeze({
@@ -293,6 +295,13 @@ export function providerRequest(config, incomingPath, body, { openCodeSession, m
   }
   const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
   const endpoint = new URL(config.baseUrl);
+  if (config.provider === 'compatible' && config.apiKey === 'chainchat-free-tier' &&
+      config.baseUrl === 'https://cyphertempre.ai/api/free-model/v1') {
+    if (typeof openCodeSession !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(openCodeSession))
+      throw fail('The public model session correlation is unavailable.', 'OPENCLAW_PROVIDER_SESSION');
+    headers['x-chainchat-session'] = openCodeSession;
+    headers['user-agent'] = 'CypherTempre-ChainChat';
+  }
   if (endpoint.protocol === "https:" && endpoint.hostname === "opencode.ai" && !endpoint.port &&
       endpoint.pathname.startsWith("/inference/go/")) {
     if (typeof openCodeSession !== "string" || !/^[a-f0-9-]{36}$/i.test(openCodeSession))
@@ -344,7 +353,7 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
     return { values, hash: createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b))))).digest('hex') };
   }
   const status = () => ({ backend: "openclaw", version: OPENCLAW_VERSION, running: Boolean(child && child.exitCode === null && child.signalCode === null),
-    localOnly: true, credentials: "session-memory", hostTools: toolsPolicy.deny?.includes("*") ? "disabled" : "scoped-per-invocation" });
+    localOnly: true, credentials: "session-memory", contextPolicy: structuredClone(CONTEXT_POLICY), hostTools: toolsPolicy.deny?.includes("*") ? "disabled" : "scoped-per-invocation" });
   async function stopChild({ force = false } = {}) {
     if (force) {
       // A missing assembly capability is a runtime integrity fault. Terminate
@@ -424,12 +433,12 @@ export function createOpenClawGateway({ stateDir, packageRoot, nodePath = proces
       admitted = true;
       const upstreamRequest = providerRequest(current.config, request.url, decoded, {
         openCodeSession: current.openCodeSession, maxTokens: current.args.maxTokens || 4096 });
-      if (current.config.contextWindow !== undefined) {
+      {
         // This is a bounded UTF-8 estimate, not a provider-specific tokenizer.
         // It catches plainly oversized first turns before a remote rejection.
         const inputEstimate = Math.ceil(Buffer.byteLength(JSON.stringify(upstreamRequest.body), 'utf8') / 3);
         const output = Math.min(current.args.maxTokens || 4096, current.config.maxOutputTokens || 32768);
-        if (inputEstimate + output > current.config.contextWindow)
+        if (inputEstimate + output > Math.min(current.config.contextWindow ?? contextWindow, contextWindow))
           throw Object.assign(fail('The active request exceeds the configured model context window.', 'OPENCLAW_CONTEXT_BUDGET', 422), { stage: 'context' });
       }
       if (current !== active) throw fail("The model invocation ended.", "REQUEST_CANCELLED", 499);
