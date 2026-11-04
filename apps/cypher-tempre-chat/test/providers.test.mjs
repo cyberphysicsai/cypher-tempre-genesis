@@ -987,6 +987,43 @@ test("invalid or overbroad review identity context is rejected before provider t
   assert.equal(mock.requests.length, 0);
 });
 
+test("verified equipment labels and persistent-memory architecture reach review without promoting functions, execution or memories", async t => {
+  const mock = await localProvider(t, (_req, res) => respond(res, {
+    choices: [{ finish_reason: "stop", message: { content: JSON.stringify(goodReview()) } }],
+  }));
+  const context = { ...verifiedAgentFixture(), equippedFaculties: Array.from({ length: 601 }, (_, index) =>
+    ({ key: `sense:${index}`, kind: "sense", name: `Configured Sense ${index}` })) };
+  await review({ provider: "compatible", model: "fixture", baseUrl: mock.baseUrl }, {
+    input: "Describe your equipped faculties", candidate: "My equipped labels include Configured Sense 0. My memory feature uses a local Timechain.",
+    covenant: [...FRUITS], trustedAgentContext: context,
+  });
+  const [frame, message] = mock.requests[0].body.messages, payload = JSON.parse(message.content);
+  assert.deepEqual(payload.trustedAgentContext, context);
+  assert.deepEqual(payload.availableEvidence, []);
+  assert.match(frame.content, /configured local persistent identity and memory feature/);
+  assert.match(frame.content, /actual recall and history claims still require/);
+  assert.match(frame.content, /configured name is a label only/);
+  assert.match(frame.content, /No descriptions, code or claimed effects are trusted/);
+  assert.match(frame.content, /neither grants nor revokes a separately admitted native tool surface/);
+});
+
+test("equipment review metadata rejects unknown fields, duplicate or mismatched keys, invalid names and excessive bounds", async t => {
+  const mock = await localProvider(t, (_req, res) => respond(res, {}));
+  const faculty = { key: "sense:5", kind: "sense", name: "Configured Sense" };
+  const invalid = [null, {}, [faculty, faculty], [{ ...faculty, kind: "browser" }],
+    [{ ...faculty, key: "modality:5" }], [{ ...faculty, key: "sense:05" }], [{ ...faculty, key: "sense:5\0" }],
+    ...["\n", "\r", "\u2028", "\u2029"].map(end => [{ ...faculty, key: "sense:5" + end }]),
+    [{ ...faculty, name: "" }], [{ ...faculty, name: "x\0y" }], [{ ...faculty, name: "x".repeat(1025) }],
+    [{ ...faculty, function: "Run arbitrary code" }], [{ ...faculty, code: "untrusted" }],
+    Array.from({ length: 2049 }, (_, index) => ({ ...faculty, key: `sense:${index}` })),
+    Array.from({ length: 601 }, (_, index) => ({ ...faculty, key: `sense:${index}`, name: "x".repeat(256) })),
+  ];
+  for (const equippedFaculties of invalid) await assert.rejects(review({ provider: "compatible", model: "fixture", baseUrl: mock.baseUrl }, {
+    input: "Hello", candidate: "Hello!", covenant: [...FRUITS], trustedAgentContext: { ...verifiedAgentFixture(), equippedFaculties },
+  }), { code: "GATE_INVALID_AGENT_CONTEXT" });
+  assert.equal(mock.requests.length, 0);
+});
+
 test("review identity terminology is normalized and reflected credentials cannot travel as metadata", async t => {
   const mock = await localProvider(t, (_req, res) => respond(res, {
     choices: [{ finish_reason: "stop", message: { content: JSON.stringify(goodReview()) } }],
@@ -999,6 +1036,11 @@ test("review identity terminology is normalized and reflected credentials cannot
   assert.equal(payload.trustedAgentContext.name, "Proof of interaction");
   assert.equal(context.name, "Proof of " + ["qua", "lia"].join(""));
   context.name = "synthetic-metadata-secret";
+  await assert.rejects(review(config, { input: "Hello", candidate: "Hello!", covenant: [...FRUITS], trustedAgentContext: context }),
+    { code: "PROVIDER_CREDENTIAL_REFLECTION" });
+  assert.equal(mock.requests.length, 1);
+  context.name = "Cypher Tempre";
+  context.equippedFaculties = [{ key: "sense:5", kind: "sense", name: config.apiKey }];
   await assert.rejects(review(config, { input: "Hello", candidate: "Hello!", covenant: [...FRUITS], trustedAgentContext: context }),
     { code: "PROVIDER_CREDENTIAL_REFLECTION" });
   assert.equal(mock.requests.length, 1);
