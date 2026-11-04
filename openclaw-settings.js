@@ -80,7 +80,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, d
         const detail = doc.createElement('p');
         detail.textContent = kind === 'cron' ? `${item.schedule.kind === 'every' ? `Every ${item.schedule.everyMs / 60000} minutes` : item.schedule.kind === 'at' ? new Date(item.schedule.at).toLocaleString() : `${item.schedule.expr} · ${item.schedule.tz}`} · Agent ${item.binding.agentId.slice(0, 8)}` : kind === 'channel' ? `${item.target.channelId} / ${item.target.accountId} · ${item.target.conversationId} · ${item.allowSenders.length} allowed senders · Pause stops incoming messages and dependent scheduled deliveries` : `${new Date(item.createdAt).toLocaleString()} · Agent ${item.binding.agentId.slice(0, 8)}`;
         row.append(detail);
-        if (item.reason) { const reason = doc.createElement('p'); reason.textContent = item.status === 'uncertain' ? 'Outcome needs inspection. Automatic retries are stopped.' : item.reason === 'live_admission_unavailable' ? 'Held until an eligible live owner, model, wallet and chain are connected.' : item.reason.replaceAll('_', ' '); row.append(reason); }
+        if (item.reason) { const reason = doc.createElement('p'); reason.textContent = item.status === 'uncertain' ? 'Outcome needs inspection. Automatic retries are stopped.' : item.reason === 'live_admission_unavailable' ? 'Held until an eligible live owner, model and chain are connected.' : item.reason.replaceAll('_', ' '); row.append(reason); }
         if (kind) {
           const actions = doc.createElement('div'); actions.className = 'native-actions';
           const toggle = doc.createElement('button'); toggle.type = 'button'; toggle.className = 'quiet-button'; toggle.textContent = item.enabled ? 'Pause' : 'Resume';

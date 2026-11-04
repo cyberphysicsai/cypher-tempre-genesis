@@ -1,14 +1,6 @@
 import { initMotifs } from "./motifs.js";
 import { initThemes } from "./themes.js";
-import {
-  validateHoldingsConfig,
-  verifyHoldingsWithWallet,
-  freshChallenge,
-  watchWallet,
-  verifyBridgeIdentity,
-  matchingConfiguration,
-} from "./holdings-wallet.js";
-import { blockHeight, formatTokenBalance, requiresHoldings, supportedBridgeVersion } from "./chainchat-display.js";
+import { blockHeight, supportedBridgeVersion } from "./chainchat-display.js";
 import {
   DEFAULT_COGNITION, normalizeCognition, normalizeActivity,
   abilityIndicators, facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
@@ -227,7 +219,6 @@ function covenantReview(gate) {
 async function api(path, data, options = {}) {
   if (!localBridgePage && !token && !["/api/pair", "/api/status"].includes(path))
     throw new Error("Install and launch ChainChat, or connect in optional website mode.");
-  if (requiresHoldings(path, data)) await ensureHoldings();
   const requestToken = token;
   const headers = { Accept: "application/json" };
   if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
@@ -268,8 +259,7 @@ async function api(path, data, options = {}) {
     error.stage = result.stage;
     error.gate = result.gate;
     error.pluginNotice = result.pluginNotice;
-    if (response.status === 401 && path !== "/api/pair" &&
-        !path.startsWith("/api/license/") && token === requestToken) clearLocalSession();
+    if (response.status === 401 && path !== "/api/pair" && token === requestToken) clearLocalSession();
     throw error;
   }
   return result;
@@ -343,7 +333,7 @@ async function runForm(form, callback) {
     else toast(error.message, true);
   } finally {
     if (button) button.disabled = false;
-    renderHoldingsControls();
+    renderOperationControls();
   }
 }
 function settings() {
@@ -458,7 +448,7 @@ function renderCognition() {
       ? "Memory, faculties, covenant review and accepted conversation blocks are active. Learning and growth follow your selected settings."
       : "Memory, faculties, covenant review and accepted conversation blocks remain active. Learner training and automatic growth are off.";
   $("toggleChainMode").textContent = dormant ? "Resume Timechain" : "Pause Timechain · plain model chat";
-  $("toggleChainMode").disabled = !paired || cognitionBusy || (dormant && !hasHoldingsAccess());
+  $("toggleChainMode").disabled = !paired || cognitionBusy;
   if (paired && dormant) {
     for (const id of ["recallAbility", "forkAbility", "continuumAbility", "loadoutAbility"])
       $(id).classList.remove("active");
@@ -644,7 +634,7 @@ function renderFaculties() {
       `faculty-card${selected ? " equipped" : ""}${faculty.equippable === false ? " emerging" : ""}${freshIds.has(facultyIdentity(faculty)) ? " new-faculty" : ""}`,
     );
     button.type = "button";
-    button.disabled = !!token && !hasHoldingsAccess();
+    button.disabled = requestBusy || cognitionBusy;
     button.title = `${faculty.function || faculty.description || ""}${faculty.dormant ? " · Dormant faculty" : ""}`;
     button.setAttribute("aria-pressed", String(selected));
     button.setAttribute(
@@ -939,7 +929,7 @@ function renderState() {
   if (state.gate?.threshold)
     $("thresholdNote").textContent =
       `While Timechain is active, every fruitage must meet the server-enforced minimum (${state.gate.threshold}/255), alongside native PoI acceptance. Deliberate dormancy uses plain model chat without this gate or chain recording.`;
-  renderHoldingsControls();
+  renderOperationControls();
   renderCognition();
 }
 function renderConversation() {
@@ -1101,7 +1091,7 @@ function recoverChatFailure(action) {
   else if (action === "loadout") requireAgent(openClearLoadout);
   else if (action === "inspect") $("historyButton").click();
   else if (action === "native") requirePair(() => nativePanel.open());
-  else if (action === "holdings") $("licenseButton").click();
+  else if (action === "connect") openDialog(localBridgePage ? "installDialog" : "pairDialog");
 }
 function openClearLoadout() {
   if (requestBusy) { toast("Wait for the current turn before changing equipment."); return; }
@@ -1185,12 +1175,6 @@ function clearLocalSession() {
   nativePanel.close();
   clearLocalResume(localBridgePage ? localTabStorage() : null);
   chatController?.abort();
-  walletController?.abort();
-  walletWatch?.close();
-  walletWatch = null;
-  currentLicense = null;
-  walletRevoked = true;
-  licenseRevision++;
   token = "";
   pendingAction = null;
   state = {
@@ -1210,7 +1194,6 @@ function clearLocalSession() {
   $("messageInput").value = "";
   $("packJson").value = "";
   $("packFile").value = "";
-  renderLicense(null);
   renderState();
   renderConversation();
   activity("App disconnected. Open ChainChat using its application launcher to continue your saved Timechain.");
@@ -1259,12 +1242,11 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.9.1 or newer to use this interface. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.9.2 or newer to use this interface. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     $("pairCode").value = "";
     applyState(await api("/api/state"));
-    await refreshLicense();
     closeDialog("pairDialog");
     toast("Website connected to the local app.");
     try {
@@ -1309,12 +1291,8 @@ $("existingForm").addEventListener("submit", (event) => {
       await api("/api/agents/pair", { root: $("existingRoot").value.trim() }),
     );
     closeDialog("existingDialog");
-    if (hasHoldingsAccess()) {
-      toast("Existing Timechain verified and paired.");
-      if (!state.provider?.configured) openModel();
-    } else {
-      toast("Timechain paired. Verify CPHY holdings to enable chat.");
-    }
+    toast("Existing Timechain verified and paired.");
+    if (!state.provider?.configured) openModel();
   });
 });
 $("discoverChains").addEventListener("click", async () => {
@@ -1350,7 +1328,7 @@ function openModel() {
   $("modelOutputLimit").value = provider.maxOutputTokens ?? "";
   $("apiKey").value = "";
   updateProviderPlaceholder();
-  renderHoldingsControls();
+  renderOperationControls();
   openDialog("modelDialog");
 }
 $("modelButton").addEventListener("click", () => requirePair(openModel));
@@ -1445,10 +1423,6 @@ $("chatForm").addEventListener("submit", async (event) => {
     openModel();
     return;
   }
-  try { await ensureHoldings(); } catch (error) {
-    toast(error.message, true);
-    return;
-  }
   requestBusy = true;
   const turnMode = cognition().mode;
   const chatSession = token;
@@ -1502,7 +1476,7 @@ $("chatForm").addEventListener("submit", async (event) => {
   } finally {
     chatController = null;
     requestBusy = false;
-    renderHoldingsControls();
+    renderOperationControls();
     $("messageInput").disabled = false;
     $("messageInput").focus();
     await refreshState();
@@ -1662,7 +1636,7 @@ $("saveFork").addEventListener("click", () => {
         error.message;
     } finally {
       button.disabled = false;
-      renderHoldingsControls();
+      renderOperationControls();
     }
   })();
 });
@@ -1734,7 +1708,7 @@ $("flushContinuum").addEventListener("click", () => {
         error.message;
     } finally {
       button.disabled = false;
-      renderHoldingsControls();
+      renderOperationControls();
     }
   })();
 });
@@ -2011,14 +1985,14 @@ $("cancelTurn").addEventListener("click", async () => {
 for (const button of document.querySelectorAll("[data-maintenance]")) {
   button.addEventListener("click", async () => {
     if (requestBusy || cognitionBusy) { toast("Finish or stop the current operation first."); return; }
-    cognitionBusy = true; renderHoldingsControls();
+    cognitionBusy = true; renderOperationControls();
     $("cognitionDialog").querySelector(".dialog-error").textContent = "";
     try {
       const result = await api("/api/maintenance", { action: button.dataset.maintenance, confirm: true });
       applyState(result); await refreshState(); await refreshCognition();
       toast("Native maintenance completed. Inspect its recorded activity below.");
     } catch (error) { $("cognitionDialog").querySelector(".dialog-error").textContent = error.message; }
-    finally { cognitionBusy = false; renderHoldingsControls(); await refreshActivity(); }
+    finally { cognitionBusy = false; renderOperationControls(); await refreshActivity(); }
   });
 }
 
@@ -2049,14 +2023,14 @@ function renderLifecycle() {
     const action = facultyLifecycleAction(faculty);
     if (action) {
       const button = el("button", "text-button", action === "promote" ? "Review promotion ↗" : action === "wake" ? "Wake faculty ↗" : "Prune to hibernation ↗");
-      button.type = "button"; button.disabled = requestBusy || cognitionBusy || !hasHoldingsAccess() || readOnly;
+      button.type = "button"; button.disabled = requestBusy || cognitionBusy || !token || readOnly;
       button.addEventListener("click", () => previewLifecycle(faculty, action));
       card.append(button);
     }
     if (faculty.requiresLocalCodeReview) card.append(el("p", "fine-print", "This proposal contains authored code. Review it locally before activation; ChainChat will not execute it."));
     if (faculty.equippable !== false && !faculty.dormant) {
       const equip = el("button", "text-button", isEquipped(faculty) ? "Unequip" : "Equip");
-      equip.type = "button"; equip.disabled = requestBusy || cognitionBusy || !hasHoldingsAccess();
+      equip.type = "button"; equip.disabled = requestBusy || cognitionBusy || !token;
       equip.addEventListener("click", async () => { await toggleFaculty(faculty); renderLifecycle(); });
       card.append(equip);
     }
@@ -2224,7 +2198,7 @@ function renderPackPreview(result) {
   packReportList(panel, "Errors", report.errors, "Invalid pack");
   const ready = (report.imported?.length || 0) > 0 && !report.errors?.length;
   $("importPackButton").classList.remove("hidden");
-  $("importPackButton").disabled = !ready || !hasHoldingsAccess();
+  $("importPackButton").disabled = !ready || !token;
   if (!ready)
     panel.append(
       el(
@@ -2379,7 +2353,7 @@ $("importPackButton").addEventListener("click", async () => {
     if (["STALE_HEAD", "PREVIEW_STALE"].includes(error.code)) {
       packPreviewState = null;
       button.disabled = true;
-    } else button.disabled = !hasHoldingsAccess();
+    } else button.disabled = !token || requestBusy;
   }
 });
 $("selectAllExport").addEventListener("click", () => {
@@ -2420,159 +2394,30 @@ $("exportPackForm").addEventListener("submit", (event) => {
     );
   });
 });
-let licenseDeployment = null,
-  currentLicense = null,
-  walletBusy = false,
-  licensePolling = false,
-  walletWatch = null,
-  walletController = null,
-  walletRevoked = false,
-  licenseRevision = 0;
-
-function hasHoldingsAccess() {
-  if (!token || !currentLicense?.identityVerified ||
-      !matchingConfiguration(licenseDeployment, currentLicense.configuration)) return false;
-  if (!licenseDeployment.required && currentLicense.status === "local-test-mode") return true;
-  if (walletRevoked) return false;
-  return currentLicense.status === "active" &&
-    currentLicense.session?.expiresAt > Date.now() &&
-    currentLicense.verification?.expiresAt > Date.now();
-}
-function licenseMessage(info) {
-  if (!token) return "Launch the installed ChainChat app, then verify at least 21,000 CPHY held on Base.";
-  if (info?.status === "local-test-mode") return "Local test configuration: holdings enforcement is disabled.";
-  if (info?.status === "verification-unavailable")
-    return "Holdings could not be verified. New operations are paused; your saved history remains available.";
-  if (info?.status === "session-expired" || (info?.session && info.session.expiresAt <= Date.now()))
-    return "Your wallet sign-in has expired. Verify holdings again to continue.";
-  if (info?.status === "insufficient-balance")
-    return "This wallet holds less than 21,000 CPHY. New operations are paused; your saved history remains available.";
-  if (info?.status === "active" && hasHoldingsAccess())
-    return "Holdings verified. Keep at least 21,000 CPHY in this wallet while using ChainChat.";
-  if (info?.status === "active") return "Your balance verification needs a refresh. Recheck before continuing.";
-  return "Connect your wallet on Base and sign in to verify at least 21,000 CPHY. Your tokens stay yours.";
-}
-function renderHoldingsControls() {
-  const active = hasHoldingsAccess(), blocked = !!token && !active;
+function renderOperationControls() {
   const held = !!(state.agent?.locked || state.agent?.maintenancePending);
-  const testMode = active && licenseDeployment?.required === false && currentLicense?.status === "local-test-mode";
-  $("modelHoldingsNotice").classList.toggle("hidden", !blocked);
-  $("sendButton").disabled = requestBusy || blocked || (held && cognition().mode !== "dormant");
-  $("newAgentButton").disabled = blocked;
+  const dormant = cognition().mode === "dormant";
+  $("sendButton").disabled = requestBusy || (held && !dormant);
+  $("newAgentButton").disabled = requestBusy;
   for (const selector of ['#genesisForm button[type="submit"]', '#modelForm button[type="submit"]',
     '#continuumForm button[type="submit"]', '#ingestForm button[type="submit"]', '#saveFork', '#flushContinuum']) {
     const control = document.querySelector(selector);
-    if (control) control.disabled = blocked || requestBusy;
+    if (control) control.disabled = requestBusy;
   }
-  $("recallAbility").disabled = blocked;
+  $("recallAbility").disabled = requestBusy;
   document.querySelectorAll(".faculty-card").forEach((card) => {
-    if (card.tagName === "BUTTON") card.disabled = blocked;
+    if (card.tagName === "BUTTON") card.disabled = requestBusy || cognitionBusy;
   });
-  if (blocked) $("importPackButton").disabled = true;
-  $("holdingsPrompt").classList.toggle("verified", active);
-  $("holdingsPromptLabel").textContent = active
-    ? testMode ? "LOCAL TEST MODE · CPHY holdings are not checked" : "CPHY holdings verified · your tokens remain in your wallet"
-    : token ? "Verify at least 21,000 CPHY to enable new operations" : "Hold 21,000 CPHY on Base to use ChainChat";
-  $("holdingsPromptAction").textContent = active ? "View access ↗" : "Verify holdings ↗";
-  $("sendButton").title = blocked ? "Verify your CPHY holdings to send a message" : held && cognition().mode !== "dormant" ? "Review the native recovery hold before continuing" : "Send message";
-  const dormant = cognition().mode === "dormant";
+  $("sendButton").title = held && !dormant ? "Review the native recovery hold before continuing" : "Send message";
   $("cognitionForm").querySelectorAll("input,button").forEach(control => {
-    control.disabled = blocked || requestBusy || cognitionBusy;
+    control.disabled = requestBusy || cognitionBusy;
   });
   document.querySelectorAll("[data-maintenance]").forEach(control => {
-    control.disabled = blocked || held || requestBusy || cognitionBusy || dormant || !cognition().learning;
+    control.disabled = held || requestBusy || cognitionBusy || dormant || !cognition().learning;
   });
-  $("toggleChainMode").disabled = !token || !state.agent || cognitionBusy || (dormant && blocked);
-  $("confirmLifecycle").disabled = blocked || held || requestBusy || cognitionBusy || dormant || !cognition().learning || !lifecycleSelection?.allowed;
+  $("toggleChainMode").disabled = !token || !state.agent || cognitionBusy;
+  $("confirmLifecycle").disabled = !token || held || requestBusy || cognitionBusy || dormant || !cognition().learning || !lifecycleSelection?.allowed;
 }
-function renderLicense(info) {
-  currentLicense = info;
-  $("licenseDeviceKey").value = info?.deviceKey || "";
-  $("licenseOwner").value = info?.identityVerified ? info.selectedOwner || "" : "";
-  const status = licenseMessage(info);
-  $("licenseStatus").textContent = status;
-  $("licenseSummary").textContent = status;
-  $("holdingsBalance").textContent = info?.identityVerified
-    ? formatTokenBalance(info.verification?.balance) : "—";
-  $("holdingsChecked").textContent = info?.identityVerified && info.verification?.checkedAt
-    ? new Date(info.verification.checkedAt).toLocaleTimeString() : "Not verified";
-  $("holdingsExpiry").textContent = info?.identityVerified && info.session?.expiresAt
-    ? `Sign-in expires ${new Date(info.session.expiresAt).toLocaleTimeString()}` : "Sign in to begin a session";
-  const matched = !!(info?.identityVerified && matchingConfiguration(licenseDeployment, info.configuration));
-  $("verifyHoldingsButton").disabled = !token || !matched || walletBusy || !licenseDeployment?.required;
-  $("checkLicenseButton").disabled = !token || !info?.session || walletBusy;
-  $("logoutHoldingsButton").disabled = !token || !info?.session || walletBusy;
-  if (info?.identityVerified && !matched)
-    $("licenseError").textContent = "This website and local app use different holdings settings. Install the matching ChainChat app release.";
-  renderHoldingsControls();
-}
-async function readLicense() {
-  const challenge = freshChallenge(), sessionToken = token, revision = licenseRevision;
-  const info = await api("/api/license/check", { challenge });
-  await verifyBridgeIdentity(info, challenge, location.origin);
-  if (!sessionToken || token !== sessionToken || revision !== licenseRevision)
-    throw new Error("The app or wallet session changed during verification. Verify again.");
-  if (!matchingConfiguration(licenseDeployment, info.configuration))
-    throw new Error("The website and local app have different holdings settings. Install the matching ChainChat release.");
-  if (walletRevoked && info.session)
-    throw new Error("This wallet sign-in was revoked. Sign out and verify holdings again.");
-  if (info.session && walletWatch) await walletWatch.check(info.selectedOwner);
-  if (token !== sessionToken || revision !== licenseRevision)
-    throw new Error("The wallet session changed during verification. Verify again.");
-  return { ...info, identityVerified: true };
-}
-async function refreshLicense() {
-  if (!token || licensePolling || walletBusy) return;
-  licensePolling = true;
-  const revision = licenseRevision, sessionToken = token;
-  try {
-    const info = await readLicense();
-    if (revision === licenseRevision && sessionToken === token) renderLicense(info);
-  } catch (error) {
-    if (revision === licenseRevision && sessionToken === token) {
-      renderLicense(currentLicense ? { ...currentLicense, identityVerified: false, status: "verification-unavailable" } : null);
-      $("licenseError").textContent = error.message;
-    }
-  } finally { licensePolling = false; }
-}
-async function ensureHoldings() {
-  if (hasHoldingsAccess() && walletWatch) await walletWatch.check(currentLicense.selectedOwner);
-  if (hasHoldingsAccess()) return;
-  await refreshLicense();
-  if (hasHoldingsAccess()) return;
-  openDialog("licenseDialog");
-  throw new Error("Verify a wallet holding at least 21,000 CPHY before starting a new operation. Your saved history remains available.");
-}
-async function showLicense() {
-  openDialog("licenseDialog");
-  await refreshLicense();
-}
-async function invalidateWalletSession(message = "Wallet account or network changed. Verify holdings again.") {
-  licenseRevision++;
-  walletRevoked = true;
-  walletController?.abort();
-  walletWatch?.close();
-  walletWatch = null;
-  chatController?.abort();
-  renderLicense(null);
-  $("licenseStatus").textContent = message;
-  $("licenseSummary").textContent = message;
-  const sessionToken = token;
-  if (sessionToken) {
-    try {
-      await api("/api/license/logout", {});
-      if (token === sessionToken) await refreshLicense();
-    } catch {
-      $("licenseError").textContent = "Could not confirm wallet sign-out with the app. End the app session or stop the local app before reconnecting.";
-    }
-  }
-}
-for (const id of ["licenseButton", "holdingsPrompt"])
-  $(id).addEventListener("click", () => requirePair(showLicense));
-$("modelVerifyHoldings").addEventListener("click", () => {
-  closeDialog("modelDialog");
-  requirePair(showLicense);
-});
 $("loadAuditor").addEventListener("click", () => {
   requireAgent(() => {
     $("auditFrame").src = "./audit/?chainchat=1";
@@ -2580,60 +2425,6 @@ $("loadAuditor").addEventListener("click", () => {
     $("loadAuditor").classList.add("hidden");
     auditedAgent = agentId();
   });
-});
-$("checkLicenseButton").addEventListener("click", refreshLicense);
-$("logoutHoldingsButton").addEventListener("click", () => invalidateWalletSession("Wallet signed out. Your saved Timechain remains available."));
-$("verifyHoldingsButton").addEventListener("click", async () => {
-  if (walletBusy || !token) return;
-  walletBusy = true;
-  walletController = new AbortController();
-  const sessionToken = token, revision = ++licenseRevision;
-  walletRevoked = true;
-  walletWatch?.close();
-  walletWatch = null;
-  renderLicense(currentLicense);
-  $("licenseError").textContent = "";
-  try {
-    await api("/api/license/logout", {});
-    if (token !== sessionToken || revision !== licenseRevision)
-      throw new Error("The app changed before wallet sign-in. Verify again.");
-    const info = await verifyHoldingsWithWallet({
-      wallet: window.ethereum,
-      config: licenseDeployment,
-      origin: location.origin,
-      deviceKey: currentLicense?.deviceKey,
-      api: (path, data) => {
-        if (token !== sessionToken) throw new Error("The app session changed during wallet verification.");
-        return api(path, data);
-      },
-      signal: walletController.signal,
-      report: (text) => { $("licenseStatus").textContent = text; },
-      onInvalidated: () => { void invalidateWalletSession(); },
-    });
-    if (token !== sessionToken || revision !== licenseRevision)
-      throw new Error("The app or wallet changed during sign-in. Verify again.");
-    walletWatch = watchWallet(window.ethereum, () => { void invalidateWalletSession(); });
-    await walletWatch.check(info.selectedOwner);
-    if (token !== sessionToken || revision !== licenseRevision)
-      throw new Error("The app or wallet changed during sign-in. Verify again.");
-    walletRevoked = false;
-    renderLicense(info);
-    if (info.status === "active") toast("CPHY holdings verified. Your tokens remain in your wallet.");
-  } catch (error) {
-    if (sessionToken === token) {
-      walletRevoked = true;
-      walletWatch?.close();
-      walletWatch = null;
-      await api("/api/license/logout", {}).catch(() => {});
-      currentLicense = currentLicense ? { ...currentLicense, identityVerified: false } : null;
-      $("licenseError").textContent = error.message || "Wallet verification could not complete.";
-    }
-  } finally {
-    walletBusy = false;
-    walletController = null;
-    renderLicense(currentLicense);
-    await refreshLicense();
-  }
 });
 async function start() {
   const bootstrap = localBridgePage ? new URLSearchParams(location.hash.slice(1)).get("launch") : null;
@@ -2647,20 +2438,6 @@ async function start() {
   $("bridgePort").disabled = localBridgePage || ["cyphertempre.ai","www.cyphertempre.ai"].includes(location.hostname);
   $("bridgePort").value = selectedBridgePort;
   $("hostedOrigin").textContent = location.origin;
-  try {
-    const response = await fetch("./license-config.json", {
-      cache: "no-store", credentials: "omit", redirect: "error",
-    });
-    if (!response.ok) throw new Error("Holdings configuration unavailable.");
-    licenseDeployment = validateHoldingsConfig(await response.json());
-    renderLicense(null);
-  } catch {
-    $("licenseSummary").textContent = "Holdings configuration unavailable. Update ChainChat before connecting your wallet.";
-  }
-  setInterval(() => {
-    if (token && currentLicense?.session && !walletBusy) void refreshLicense();
-    renderHoldingsControls();
-  }, 20000);
   try {
     const response = await fetch("/catalogue.json", { cache: "no-store" });
     const data = await response.json();
@@ -2688,17 +2465,7 @@ async function start() {
       storage: localTabStorage(), request: api });
     token = paired.token;
     applyState(await api("/api/state"));
-    await refreshLicense();
     toast("Connected to your local OpenClaw app. PoI is ready for active Timechain chats.");
-    if (currentLicense?.identityVerified) {
-      try {
-        walletWatch?.close();
-        walletWatch = watchWallet(window.ethereum, () => { void invalidateWalletSession(); });
-        await walletWatch.check(currentLicense.selectedOwner);
-      } catch {
-        await invalidateWalletSession("Verify your wallet again to continue this resumed session.");
-      }
-    }
     if (!paired.resumable) activity("Connected. To reopen this chat, use the ChainChat application launcher; tab storage is unavailable.");
   } catch (error) {
     console.warn("Local app connection unavailable.", error.code || error.name || "CONNECTION_FAILED");
