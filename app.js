@@ -1,5 +1,6 @@
 import { initMotifs } from "./motifs.js";
 import { initThemes } from "./themes.js";
+import { initFontModes } from "./font-modes.js";
 import { modelChoiceAction, mountNativeModelPicker } from "./model-catalogue.js";
 import { mountNativeAuth } from "./native-auth.js";
 import { mountNativeMediaComposer, nativeChatPayload, nativeHistoryMedia, nativeMessageMedia, renderNativeMedia } from "./native-media.js";
@@ -2682,6 +2683,7 @@ async function start() {
   const bootstrap = localBridgePage ? new URLSearchParams(location.hash.slice(1)).get("launch") : null;
   if (bootstrap !== null) history.replaceState(null, "", location.pathname + location.search);
   initThemes();
+  initFontModes();
   initMotifs();
   renderState();
   setInterval(() => { void refreshActivity(); }, 1000);

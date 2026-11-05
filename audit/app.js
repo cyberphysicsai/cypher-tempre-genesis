@@ -1,8 +1,10 @@
 import { DEFAULT_AUDIT_BRIDGE, normalizeBridgeURL } from './bridge-url.js';
 import { createAuditConnection } from './chainchat-connection.js';
 import { initThemes, motifPalette, normalizeTheme } from '../themes.js';
+import { initFontModes } from '../font-modes.js';
 
 initThemes();
+initFontModes();
 
 const embeddedAudit = new URLSearchParams(window.location.search).get('chainchat') === '1';
 let parentAudit = null;

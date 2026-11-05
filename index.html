@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/openclaw-settings.css" />
     <link rel="stylesheet" href="/setup-wizard.css" />
+    <link rel="stylesheet" href="/font-modes.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
@@ -116,6 +117,11 @@
           <button type="button" data-theme-choice="dark" aria-pressed="true">Dark mode</button>
           <button type="button" data-theme-choice="light" aria-pressed="false">Light mode</button>
           <button type="button" data-theme-choice="matrix" aria-pressed="false">Matrix</button>
+        </div>
+        <div class="font-selector" role="group" aria-label="Font mode">
+          <button type="button" data-font-choice="cyber" aria-pressed="true" title="Retro cyber typography">Cyber</button>
+          <button type="button" data-font-choice="typewriter" aria-pressed="false" title="Classic typewriter typography">Typewriter</button>
+          <button type="button" data-font-choice="clarity" aria-pressed="false" title="Clear rounded typography">Clarity</button>
         </div>
         <button
           class="icon-button native-settings-button" id="openclawSettingsButton" aria-label="OpenClaw control center" title="OpenClaw control center and chat controls" type="button"
