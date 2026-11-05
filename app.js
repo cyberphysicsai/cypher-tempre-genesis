@@ -21,6 +21,7 @@ import { createAuditParent } from "./audit-parent.js";
 import { initOpenClawSettings } from "./openclaw-settings.js";
 import { chatFailure, providerLimits, loadoutRepairNotice } from "./chat-errors.js";
 import { mountSetupWizard } from "./setup-wizard.js";
+import { createRuntimeHealthDisplay } from "./runtime-health.js";
 const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
@@ -29,6 +30,7 @@ let modelCatalogue = null, modelCatalogueLoading = false, modelSwitchBusy = fals
   modelCatalogueRevision = 0, selectedModelTier = 'byok', modelCatalogueError = '', lastByokDetails = null, nativeModelPicker = null, nativeAuthControls = null;
 let nativeMediaComposer = null, messageMediaDisposers = [];
 let setupWizard = null, setupSessionGeneration = 0;
+const runtimeHealthDisplay = createRuntimeHealthDisplay();
 const FRUITS = [
   "Love",
   "Peace",
@@ -229,6 +231,7 @@ async function api(path, data, options = {}) {
   if (!localBridgePage && !token && !["/api/pair", "/api/status"].includes(path))
     throw new Error("Install and launch ChainChat, or connect in optional website mode.");
   const requestToken = token;
+  const healthRevision = runtimeHealthDisplay.revision;
   const headers = { Accept: "application/json" };
   if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
   if (data !== undefined) headers["Content-Type"] = "application/json";
@@ -247,6 +250,7 @@ async function api(path, data, options = {}) {
       },
     );
   } catch (error) {
+    if (error.name !== 'AbortError' && requestToken === token && runtimeHealthDisplay.unavailable(healthRevision)) invalidateRuntimeConfirmation();
     if (error.name === "AbortError" || localBridgePage) throw error;
     throw new Error(
       "Could not reach the installed app. Open ChainChat using its application launcher. Optional website mode may also need local-network permission.",
@@ -256,6 +260,7 @@ async function api(path, data, options = {}) {
   try {
     result = await response.json();
   } catch {
+    if (requestToken === token && runtimeHealthDisplay.unavailable(healthRevision)) invalidateRuntimeConfirmation();
     throw new Error("The local app returned an unreadable response.");
   }
   if (!response.ok) {
@@ -268,10 +273,35 @@ async function api(path, data, options = {}) {
     error.stage = result.stage;
     error.gate = result.gate;
     error.pluginNotice = result.pluginNotice;
+    if (requestToken === token && runtimeHealthDisplay.failed(error.code, healthRevision)) invalidateRuntimeConfirmation();
     if (response.status === 401 && path !== "/api/pair" && token === requestToken) clearLocalSession();
     throw error;
   }
+  if (requestToken === token) {
+    const current = result.state || result;
+    const runtime = current.executionRuntime || (path === '/api/status' ? result.runtime : null);
+    if (runtime && runtimeHealthDisplay.observe(runtime, healthRevision, { agentVerified: current.agent?.verified === true || current.agent?.verified === 'PASS' })) {
+      // Keep the setup guide's existing health binding current as well. A cheap
+      // activity response must invalidate its cached readiness immediately.
+      state.executionRuntime = { ...state.executionRuntime, ...runtime, backend: runtime.backend, running: runtime.running === true,
+        healthy: runtime.healthy === true, enforcementHealthy: runtime.enforcementHealthy === true,
+        healthState: runtime.healthState, healthRevision: runtime.healthRevision, generation: runtime.generation };
+      renderRuntimeConnection(); setupWizard?.update();
+    }
+  }
   return result;
+}
+function invalidateRuntimeConfirmation() {
+  state.executionRuntime = { ...state.executionRuntime, healthy: false, enforcementHealthy: false };
+  renderRuntimeConnection(); setupWizard?.update();
+}
+function renderRuntimeConnection() {
+  const view = runtimeHealthDisplay.view({ paired: !!token, local: localBridgePage });
+  $("bridgeDot").classList.toggle("online", view.online);
+  $("bridgeStatus").textContent = view.label;
+  $("bridgeStatus").title = view.detail;
+  $("runtimeHealthNotice").textContent = view.detail;
+  $("runtimeHealthNotice").classList.toggle('hidden', !view.detail);
 }
 function toast(message, bad = false) {
   clearTimeout(toastTimer);
@@ -355,6 +385,9 @@ function settings() {
 }
 function applyState(result) {
   const next = result.state || result;
+  // api() admits health observations in response order. Merging a late full
+  // state must not resurrect the runtime readiness it already rejected.
+  const executionRuntime = state.executionRuntime;
   const incomingId = next.agent?.id || next.agent?.root;
   if (incomingId && incomingId !== agentId()) {
     delete state.faculties;
@@ -368,6 +401,7 @@ function applyState(result) {
   }
   if (next.agent !== undefined || next.agents !== undefined) {
     state = { ...state, ...next };
+    if (executionRuntime) state.executionRuntime = executionRuntime;
     state.settings = {
       ...DEFAULT_SETTINGS,
       ...state.settings,
@@ -527,14 +561,19 @@ function renderRuntimeActivity() {
 async function refreshActivity() {
   if (!token || !state.agent || activityPolling) return;
   activityPolling = true;
-  const sessionToken = token, id = agentId();
+  const sessionToken = token, id = agentId(), healthRevision = runtimeHealthDisplay.revision;
   try {
     const result = await pollWithDeadline(signal => api("/api/activity", undefined, { signal }));
     if (sessionToken !== token || id !== agentId()) return;
     const next = normalizeActivity(result.activity || result, id);
     if (!next || (runtimeActivity?.agentId === id && next.revision < runtimeActivity.revision)) return;
     runtimeActivity = next; activityReceivedAt = Date.now();
-  } catch { if (sessionToken === token && id === agentId()) activityReceivedAt = 0; }
+  } catch {
+    if (sessionToken === token && id === agentId()) {
+      activityReceivedAt = 0;
+      if (runtimeHealthDisplay.unavailable(healthRevision)) invalidateRuntimeConfirmation();
+    }
+  }
   finally { activityPolling = false; renderRuntimeActivity(); }
 }
 
@@ -839,10 +878,7 @@ function renderState() {
   const id = agentId();
   $("installNotice").classList.toggle("hidden", localBridgePage || paired);
   refreshEmbeddedAuditor();
-  $("bridgeDot").classList.toggle("online", paired);
-  $("bridgeStatus").textContent = paired
-    ? state.executionRuntime?.backend === "openclaw" ? "OPENCLAW CONNECTED" : "LOCAL RUNTIME CONNECTED"
-    : localBridgePage ? "OPEN INSTALLED CHAINCHAT" : "INSTALL & LAUNCH CHAINCHAT";
+  renderRuntimeConnection();
   $("pairButton").querySelector("span").textContent = paired
     ? "App connected"
     : "Install & open";
@@ -1211,6 +1247,7 @@ function clearLocalSession() {
   clearLocalResume(localBridgePage ? localTabStorage() : null);
   chatController?.abort();
   token = "";
+  runtimeHealthDisplay.reset();
   setupSessionGeneration++;
   modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false; modelSwitchBusy = false;
   modelCatalogueError = ''; selectedModelTier = 'byok'; lastByokDetails = null;
@@ -1281,7 +1318,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.10.1 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.10.2 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     setupSessionGeneration++;
@@ -2671,17 +2708,16 @@ async function start() {
   try {
     const status = await api("/api/status");
     $("bridgeStatus").textContent = supportedBridgeVersion(status.version)
-      ? "LOCAL APP READY"
+      ? "CONNECTING TO LOCAL APP"
       : "APP UPDATE REQUIRED";
     if (status.version) $("appVersion").textContent = `v${status.version}`;
-    if (status.runtime?.backend === "openclaw") $("bridgeStatus").textContent = "OPENCLAW RUNTIME READY";
     if (!supportedBridgeVersion(status.version)) throw new Error("Install the latest ChainChat app to connect automatically.");
     const paired = await connectLocalSession({ origin: location.origin, nonce: bootstrap,
       storage: localTabStorage(), request: api });
     token = paired.token;
     setupSessionGeneration++;
     applyState(await api("/api/state"));
-    toast("Connected to your local OpenClaw app. PoI is ready for active Timechain chats.");
+    toast("Local app session connected. Check the runtime status above.");
     if (!paired.resumable) activity("Connected. To reopen this chat, use the ChainChat application launcher; tab storage is unavailable.");
   } catch (error) {
     console.warn("Local app connection unavailable.", error.code || error.name || "CONNECTION_FAILED");

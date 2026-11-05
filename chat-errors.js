@@ -1,11 +1,19 @@
 /** Public diagnostics contain fixed labels, never raw provider or transport data. */
 const STAGES = Object.freeze({
-  'memory-planning': 'Memory planning', generation: 'Model generation', review: 'Covenant review',
+  'memory-planning': 'Memory retrieval planning', generation: 'Model generation', review: 'Covenant review',
   'native-review': 'Native review', 'chain-preparation': 'Chain preparation', loadout: 'Faculty loadout',
   context: 'Context budget', compaction: 'Transcript compaction', commitment: 'Block commitment',
   provider: 'Provider connection', runtime: 'Local runtime', authorization: 'Authorization', cancellation: 'Cancellation',
 });
 const GROUPS = [
+  { codes: ['OPENCLAW_MEMORY_EXHAUSTED'], stage: 'runtime', title: 'LOCAL MEMORY EXHAUSTED', kind: 'runtime',
+    message: 'The local runtime reported a memory-allocation failure. Free system memory and inspect its diagnostics before restarting. No unreviewed answer was released.', action: 'native' },
+  { codes: ['OPENCLAW_PROCESS_KILLED'], stage: 'runtime', title: 'GATEWAY KILLED EXTERNALLY', kind: 'runtime',
+    message: 'The gateway was killed with SIGKILL. Memory pressure is possible, but the signal alone does not confirm an out-of-memory kill. Inspect the operating system logs.', action: 'native' },
+  { codes: ['OPENCLAW_PROCESS_EXITED'], stage: 'runtime', title: 'GATEWAY EXITED', kind: 'runtime',
+    message: 'The gateway exited unexpectedly. Inspect runtime diagnostics; an exit code alone does not establish database corruption.', action: 'native' },
+  { codes: ['OPENCLAW_START_FAILED', 'OPENCLAW_START_TIMEOUT'], stage: 'runtime', title: 'GATEWAY STARTUP FAILED', kind: 'runtime',
+    message: 'The local gateway did not complete startup. Inspect runtime diagnostics and available memory. A failed start or timeout alone does not establish database corruption.', action: 'native' },
   { codes: ['COVENANT_REJECTED', 'POI_REJECTED', 'SPAN_GUARD', 'ALL_PERSPECTIVES_REJECTED'],
     stage: 'review', title: 'POI REVIEW HELD', kind: 'gate',
     message: 'PoI withheld the proposed response. Inspect the assessment and request a grounded revision.', action: null },
@@ -36,7 +44,7 @@ const GROUPS = [
     message: 'The native engine held this operation to protect chain integrity. Inspect the chain and its recovery status before retrying.', action: 'inspect' },
   { codes: ['OPENCLAW_COMPACTION_HELD'], stage: 'compaction', title: 'COMPACTION HELD', kind: 'review',
     message: 'The conversation summary was not accepted. Inspect the native context and compaction status before retrying.', action: 'native' },
-  { codes: ['OPENCLAW_ENFORCEMENT', 'OPENCLAW_ENFORCEMENT_UNHEALTHY', 'OPENCLAW_NATIVE_HELD', 'OPENCLAW_CONTROL_CLOSED', 'OPENCLAW_EMPTY_RESPONSE', 'OPENCLAW_ADMISSION_FAILED', 'OPENCLAW_START_TIMEOUT', 'OPENCLAW_REQUIRED', 'ENGINE_PROTOCOL', 'ENGINE_TIMEOUT', 'ENGINE_REJECTED', 'ENGINE_ERROR', 'PYTHON_UNAVAILABLE'],
+  { codes: ['OPENCLAW_ENFORCEMENT', 'OPENCLAW_ENFORCEMENT_UNHEALTHY', 'OPENCLAW_NATIVE_HELD', 'OPENCLAW_CONTROL_CLOSED', 'OPENCLAW_CONTROL_TIMEOUT', 'OPENCLAW_CONTROL_AUTH', 'OPENCLAW_EMPTY_RESPONSE', 'OPENCLAW_ADMISSION_FAILED', 'OPENCLAW_REQUIRED', 'ENGINE_PROTOCOL', 'ENGINE_TIMEOUT', 'ENGINE_REJECTED', 'ENGINE_ERROR', 'PYTHON_UNAVAILABLE'],
     stage: 'runtime', title: 'ACTIVE RUNTIME HELD', kind: 'runtime',
     message: 'The local runtime could not return an approved answer. Inspect runtime status and use this code when reporting the failure.', action: 'native' },
   { codes: ['SESSION_CHANGED'], stage: 'authorization', title: 'MODEL SESSION CHANGED', kind: 'authorization',
@@ -49,13 +57,16 @@ const GROUPS = [
 ];
 const BY_CODE = new Map(GROUPS.flatMap(group => group.codes.map(code => [code, group])));
 const ACTIONS = Object.freeze({ model: 'Open model settings', loadout: 'Review equipped faculties', continuum: 'Open pending block', inspect: 'Inspect chain', native: 'Open runtime settings', connect: 'Reconnect local app' });
+const RUNTIME_CAUSES = new Set(['OPENCLAW_MEMORY_EXHAUSTED', 'OPENCLAW_PROCESS_KILLED',
+  'OPENCLAW_PROCESS_EXITED', 'OPENCLAW_START_FAILED', 'OPENCLAW_START_TIMEOUT',
+  'OPENCLAW_ENFORCEMENT_UNHEALTHY', 'OPENCLAW_CONTROL_CLOSED', 'OPENCLAW_CONTROL_TIMEOUT', 'OPENCLAW_CONTROL_AUTH']);
 
 export function chatFailure(error = {}) {
   const suppliedCode = error?.name === 'AbortError' ? 'REQUEST_CANCELLED' : error?.code;
   const code = BY_CODE.has(suppliedCode) ? suppliedCode : 'REQUEST_FAILED';
   const group = BY_CODE.get(code) || { stage: 'runtime', title: 'REQUEST DID NOT COMPLETE', kind: 'runtime',
     message: 'The local app could not complete this request. Inspect its status and report the code and stage shown here.', action: 'native' };
-  const stage = Object.hasOwn(STAGES, error?.stage) ? error.stage : group.stage;
+  const stage = RUNTIME_CAUSES.has(code) ? 'runtime' : Object.hasOwn(STAGES, error?.stage) ? error.stage : group.stage;
   return { code, stage, stageLabel: STAGES[stage], title: group.title, kind: group.kind,
     message: group.message, action: group.action, actionLabel: ACTIONS[group.action] || null };
 }
