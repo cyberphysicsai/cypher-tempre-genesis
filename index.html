@@ -18,6 +18,7 @@
     />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/openclaw-settings.css" />
+    <link rel="stylesheet" href="/setup-wizard.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
@@ -107,9 +108,10 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.10.0</span>
+        ><span class="mono" id="appVersion">v0.10.1</span>
       </div>
       <div class="top-actions">
+        <button class="quiet-button setup-guide-button" id="setupGuideButton" type="button">Setup guide</button>
         <div class="theme-selector" role="group" aria-label="Visual mode">
           <button type="button" data-theme-choice="dark" aria-pressed="true">Dark mode</button>
           <button type="button" data-theme-choice="light" aria-pressed="false">Light mode</button>
@@ -139,9 +141,9 @@
       <div>
         <span class="eyebrow">OPENCLAW + PROOF OF INTERACTION INCLUDED</span>
         <h2 id="installNoticeTitle">Install once. Launch your agent.</h2>
-        <p>Setup opens your local chat automatically. Choose your model and Timechain; PoI is already equipped. No separate bridge installation or pairing code.</p>
+        <p>Follow the installer, then open setup to choose your model and Timechain. The guide checks readiness before you begin. PoI is already equipped; no separate bridge installation or pairing code.</p>
       </div>
-      <button id="getStartedButton" class="primary-button" type="button">Install ChainChat ↗</button>
+      <button id="getStartedButton" class="primary-button" type="button">Guided install →</button>
     </section>
 
     <div class="agent-card">
@@ -524,13 +526,13 @@
       <div class="beta-actions">
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.1/CypherTempre-ChainChat-Setup-0.10.1-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
         >
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-macos.zip" rel="noopener noreferrer">Install for macOS</a>
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.1/CypherTempre-ChainChat-Setup-0.10.1-macos.zip" rel="noopener noreferrer">Install for macOS</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.1/CypherTempre-ChainChat-Setup-0.10.1-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
     </section>
@@ -569,22 +571,95 @@
       >
     </section>
 
+    <dialog id="setupDialog" class="modal setup-wizard" aria-labelledby="setupTitle" aria-describedby="setupSubtitle">
+      <div class="dialog-top">
+        <span class="eyebrow">FROM DOWNLOAD TO YOUR FIRST CONVERSATION</span>
+        <button id="setupDismiss" type="button" class="icon-button" aria-label="Close setup guide"><svg><use href="#i-close" /></svg></button>
+      </div>
+      <h2 id="setupTitle">Let’s get your agent ready.</h2>
+      <p id="setupSubtitle">One guided setup. Your model, your Timechain, your machine.</p>
+      <ol class="setup-progress" aria-label="Setup progress">
+        <li><button type="button" data-setup-step="0"><span class="setup-step-number">01</span><strong>Install</strong><small class="setup-step-state">Current</small></button></li>
+        <li><button type="button" data-setup-step="1"><span class="setup-step-number">02</span><strong>Choose model</strong><small class="setup-step-state">Next</small></button></li>
+        <li><button type="button" data-setup-step="2"><span class="setup-step-number">03</span><strong>Timechain</strong><small class="setup-step-state">Next</small></button></li>
+        <li><button type="button" data-setup-step="3"><span class="setup-step-number">04</span><strong>Ready check</strong><small class="setup-step-state">Next</small></button></li>
+      </ol>
+      <p id="setupProgressText" class="setup-progress-text" role="status">Step 1 of 4 · Install</p>
+      <section data-setup-panel="0" class="setup-step-panel" aria-labelledby="setupInstallTitle">
+        <h3 id="setupInstallTitle">Install the local app.</h3>
+        <p>Choose your computer below. The installer verifies and installs OpenClaw, Proof of Interaction and ChainChat together.</p>
+        <div id="setupDownloads"></div>
+        <ol class="setup-instructions">
+          <li>Open your download. On macOS or Linux, extract the archive and open its installer.</li>
+          <li>Follow the install steps. When installation finishes, open the local setup from the installer.</li>
+          <li>The local chat opens this guide automatically. Choose your model and Timechain there.</li>
+        </ol>
+        <p id="setupLocalStatus" class="info-box" role="status"></p>
+        <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. A download alone does not mean installation has finished.</p>
+        <button id="setupAdvancedPair" type="button" class="text-button">Use this website with an installed app (advanced) ↗</button>
+      </section>
+      <section data-setup-panel="1" class="setup-step-panel" aria-labelledby="setupModelTitle" hidden>
+        <h3 id="setupModelTitle">Choose how your agent thinks.</h3>
+        <p id="setupModelStatus" class="info-box" role="status"></p>
+        <button id="setupModelAction" type="button" class="primary-button">Choose or connect a model →</button>
+        <p class="fine-print">Shared free models, when available, need no personal API key. Some provider-listed free models require your own key. You can also bring your own API or use native OpenClaw sign-in. Direct keys stay in local app memory; native sign-in can save credentials privately on your computer. Selected context goes to your chosen provider for inference and review.</p>
+      </section>
+      <section data-setup-panel="2" class="setup-step-panel" aria-labelledby="setupChainTitle" hidden>
+        <h3 id="setupChainTitle">Give your agent a continuous history.</h3>
+        <p id="setupChainStatus" class="info-box" role="status"></p>
+        <div class="setup-choice-grid">
+          <button id="setupNewChain" type="button" class="secondary-button">Create a fresh Timechain<small>Choose a name and seal your genesis.</small></button>
+          <button id="setupExistingChain" type="button" class="secondary-button">Use an existing Timechain<small>Find or enter its location, then verify.</small></button>
+        </div>
+        <div id="setupSavedSection" class="setup-saved-section" hidden>
+          <label class="field" for="setupSavedAgents">Or select an agent already added to this app</label>
+          <select id="setupSavedAgents" aria-label="Saved agents"></select>
+          <button id="setupSelectSaved" type="button" class="quiet-button">Use selected agent</button>
+        </div>
+        <p class="fine-print">A new genesis contains love, peace, joy, kindness, mildness, self-control, goodness, patience and faith. Pairing an existing agent preserves its genesis and history.</p>
+      </section>
+      <section data-setup-panel="3" class="setup-step-panel" aria-labelledby="setupReadyTitle" hidden>
+        <h3 id="setupReadyTitle">Let’s verify your setup.</h3>
+        <p id="setupReadyNote"></p>
+        <ul id="setupCheckList" class="setup-check-list" aria-label="Readiness results"></ul>
+        <p id="setupPausedNote" class="info-box" hidden>Your chain is paused. Chat remains reviewed, but memory and learning stay paused until you resume them in the skill controls.</p>
+        <div class="setup-check-actions">
+          <button id="setupCheck" type="button" class="secondary-button">Check readiness</button>
+          <button id="setupRepairModel" type="button" class="text-button" hidden>Change model →</button>
+          <button id="setupRepairChain" type="button" class="text-button" hidden>Choose Timechain →</button>
+          <button id="setupRepairRuntime" type="button" class="text-button" hidden>Open runtime settings →</button>
+        </div>
+        <div class="setup-finish-actions">
+          <button id="setupFinish" type="button" class="primary-button" disabled>Start chatting →</button>
+          <button id="setupFirstMessage" type="button" class="quiet-button" disabled>Prepare an introduction</button>
+        </div>
+        <p class="fine-print">“Prepare an introduction” puts a first message in your composer. You decide when to send it. Readiness checks do not send messages or spend API credit.</p>
+      </section>
+      <p id="setupError" class="dialog-error" role="alert"></p>
+      <footer class="setup-footer">
+        <button id="setupBack" type="button" class="quiet-button">← Back</button>
+        <button id="setupLater" type="button" class="text-button">Finish later</button>
+        <button id="setupNext" type="button" class="primary-button">Continue →</button>
+      </footer>
+      <p class="fine-print setup-resume-note">You can reopen this guide anytime using “Setup guide” at the top. Saved chains stay on your computer.</p>
+    </dialog>
+
     <dialog id="installDialog" class="modal compact-modal">
       <div class="dialog-top">
         <span class="eyebrow">YOUR AGENT RUNS ON YOUR MACHINE</span>
         <button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button>
       </div>
       <h2>One install. Everything starts together.</h2>
-      <p>The installer includes OpenClaw, Proof of Interaction, the Timechain engine and this chat interface. It starts the app and connects the local chat automatically.</p>
+      <p>The installer includes OpenClaw, Proof of Interaction, the Timechain engine and this chat interface. Follow its steps, then open setup to finish model, Timechain and readiness checks in your local chat.</p>
       <ol class="install-steps">
         <li>Choose your system below. On macOS or Linux, extract the archive and open its installer.</li>
         <li>In the chat it opens, choose your API model and enter its key locally.</li>
         <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
       </ol>
       <div class="platform-downloads">
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.0/CypherTempre-ChainChat-Setup-0.10.0-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.1/CypherTempre-ChainChat-Setup-0.10.1-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.1/CypherTempre-ChainChat-Setup-0.10.1-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.1/CypherTempre-ChainChat-Setup-0.10.1-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
       </div>
       <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
       <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>

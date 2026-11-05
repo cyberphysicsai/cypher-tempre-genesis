@@ -20,6 +20,7 @@ import { connectLocalSession, clearLocalResume, localTabStorage } from "./local-
 import { createAuditParent } from "./audit-parent.js";
 import { initOpenClawSettings } from "./openclaw-settings.js";
 import { chatFailure, providerLimits, loadoutRepairNotice } from "./chat-errors.js";
+import { mountSetupWizard } from "./setup-wizard.js";
 const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
@@ -27,6 +28,7 @@ let auditedAgent = null;
 let modelCatalogue = null, modelCatalogueLoading = false, modelSwitchBusy = false,
   modelCatalogueRevision = 0, selectedModelTier = 'byok', modelCatalogueError = '', lastByokDetails = null, nativeModelPicker = null, nativeAuthControls = null;
 let nativeMediaComposer = null, messageMediaDisposers = [];
+let setupWizard = null, setupSessionGeneration = 0;
 const FRUITS = [
   "Love",
   "Peace",
@@ -315,7 +317,8 @@ function requirePair(action) {
     return;
   }
   pendingAction = action;
-  openDialog("installDialog");
+  if (setupWizard) setupWizard.open();
+  else openDialog("installDialog");
 }
 function requireAgent(action) {
   requirePair(() => {
@@ -952,6 +955,7 @@ function renderState() {
   renderCognition();
   nativeMediaComposer?.sync();
   nativePanel.syncConnection({ connected: !!token, agentId: agentId() });
+  setupWizard?.update();
 }
 function renderConversation() {
   for (const cleanup of messageMediaDisposers) cleanup(); messageMediaDisposers = [];
@@ -1184,8 +1188,9 @@ document.querySelectorAll("dialog").forEach((dialog) =>
     }
   }),
 );
-$("pairButton").addEventListener("click", () => openDialog(token ? "pairDialog" : "installDialog"));
-$("getStartedButton").addEventListener("click", () => openDialog("installDialog"));
+$("pairButton").addEventListener("click", () => token ? openDialog("pairDialog") : setupWizard.open());
+$("getStartedButton").addEventListener("click", () => setupWizard.open());
+$("setupGuideButton").addEventListener("click", () => setupWizard.open());
 $("advancedWebsitePairing").addEventListener("click", () => {
   closeDialog("installDialog");
   openDialog("pairDialog");
@@ -1206,6 +1211,7 @@ function clearLocalSession() {
   clearLocalResume(localBridgePage ? localTabStorage() : null);
   chatController?.abort();
   token = "";
+  setupSessionGeneration++;
   modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false; modelSwitchBusy = false;
   modelCatalogueError = ''; selectedModelTier = 'byok'; lastByokDetails = null;
   pendingAction = null;
@@ -1275,9 +1281,10 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.10.0 or newer to use this interface. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.10.1 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
+    setupSessionGeneration++;
     $("pairCode").value = "";
     applyState(await api("/api/state"));
     closeDialog("pairDialog");
@@ -1288,18 +1295,15 @@ $("pairForm").addEventListener("submit", (event) => {
     } catch {}
     const action = pendingAction;
     pendingAction = null;
-    if (action) action();
+    if (action && !setupWizard?.active) action();
   });
 });
 $("newAgentButton").addEventListener("click", () =>
   requirePair(() => openDialog("genesisDialog")),
 );
 $("welcomeStart").addEventListener("click", () =>
-  requirePair(() => {
-    if (!state.agent) openDialog("genesisDialog");
-    else if (!state.provider?.configured) openModel();
-    else $("messageInput").focus();
-  }),
+  !token || !state.agent || !state.provider?.configured
+    ? setupWizard.open() : $("messageInput").focus(),
 );
 for (const id of ["existingAgentButton", "welcomePair"])
   $(id).addEventListener("click", () =>
@@ -1314,7 +1318,7 @@ $("genesisForm").addEventListener("submit", (event) => {
     closeDialog("genesisDialog");
     $("newAgentName").value = "Cypher Tempre";
     toast("Genesis sealed. Your Timechain has begun.");
-    if (!state.provider?.configured) openModel();
+    if (!setupWizard?.active && !state.provider?.configured) openModel();
   });
 });
 $("existingForm").addEventListener("submit", (event) => {
@@ -1325,7 +1329,7 @@ $("existingForm").addEventListener("submit", (event) => {
     );
     closeDialog("existingDialog");
     toast("Existing Timechain verified and paired.");
-    if (!state.provider?.configured) openModel();
+    if (!setupWizard?.active && !state.provider?.configured) openModel();
   });
 });
 $("discoverChains").addEventListener("click", async () => {
@@ -1510,7 +1514,7 @@ nativeAuthControls = mountNativeAuth({ document, mount: $("nativeModelPickerMoun
   context: () => `${token}:${agentId()}`, isBusy: () => requestBusy || modelSwitchBusy,
   onBusy(value) { modelSwitchBusy = value; if (value) { modelCatalogueRevision++; modelCatalogueLoading = false; $("apiKey").value = ''; } renderModelCatalogue(); },
   onUpdated: () => nativeModelPicker.refresh(),
-  openSettings() { closeDialog('modelDialog'); nativePanel.open('configuration'); $("nativeSchemaSearch").value = 'models.providers'; $("nativeSchemaSearch").dispatchEvent(new Event('input')); },
+  openSettings() { setupWizard?.dismiss(); closeDialog('modelDialog'); nativePanel.open('configuration'); $("nativeSchemaSearch").value = 'models.providers'; $("nativeSchemaSearch").dispatchEvent(new Event('input')); },
 });
 $("modelButton").addEventListener("click", () => requirePair(openModel));
 const modelTierTabs = [...document.querySelectorAll('[data-model-tier]')];
@@ -2675,6 +2679,7 @@ async function start() {
     const paired = await connectLocalSession({ origin: location.origin, nonce: bootstrap,
       storage: localTabStorage(), request: api });
     token = paired.token;
+    setupSessionGeneration++;
     applyState(await api("/api/state"));
     toast("Connected to your local OpenClaw app. PoI is ready for active Timechain chats.");
     if (!paired.resumable) activity("Connected. To reopen this chat, use the ChainChat application launcher; tab storage is unavailable.");
@@ -2687,6 +2692,7 @@ async function start() {
     const result = await api("/api/archetypes");
     if (result.archetypes?.length) archetypes = result.archetypes;
   } catch {}
+  setupWizard.start();
   setInterval(refreshState, 10000);
 }
 const nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, isConnected: () => !!token, onClose: renderState,
@@ -2710,4 +2716,21 @@ nativeMediaComposer = mountNativeMediaComposer({ document, button: $("attachMedi
 });
 window.addEventListener('pagehide', () => { nativeMediaComposer?.dispose(); for (const cleanup of messageMediaDisposers) cleanup(); messageMediaDisposers = []; });
 window.addEventListener('pageshow', event => { if (event.persisted) { renderConversation(); nativeMediaComposer?.sync(); } });
+setupWizard = mountSetupWizard({ document, api,
+  snapshot: () => ({ local: localBridgePage, connected: !!token, generation: setupSessionGeneration, state }),
+  actions: {
+    model: openModel,
+    genesis: () => openDialog('genesisDialog'),
+    existing: () => openDialog('existingDialog'),
+    pair: () => openDialog('pairDialog'),
+    selectAgent,
+    settings: () => nativePanel.open(),
+    finish({ prepareIntroduction }) {
+      if (prepareIntroduction && !$("messageInput").value.trim()) $("messageInput").value = 'Please introduce yourself.';
+      focusWorkspaceSection('chainchatWorkspace');
+      $("messageInput").focus();
+      toast('Setup checks passed. Send a message when you are ready.');
+    },
+  },
+});
 start();
