@@ -1,0 +1,67 @@
+.chat-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 4px 16px 9px;
+}
+
+.composer:has(.chat-commands[open]) { overflow: visible; }
+
+.chat-controls > [role="status"] {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.chat-commands { position: relative; }
+
+.chat-commands > summary {
+  cursor: pointer;
+  padding: 5px 0;
+}
+
+.chat-command-menu {
+  position: absolute;
+  z-index: 8;
+  inset-inline-start: 0;
+  bottom: calc(100% + 8px);
+  width: min(31rem, calc(100vw - 48px));
+  max-height: min(24rem, 55vh);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line-light);
+  background: var(--panel);
+}
+
+.chat-command-menu .native-command-list {
+  grid-template-columns: minmax(0, 1fr);
+  margin: 8px 0 0;
+}
+
+#chatToolsActivity { margin: 0 16px 8px; }
+
+.chat-skills-list {
+  max-height: 18rem;
+  overflow: auto;
+  margin-block: 12px;
+}
+
+.chat-skills-list .native-check {
+  align-items: start;
+  overflow-wrap: anywhere;
+}
+
+.chat-skills-list small {
+  display: block;
+  color: var(--muted);
+}
+
+#chatSkillsPreview {
+  max-height: 13rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}

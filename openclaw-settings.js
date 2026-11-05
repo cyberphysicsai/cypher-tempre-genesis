@@ -1,3 +1,5 @@
+import { chatToolAccess, chatToolActivity, hostToolChoices } from './chat-tools.js';
+
 const pretty = value => JSON.stringify(value ?? null, null, 2);
 const nativeUtilityModelNotice = 'Automatic native metadata utilities are off by default. Explicitly configuring agents.defaults.utilityModel requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms, even while chat uses Free models. The shared free-tier key is not supplied. These metadata-only calls have no action tools; agent answers and actions retain canonical PoI review.';
 const nativeQueuePolicyNotice = 'ChainChat frontend messages use followup: each request keeps its own identity and PoI review, with commitment following the selected Timechain block policy. Native /queue preferences apply to other native events and channel inputs; frontend requests stay separate.';
@@ -451,7 +453,27 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   let snapshot = null, loading = false, activeSection = 'configuration', selectedFamily = '';
   let connectionKey = '', connectionRevision = 0, pendingRefresh = false;
   let configDirty = false, configEditRevision = null, nativeCapabilityControls = null, nativeSourceControls = null, nativeSecretControls = null;
+  let toolContext = {}, toolSnapshot = null, toolSaving = false;
   function error(message = '') { $('nativeError').textContent = message; }
+  function renderToolStatus() {
+    const view = chatToolAccess(toolSnapshot, toolContext);
+    const status = toolSaving ? 'Saving tool permissions…' : view.status;
+    for (const [id, text] of [['chatToolsStatus', status], ['nativeToolScopeStatus', view.detail]]) {
+      const node = $(id);
+      if (node && node.textContent !== text) node.textContent = text;
+    }
+    if ($('chatToolsStatus')) $('chatToolsStatus').title = view.detail;
+    const canChange = toolContext.connected && toolContext.agentId && !toolSaving;
+    $('nativeToolsForm').querySelector('button[type="submit"]').disabled = !canChange || !toolSnapshot;
+    $('disableNativeTools').disabled = !canChange;
+  }
+  function renderToolActivity(activity, fresh) {
+    const node = $('chatToolsActivity');
+    if (!node) return;
+    const text = chatToolActivity(activity, fresh && activity?.agentId === toolContext.agentId);
+    if (node.textContent !== text) node.textContent = text;
+    node.hidden = !text;
+  }
   function close() {
     doc.querySelector('main.workspace')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     onClose?.();
@@ -568,6 +590,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
       const description = doc.createElement('span'); description.textContent = nativeCommandDescription(item);
       button.append(name, description); button.addEventListener('click', () => { $('nativeCommandInput').value = item.name; $('nativeCommandInput').focus(); }); commands.append(button);
     }
+    toolSnapshot = next;
     const grant = next.toolAuthority?.grant || {};
     for (const name of ['evaluate', 'credentials', 'payments']) {
       const checkbox = doc.querySelector(`[data-browser-capability="${name}"]`);
@@ -577,19 +600,18 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     if ($('nativeBrowserRuntime')) $('nativeBrowserRuntime').textContent = pretty(next.browserRuntime || { state: 'Install the current local release for managed browser setup.' });
     $('nativeToolsEnabled').checked = grant.enabled === true;
     $('nativeExecutionAllowed').checked = grant.allowExecution === true;
-    $('nativeToolsAcknowledged').checked = grant.acknowledged === true;
+    $('nativeToolsAcknowledged').checked = false;
     $('nativeToolRoots').value = (grant.roots || []).join('\n');
     $('nativeToolHosts').value = (grant.networkHosts || []).join('\n');
     const tools = $('nativeToolChoices'); tools.replaceChildren();
-    for (const entry of next.toolCatalogue || []) {
-      const name = typeof entry === 'string' ? entry : entry.name;
-      if (!name) continue;
+    for (const { name, label: title, details, available, selected } of hostToolChoices(next)) {
       const label = doc.createElement('label'); label.className = 'native-check';
-      const checkbox = doc.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.hostTool = name; checkbox.checked = (grant.tools || []).includes(name);
-      checkbox.disabled = entry.available === false;
-      const text = doc.createElement('span'); text.textContent = typeof entry === 'string' ? name : `${name}${entry.description ? ` · ${entry.description}` : ''}`;
+      const checkbox = doc.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.hostTool = name; checkbox.checked = selected;
+      checkbox.disabled = !available;
+      const text = doc.createElement('span'); text.textContent = `${title} (${name}) · ${details}`;
       label.append(checkbox, text); tools.append(label);
     }
+    renderToolStatus();
     nativeCapabilityControls?.render(next);
     nativeSourceControls?.render(next);
     nativeSecretControls?.render(next);
@@ -603,7 +625,9 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
       const next = await api('/api/openclaw');
       if (revision !== connectionRevision || !isConnected()) return;
       render(next); $('nativeConnectedControls').disabled = false;
-    } catch (failure) { if (revision === connectionRevision) error(failure.message); }
+    } catch (failure) {
+      if (revision === connectionRevision) { toolSnapshot = null; renderToolStatus(); error(failure.message); }
+    }
     finally { loading = false; if (pendingRefresh) { pendingRefresh = false; void refresh(); } }
   }
   function open(name = 'configuration') {
@@ -612,11 +636,15 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     $('nativeTitle').focus?.({ preventScroll: true });
     if (isConnected()) void refresh();
   }
-  function syncConnection({ connected, agentId = '' }) {
+  function syncConnection({ connected, agentId = '', ...context }) {
+    toolContext = { connected, agentId, ...context };
     const next = connected ? `connected:${agentId}` : 'disconnected';
-    if (next === connectionKey) return;
+    if (next === connectionKey) { renderToolStatus(); return; }
     connectionKey = next; connectionRevision++; configDirty = false; configEditRevision = null;
     snapshot = null; selectedFamily = ''; $('nativeConnectedControls').disabled = true;
+    toolSnapshot = null; toolSaving = false;
+    $('nativeToolsForm').inert = false;
+    renderToolStatus(); renderToolActivity(null, false);
     nativeCapabilityControls?.reset();
     nativeSourceControls?.reset();
     nativeSecretControls?.reset();
@@ -627,6 +655,9 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     for (const id of ['nativeRuntimeState', 'nativeEffectiveConfig', 'nativeSchemaJson', 'nativeProtectedPaths', 'nativeGoalState']) $(id).textContent = '';
     for (const id of ['nativeSchemaFields', 'nativeConfigFamilies', 'nativeCommandCatalogue', 'nativeServicesJobs', 'nativeServicesChannels', 'nativeServicesRuns']) $(id).replaceChildren();
     $('nativeConfigEditor').value = '{}'; $('nativeToolRoots').value = ''; $('nativeToolHosts').value = '';
+    $('nativeToolChoices').replaceChildren();
+    for (const id of ['nativeToolsEnabled', 'nativeExecutionAllowed', 'nativeToolsAcknowledged']) $(id).checked = false;
+    for (const field of panel.querySelectorAll('[data-browser-capability]')) field.checked = false;
     $('nativeConnection').textContent = connected ? 'Loading the authenticated local OpenClaw controls…' : 'Open your installed ChainChat app to load authenticated native controls.';
     $('connectNativeControls').classList.toggle('hidden', connected);
     $('nativeFamilyNotice').textContent = 'Connect the local app to load its exact OpenClaw schema.';
@@ -642,6 +673,10 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     } catch (failure) { error(failure.message); }
   }
   $('openclawSettingsButton').addEventListener('click', open);
+  $('chatToolsButton')?.addEventListener('click', () => requireConnection(() => {
+    open('tools');
+    $('nativeToolsTitle')?.focus?.({ preventScroll: true });
+  }));
   $('closeOpenclawPanel').addEventListener('click', close);
   $('connectNativeControls').addEventListener('click', () => requireConnection(() => refresh()));
   const tabs = [...doc.querySelectorAll('[data-native-tab]')];
@@ -667,17 +702,43 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   $('startNativeGoal').addEventListener('click', () => { const objective = $('nativeGoalObjective').value.trim(); if (objective) void run(`/goal start ${objective}`); else error('Write a goal objective first.'); });
   $('compactNativeSession').addEventListener('click', () => run('/compact'));
   for (const button of doc.querySelectorAll('[data-goal-command]')) button.addEventListener('click', () => run(button.dataset.goalCommand));
-  $('nativeToolsForm').addEventListener('submit', async event => {
-    event.preventDefault(); error();
-    const grant = { enabled: $('nativeToolsEnabled').checked, tools: [...doc.querySelectorAll('[data-host-tool]:checked')].map(node => node.dataset.hostTool),
+  const toolForm = $('nativeToolsForm');
+  async function saveToolGrant(grant) {
+    if (toolSaving || !toolContext.connected || !toolContext.agentId) return;
+    if (grant.enabled) {
+      if (!toolSnapshot) return error('Refresh Tool access before applying a grant.');
+      if (!grant.acknowledged) return error('Acknowledge the selected permissions before applying this grant.');
+      if (grant.tools.some(name => name === 'exec' || name === 'process') && !grant.allowExecution)
+        return error('Shell commands and process controls require the separate local execution permission.');
+    }
+    const revision = connectionRevision;
+    toolSaving = true; toolForm.inert = true; renderToolStatus(); error();
+    try {
+      await api('/api/openclaw/tools', grant);
+      if (revision !== connectionRevision) return;
+      toolSnapshot = null; renderToolStatus();
+      await refresh();
+    } catch (failure) {
+      if (revision === connectionRevision) error(failure.message);
+    } finally {
+      if (revision === connectionRevision) {
+        toolSaving = false; toolForm.inert = false; renderToolStatus();
+      }
+    }
+  }
+  toolForm.addEventListener('input', event => {
+    if (event.target !== $('nativeToolsAcknowledged')) $('nativeToolsAcknowledged').checked = false;
+  });
+  toolForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const grant = { enabled: $('nativeToolsEnabled').checked, tools: [...toolForm.querySelectorAll('[data-host-tool]:checked')].map(node => node.dataset.hostTool),
       roots: lines($('nativeToolRoots').value), networkHosts: lines($('nativeToolHosts').value),
       allowExecution: $('nativeExecutionAllowed').checked, acknowledged: $('nativeToolsAcknowledged').checked,
-      browserCapabilities: Object.fromEntries([...doc.querySelectorAll('[data-browser-capability]')].map(node => [node.dataset.browserCapability, node.checked])) };
-    try { await api('/api/openclaw/tools', grant); await refresh(); } catch (failure) { error(failure.message); }
+      browserCapabilities: Object.fromEntries([...panel.querySelectorAll('[data-browser-capability]')].map(node => [node.dataset.browserCapability, node.checked])) };
+    void saveToolGrant(grant);
   });
-  $('disableNativeTools').addEventListener('click', async () => {
-    try { await api('/api/openclaw/tools', { enabled: false, tools: [], roots: [], networkHosts: [], allowExecution: false, acknowledged: false }); await refresh(); }
-    catch (failure) { error(failure.message); }
+  $('disableNativeTools').addEventListener('click', () => {
+    void saveToolGrant({ enabled: false, tools: [], roots: [], networkHosts: [], allowExecution: false, acknowledged: false });
   });
   nativeCapabilityControls = mountNativeCapabilityCard({ document: doc, mount: $('nativeToolsForm').parentElement,
     api, onSaved: refresh, onError: error, context: () => connectionRevision });
@@ -718,10 +779,13 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   browserCard.append(browserRuntime, installBrowser, element('p', 'An existing Chrome, Chromium or Edge binary can also run the separate owned profile. Setup downloads the locked Chromium build when needed; it does not import personal browser data.'));
   for (const [name, description] of [['evaluate', 'Allow model-written page JavaScript · broad page access'], ['credentials', 'Allow interaction with credential fields'], ['payments', 'Allow payment and wallet controls']]) {
     const label = element('label', '', 'native-check'), checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.dataset.browserCapability = name;
+    checkbox.addEventListener('change', () => { $('nativeToolsAcknowledged').checked = false; });
     label.append(checkbox, element('span', description)); browserCard.append(label);
   }
   browserCard.append(element('p', 'PoI still reviews each concrete action. Fixed target inspection stays active; the JavaScript checkbox controls model-written scripts. Scripts require both credential and payment acknowledgements because field checks cannot sandbox arbitrary JavaScript. Grant these controls only for tasks you intend the agent to perform.'));
-  const saveBrowser = element('button', 'Save current host and browser permissions'); saveBrowser.type = 'button'; saveBrowser.addEventListener('click', () => $('nativeToolsForm').requestSubmit()); browserCard.append(saveBrowser); browserMount.append(browserCard);
+  const saveBrowser = element('button', 'Review and apply browser permissions in Tool access'); saveBrowser.type = 'button'; saveBrowser.addEventListener('click', () => {
+    section('tools'); $('nativeToolsTitle')?.focus?.();
+  }); browserCard.append(saveBrowser); browserMount.append(browserCard);
   const pluginMount = $('nativePluginsMount'); pluginMount.replaceChildren();
   const pluginCard = element('div', '', 'native-card');
   pluginCard.append(element('h2', 'Explicitly trusted native plugins'), element('p', 'Native plugins run inside OpenClaw with your OS permissions and may act outside model hooks. Trust an exact package, version and artifact before installing or activating it. Model tool calls retain PoI review. Updated code needs renewed trust.'));
@@ -802,5 +866,5 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   });
   const servicePoll = setInterval(() => { if (isConnected() && doc.visibilityState !== 'hidden' && ['channels', 'schedules', 'activity'].includes(activeSection)) void refresh(); }, 5000);
   servicePoll.unref?.();
-  return { open, close, refresh, syncConnection, isOpen: () => !panel.classList.contains('hidden') };
+  return { open, close, refresh, syncConnection, renderToolActivity, isOpen: () => !panel.classList.contains('hidden') };
 }

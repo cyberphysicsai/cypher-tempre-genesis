@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/openclaw-settings.css" />
     <link rel="stylesheet" href="/setup-wizard.css" />
+    <link rel="stylesheet" href="/chat-controls.css" />
     <link rel="stylesheet" href="/font-modes.css" />
     <script type="module" src="/app.js"></script>
   </head>
@@ -109,7 +110,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.10.2</span>
+        ><span class="mono" id="appVersion">v0.10.3</span>
       </div>
       <div class="top-actions">
         <button class="quiet-button setup-guide-button" id="setupGuideButton" type="button">Setup guide</button>
@@ -243,6 +244,19 @@
                 <svg><use href="#i-arrow" /></svg>
               </button>
             </div>
+            <div class="chat-controls" aria-label="Chat controls">
+              <details id="chatCommands" class="chat-commands">
+                <summary>Commands</summary>
+                <div class="chat-command-menu">
+                  <p class="fine-print">Choose a command to put it in the composer. Press Send to run it.</p>
+                  <div id="chatCommandChoices" class="native-command-list" aria-label="Available chat commands"></div>
+                </div>
+              </details>
+              <button class="text-button" id="chatSkillsButton" type="button" aria-haspopup="dialog">Skills</button>
+              <button class="text-button" id="chatToolsButton" type="button" aria-controls="nativeToolsForm">Tools ↗</button>
+              <span id="chatToolsStatus" role="status">TOOLS OFF</span>
+            </div>
+            <p id="chatToolsActivity" class="fine-print" role="status" hidden></p>
             <p class="native-media-notice" id="nativeMediaNotice" role="status">Attachments require a paired agent and configured native OpenClaw model.</p>
             <div class="native-attachment-queue hidden" id="nativeAttachmentQueue" aria-label="Files queued for the next native chat"></div>
           </form>
@@ -424,7 +438,21 @@
       </section>
       <section data-native-section="goals" class="hidden"><div class="native-card"><h2>Native session goal</h2><p>A durable OpenClaw objective attached to this paired agent. Goal turns still pass through the Timechain's PoI gate and block policy.</p><label class="field">Objective<textarea id="nativeGoalObjective" rows="4" maxlength="16000" placeholder="Compare the designs and prepare a recommendation…"></textarea></label><div class="native-actions"><button id="startNativeGoal" type="button" class="primary-button">Start /goal</button><button data-goal-command="/goal resume" type="button" class="secondary-button">Resume</button><button data-goal-command="/goal pause" type="button" class="secondary-button">Pause</button><button data-goal-command="/goal complete" type="button" class="quiet-button">Mark complete</button><button data-goal-command="/goal clear" type="button" class="quiet-button">Clear goal</button></div><pre id="nativeGoalState">No selected native goal.</pre><p class="fine-print">Goals preserve their native state and usage limits across restarts. Starting or resuming admits a reviewed agent turn; it does not create an unbounded background loop.</p></div></section>
       <section data-native-section="commands" class="hidden"><div class="native-card"><h2>OpenClaw chat controls</h2><p>Use native slash commands in the chat or here. Session preferences apply to the selected agent; resetting native chat context keeps its Timechain.</p><form id="nativeCommandForm"><label class="field">Command<input id="nativeCommandInput" autocomplete="off" spellcheck="false" placeholder="/help"></label><div class="native-actions"><button type="submit" class="primary-button">Run command</button><button id="compactNativeSession" type="button" class="secondary-button">Optional reviewed summary</button></div></form><div class="native-context-policy"><h3>Conversation memory policy</h3><p id="nativeContextPolicy" role="status">Connect the runtime to read its context policy. A model context window remains bounded.</p><p class="fine-print">The optional reviewed summary is an explicit advanced action. It passes through PoI and keeps the Timechain; it is separate from ordinary relevant-history retrieval.</p></div><pre id="nativeCommandResult"></pre><div id="nativeCommandCatalogue" class="native-command-list"></div></div></section>
-      <section data-native-section="tools" class="hidden"><form id="nativeToolsForm" class="native-card"><h2>Agent tool permissions</h2><p>Tools start disabled. Choose the capabilities and scope this agent may use. Each proposed tool call is checked against the grant and the native PoI gate.</p><label class="native-check"><input id="nativeToolsEnabled" type="checkbox">Enable selected tools for this agent</label><div id="nativeToolChoices" class="native-tool-choices"></div><label class="field">Allowed workspace directories (one absolute path per line)<textarea id="nativeToolRoots" rows="3" placeholder="Directories this agent may read or edit"></textarea></label><label class="field">Allowed network hosts (one per line)<textarea id="nativeToolHosts" rows="3" placeholder="docs.example.com"></textarea></label><label class="native-check"><input id="nativeExecutionAllowed" type="checkbox">Allow local command execution under my user account</label><p class="fine-print">Command execution has broad local OS access and is not a directory sandbox. Native execution approvals still apply. ChainChat's own data and native chain files are protected from scoped file tools.</p><label class="native-check"><input id="nativeToolsAcknowledged" type="checkbox">I authorize the selected tools and understand their stated scope.</label><div class="native-actions"><button type="submit" class="primary-button">Apply tool permissions</button><button id="disableNativeTools" type="button" class="secondary-button">Disable all tools</button></div></form></section>
+      <section data-native-section="tools" class="hidden">
+        <form id="nativeToolsForm" class="native-card">
+          <h2 id="nativeToolsTitle" tabindex="-1">Agent tool permissions</h2>
+          <p>Choose what this agent may use. Proof of Interaction reviews each proposed tool call against the grant and the Timechain covenant.</p>
+          <p id="nativeToolScopeStatus" class="fine-print" role="status"></p>
+          <label class="native-check"><input id="nativeToolsEnabled" type="checkbox">Enable selected tools for this agent</label>
+          <div id="nativeToolChoices" class="native-tool-choices"></div>
+          <label class="field">Allowed workspace directories (one absolute path per line)<textarea id="nativeToolRoots" rows="3" placeholder="Directories this agent may read or edit"></textarea></label>
+          <label class="field">Allowed network hosts (one per line)<textarea id="nativeToolHosts" rows="3" placeholder="docs.example.com"></textarea></label>
+          <label class="native-check"><input id="nativeExecutionAllowed" type="checkbox">Allow local command execution under my user account</label>
+          <p class="fine-print">With execution granted, ask your agent in chat to run a command. Shell commands run with your local OS permissions. Directory restrictions apply to scoped file tools.</p>
+          <label class="native-check"><input id="nativeToolsAcknowledged" type="checkbox">I authorize the selected tools and understand their stated scope.</label>
+          <div class="native-actions"><button type="submit" class="primary-button">Apply tool permissions</button><button id="disableNativeTools" type="button" class="secondary-button">Revoke saved tool grants</button></div>
+        </form>
+      </section>
       <section data-native-section="channels" class="hidden"><div class="native-service-grid"><form id="nativeChannelBindingForm" class="native-card"><h2>Bind a channel to this agent</h2><p>Connect the native account below, then choose its exact conversation and authorized senders. Incoming message text cannot select a different chain.</p><label class="field">Binding name<input id="nativeBindingName" required maxlength="256" placeholder="My team chat" autocomplete="off"></label><div class="native-service-grid"><label class="field">Native channel ID<input id="nativeBindingChannel" required maxlength="128" placeholder="telegram" autocomplete="off"></label><label class="field">Account ID<input id="nativeBindingAccount" required maxlength="128" value="default" autocomplete="off"></label></div><label class="field">Conversation ID<input id="nativeBindingConversation" required maxlength="512" placeholder="Exact native conversation ID" autocomplete="off"></label><label class="field">Allowed sender IDs (one per line)<textarea id="nativeBindingSenders" rows="3" required placeholder="Exact native sender IDs"></textarea></label><button type="submit" class="primary-button" id="nativeCreateBinding">Bind verified agent</button></form><form id="nativeChannelConnectForm" class="native-card" autocomplete="off"><h2>Connect a native channel account</h2><p>Use a bundled or explicitly trusted native channel plugin. Credentials stay in local runtime memory and must be reconnected after restart. Put secret values only in the password fields.</p><div class="native-service-grid"><label class="field">Native channel ID<input id="nativeConnectChannel" required maxlength="128" placeholder="telegram" autocomplete="off"></label><label class="field">Account ID<input id="nativeConnectAccount" required maxlength="128" value="default" autocomplete="off"></label></div><label class="field">Non-secret native account settings (JSON)<textarea id="nativeChannelConfig" rows="4" spellcheck="false" autocomplete="off">{}</textarea></label><div id="nativeCredentialRows" class="native-credential-rows"></div><div class="native-actions"><button id="nativeAddCredential" class="quiet-button" type="button">+ Credential field</button><button type="submit" id="nativeConnectChannelButton" class="primary-button">Connect in local memory</button></div></form></div><div class="native-card"><h2>Channel bindings</h2><div id="nativeServicesChannels" class="native-service-list"></div></div></section>
       <section data-native-section="schedules" class="hidden"><div class="native-service-grid"><form id="nativeAutomationJobForm" class="native-card"><h2>Schedule an agent request</h2><label class="field">Name<input id="nativeJobName" required maxlength="256" autocomplete="off" placeholder="Morning research"></label><label class="field">Request<textarea id="nativeJobPrompt" rows="4" required maxlength="32768" placeholder="Review the latest changes and summarize what matters."></textarea></label><label class="field">Schedule<select id="nativeScheduleKind"><option value="every">Repeat at an interval</option><option value="at">Run once</option><option value="cron">Cron expression</option></select></label><div data-native-schedule="every"><label class="field">Every (minutes)<input id="nativeScheduleMinutes" type="number" min="1" max="525600" step="1" value="30"></label></div><div data-native-schedule="at" class="hidden"><label class="field">Local date and time<input id="nativeScheduleAt" type="datetime-local"></label></div><div data-native-schedule="cron" class="hidden"><label class="field">Five-field expression<input id="nativeScheduleExpression" maxlength="256" value="0 9 * * *" spellcheck="false" autocomplete="off"></label><label class="field">IANA time zone<input id="nativeScheduleTimezone" maxlength="128" placeholder="America/Los_Angeles" autocomplete="off"></label></div><label class="field">Result destination<select id="nativeJobChannel"><option value="">Keep the reviewed result locally</option></select></label><button type="submit" class="primary-button" id="nativeCreateJob">Create native schedule</button></form><div class="native-card"><h2>Native schedules</h2><div id="nativeServicesJobs" class="native-service-list"></div></div></div></section>
       <section data-native-section="activity" class="hidden"><div class="native-card"><h2>Agent services</h2><p>Bind native channels and schedules to the selected verified Timechain. Each model turn and outgoing message passes through PoI. Work stays held while its owner session, connected model or chain is ineligible.</p><div class="native-actions"><button id="nativeWakeAutomation" type="button" class="secondary-button">Retry eligible held work</button><span id="nativeServicesStatus" role="status"></span></div><p id="nativeServicesNotice" class="fine-print" role="status"></p></div><div class="native-card"><h2>Recent service activity</h2><div id="nativeServicesRuns" class="native-service-list" aria-live="polite"></div></div></section>
@@ -533,13 +561,13 @@
       <div class="beta-actions">
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.2/CypherTempre-ChainChat-Setup-0.10.2-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
         >
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.2/CypherTempre-ChainChat-Setup-0.10.2-macos.zip" rel="noopener noreferrer">Install for macOS</a>
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.2/CypherTempre-ChainChat-Setup-0.10.2-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-macos.zip" rel="noopener noreferrer">Install for macOS</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
     </section>
@@ -664,9 +692,9 @@
         <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
       </ol>
       <div class="platform-downloads">
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.2/CypherTempre-ChainChat-Setup-0.10.2-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.2/CypherTempre-ChainChat-Setup-0.10.2-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.2/CypherTempre-ChainChat-Setup-0.10.2-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
       </div>
       <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
       <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>
@@ -993,6 +1021,28 @@
           Equip perspectives <span>↗</span>
         </button>
       </div>
+    </dialog>
+    <dialog id="chatSkillsDialog" class="modal chat-skills-modal" aria-labelledby="chatSkillsTitle">
+      <div class="dialog-top">
+        <span class="eyebrow">OPENCLAW SKILLS</span>
+        <button class="icon-button" id="chatSkillsClose" type="button" aria-label="Close skills"><svg><use href="#i-close" /></svg></button>
+      </div>
+      <h2 id="chatSkillsTitle">Equip skills for this agent</h2>
+      <p>Proof of Interaction is always equipped. Additional instructions guide this agent’s chat turns while memory is active. Tool permissions apply independently.</p>
+      <p id="chatSkillsNotice" class="info-box" role="status"></p>
+      <div id="chatSkillsList" class="chat-skills-list"></div>
+      <div id="chatSkillsManage" hidden>
+        <label class="native-check"><input type="checkbox" id="chatSkillsAcknowledged">I trust the selected instructions and allow them to be sent to my connected model.</label>
+        <button type="button" id="chatSkillsApply" class="primary-button" disabled>Apply equipped skills</button>
+        <details class="chat-skills-import">
+          <summary>Import a local SKILL.md</summary>
+          <p class="fine-print">Import the instruction document. Set up any required scripts or dependencies separately.</p>
+          <label class="field">Skill instructions<input id="chatSkillsFile" type="file" accept=".md,text/markdown,text/plain"></label>
+          <pre id="chatSkillsPreview" hidden></pre>
+          <button type="button" id="chatSkillsImport" class="secondary-button" disabled>Save reviewed instructions</button>
+        </details>
+      </div>
+      <p id="chatSkillsError" class="dialog-error" role="alert"></p>
     </dialog>
     <dialog id="continuumDialog" class="modal continuum-modal">
       <div class="dialog-top">

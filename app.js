@@ -23,6 +23,8 @@ import { initOpenClawSettings } from "./openclaw-settings.js";
 import { chatFailure, providerLimits, loadoutRepairNotice } from "./chat-errors.js";
 import { mountSetupWizard } from "./setup-wizard.js";
 import { createRuntimeHealthDisplay } from "./runtime-health.js";
+import { composerCommand, mountChatCommands } from "./chat-commands.js";
+import { mountAgentSkills } from "./agent-skills.js";
 const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
@@ -31,6 +33,7 @@ let modelCatalogue = null, modelCatalogueLoading = false, modelSwitchBusy = fals
   modelCatalogueRevision = 0, selectedModelTier = 'byok', modelCatalogueError = '', lastByokDetails = null, nativeModelPicker = null, nativeAuthControls = null;
 let nativeMediaComposer = null, messageMediaDisposers = [];
 let setupWizard = null, setupSessionGeneration = 0;
+let nativePanel = null, agentSkills = null;
 const runtimeHealthDisplay = createRuntimeHealthDisplay();
 const FRUITS = [
   "Love",
@@ -303,6 +306,9 @@ function renderRuntimeConnection() {
   $("bridgeStatus").title = view.detail;
   $("runtimeHealthNotice").textContent = view.detail;
   $("runtimeHealthNotice").classList.toggle('hidden', !view.detail);
+  nativePanel?.syncConnection({ connected: !!token, agentId: agentId(), agentName: state.agent?.name,
+    memoryPaused: cognition().mode === 'dormant', runtimeReady: view.online && state.executionRuntime?.backend === 'openclaw',
+    modelConfigured: state.provider?.configured === true, chainHeld: !!(state.agent?.locked || state.agent?.maintenancePending), local: localBridgePage });
 }
 function toast(message, bad = false) {
   clearTimeout(toastTimer);
@@ -524,6 +530,7 @@ function renderOperatorCompatibility() {
 function renderRuntimeActivity() {
   const paired = !!token && !!state.agent;
   const fresh = paired && runtimeActivity?.agentId === agentId() && Date.now() - activityReceivedAt < 6000;
+  nativePanel?.renderToolActivity?.(runtimeActivity, fresh);
   for (const [id, indicator] of Object.entries(abilityIndicators(runtimeActivity, fresh))) {
     const button = $(id);
     button.classList.toggle("running", indicator.active);
@@ -538,6 +545,7 @@ function renderRuntimeActivity() {
   const running = fresh && runtimeActivity?.running;
   $("cancelTurn").classList.toggle("hidden", !(requestBusy || running));
   $("cancelTurn").disabled = stoppingBusy;
+  renderSendButton();
   const events = runtimeActivity?.events || [];
   const last = events.at(-1);
   const mainStatus = activityLineState(runtimeActivity, { paired, fresh, requestBusy });
@@ -991,7 +999,7 @@ function renderState() {
   renderOperationControls();
   renderCognition();
   nativeMediaComposer?.sync();
-  nativePanel.syncConnection({ connected: !!token, agentId: agentId() });
+  agentSkills?.sync();
   setupWizard?.update();
 }
 function renderConversation() {
@@ -1267,7 +1275,7 @@ function clearLocalSession() {
   activeAgentId = null;
   $("apiKey").value = "";
   $("pairCode").value = "";
-  $("messageInput").value = "";
+  clearComposerDraft();
   $("packJson").value = "";
   $("packFile").value = "";
   renderState();
@@ -1319,7 +1327,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.10.2 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 0.10.3 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     setupSessionGeneration++;
@@ -1630,58 +1638,89 @@ $("modelForm").addEventListener("submit", (event) => {
   });
 });
 $("modelDialog").addEventListener("close", () => { $("apiKey").value = ""; nativeAuthControls?.reset({ cancel: true }); });
-$("chatForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const message = $("messageInput").value.trim();
-  if (!message) return;
-  if (requestBusy && /^\/stop\s*$/i.test(message)) {
-    chatController?.abort();
-    await api('/api/cancel', {}).catch(() => {});
-    return;
+function clearComposerDraft() {
+  const input = $("messageInput");
+  input.value = '';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+async function runComposerCommand(route, { fromComposer = false } = {}) {
+  if (!route) throw new Error('Enter a native slash command.');
+  if (!token) throw new Error('Open the installed ChainChat app to run commands.');
+  if (state.executionRuntime?.backend === 'direct')
+    throw new Error('Launch the installed OpenClaw edition to use chat commands.');
+  if (stoppingBusy || (requestBusy || modelSwitchBusy) && !route.interrupt)
+    throw new Error('Wait for the current operation before running this command.');
+
+  if (route.path === '/api/chat') {
+    if (!fromComposer) nativePanel.close();
+    return sendChatMessage(route.command, { fromComposer, command: true });
   }
-  if (requestBusy) return;
-  if (nativeMediaComposer?.snapshot().uploading) { toast('Wait for the local file uploads to finish before sending.'); return; }
-  if (!token) {
-    requirePair(() => $("messageInput").focus());
-    return;
+
+  const commandSession = token, commandAgent = agentId();
+  const stoppedController = route.name === 'stop' ? chatController : null;
+  const isCurrent = () => token === commandSession && agentId() === commandAgent;
+  if (route.interrupt) {
+    stoppingBusy = true;
+    renderRuntimeActivity();
+  } else {
+    requestBusy = true;
+    renderOperationControls();
+    activity(`Running /${route.name} in the local OpenClaw runtime…`, 'busy');
   }
-  if (/^\/[a-z][a-z0-9_-]*(?:\s|$)/i.test(message)) {
-    try {
-      const result = await api('/api/openclaw/command', { command: message });
-      if (result.state) applyState(result.state);
-      if (result.kind !== 'turn') {
-        $("messageInput").value = '';
-        addMessage({ role: 'user', content: message });
-        addMessage({ role: 'assistant', content: result.text || 'Native command completed.', control: true });
-        if (result.action === 'model') openModel();
-        if (result.action === 'config') nativePanel.open();
-        if (result.action === 'stop') chatController?.abort();
-        return;
-      }
-    } catch (error) { toast(error.message, true); return; }
+  let result;
+  try {
+    result = await api(route.path, { command: route.command });
+    if (!isCurrent()) return;
+    if (result.kind === 'turn') throw new Error('This command needs a supported reviewed chat route. Check /help for the available syntax.');
+    if (result.state) applyState(result.state);
+    if (fromComposer) {
+      if ($('messageInput').value.trim() === route.command) clearComposerDraft();
+      addMessage({ role: 'user', content: route.command });
+      addMessage({ role: 'assistant', content: result.text || (result.action === 'stop' ? 'Cancellation requested.' : 'Native command completed.'), control: true });
+    }
+    if (result.action === 'stop') stoppedController?.abort();
+    activity(result.action === 'stop' ? 'Cancellation requested.' : 'Native OpenClaw control completed.');
+  } catch (error) {
+    if (!isCurrent()) return;
+    activity(`/${route.name} could not complete. ${error.message}`, 'error');
+    throw error;
+  } finally {
+    if (route.interrupt) {
+      stoppingBusy = false;
+      renderRuntimeActivity();
+    } else {
+      requestBusy = false;
+      renderOperationControls();
+    }
+    if (isCurrent()) void refreshActivity();
   }
+  if (result.action === 'model') openModel();
+  if (result.action === 'config') nativePanel.open();
+  return result;
+}
+async function sendChatMessage(message, { fromComposer = true, command = false } = {}) {
   if (!state.agent) {
-    toast("Begin a new genesis or pair your existing agent first.");
     openDialog("genesisDialog");
-    return;
+    throw new Error("Begin a new genesis or pair your existing agent first.");
   }
   if (!state.provider?.configured) {
     openModel();
+    if (command) throw new Error('Connect a model before running this command.');
     return;
   }
-  let mediaDraft, payload;
-  try { mediaDraft = nativeMediaComposer?.take() || { ids: [], assets: [] }; payload = nativeChatPayload(message, mediaDraft.ids, state.provider); }
-  catch (failure) { toast(failure.message, true); return; }
+  if (!command && nativeMediaComposer?.snapshot().uploading)
+    throw new Error('Wait for the local file uploads to finish before sending.');
+  const mediaDraft = (!command && nativeMediaComposer?.take()) || { ids: [], assets: [] };
+  const payload = nativeChatPayload(message, mediaDraft.ids, state.provider);
   requestBusy = true;
-  nativeMediaComposer?.sync();
   const turnMode = cognition().mode;
   const chatSession = token;
   const chatAgent = agentId();
   chatController = new AbortController();
-  $("sendButton").disabled = true;
-  $("messageInput").disabled = true;
+  renderOperationControls();
+  renderRuntimeActivity();
   addMessage({ role: "user", content: message, attachments: mediaDraft.assets });
-  $("messageInput").value = "";
+  if (fromComposer) clearComposerDraft();
   activity(
     turnMode === "dormant" ? "Memory paused · starting required PoI review; no new chain block."
       : "Starting the Timechain run · waiting for live app activity…",
@@ -1711,6 +1750,7 @@ $("chatForm").addEventListener("submit", async (event) => {
         ? `Covenant accepted · ${bytes(state.pending?.bytes)} pending toward the next block.`
         : `Accepted and sealed${response.ring?.index !== undefined ? ` in ring ${response.ring.index}` : ""}.`,
     );
+    return { kind: 'turn', text: 'Reviewed chat command completed.' };
   } catch (error) {
     if (token !== chatSession || agentId() !== chatAgent) return;
     const failure = chatFailure(error);
@@ -1725,15 +1765,34 @@ $("chatForm").addEventListener("submit", async (event) => {
       `${failure.title} · ${failure.code} · ${failure.stageLabel}`,
       "error",
     );
+    if (!fromComposer) throw error;
   } finally {
     chatController = null;
     requestBusy = false;
     renderOperationControls();
-    $("messageInput").disabled = false;
     $("messageInput").focus();
     await refreshState();
     await refreshActivity();
   }
+}
+$("chatForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("messageInput").value.trim();
+  if (!message) return;
+  if (message === '/' && $("chatCommands")) {
+    $("chatCommands").open = true;
+    return;
+  }
+  const command = composerCommand(message);
+  if (stoppingBusy || (requestBusy || modelSwitchBusy) && !command?.interrupt) return;
+  if (!token) {
+    requirePair(() => $("messageInput").focus());
+    return;
+  }
+  try {
+    if (command) await runComposerCommand(command, { fromComposer: true });
+    else await sendChatMessage(message);
+  } catch (error) { toast(error.message, true); }
 });
 $("messageInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -1745,7 +1804,9 @@ $("messageInput").addEventListener("input", () => {
   $("messageInput").style.height = "auto";
   $("messageInput").style.height =
     `${Math.min($("messageInput").scrollHeight, 180)}px`;
+  renderSendButton();
 });
+mountChatCommands({ document, input: $("messageInput"), panel: $("chatCommands"), choices: $("chatCommandChoices") });
 document.querySelectorAll("[data-prompt]").forEach((button) =>
   button.addEventListener("click", () => {
     $("messageInput").value = button.dataset.prompt;
@@ -2646,10 +2707,22 @@ $("exportPackForm").addEventListener("submit", (event) => {
     );
   });
 });
+function renderSendButton() {
+  const held = !!(state.agent?.locked || state.agent?.maintenancePending);
+  const dormant = cognition().mode === "dormant";
+  const command = composerCommand($("messageInput").value);
+  const nativeControl = command?.path === '/api/openclaw/command';
+  const blockedByHold = held && !dormant && !nativeControl;
+  const button = $("sendButton");
+  button.disabled = stoppingBusy || (requestBusy && !command?.interrupt) ||
+    (!command && nativeMediaComposer?.snapshot().uploading === true) || blockedByHold;
+  button.title = blockedByHold ? "Review the native recovery hold before continuing" : command ? "Run chat command" : "Send message";
+  button.setAttribute('aria-label', command ? "Run chat command" : "Send message");
+}
 function renderOperationControls() {
   const held = !!(state.agent?.locked || state.agent?.maintenancePending);
   const dormant = cognition().mode === "dormant";
-  $("sendButton").disabled = requestBusy || nativeMediaComposer?.snapshot().uploading === true || (held && !dormant);
+  renderSendButton();
   $("newAgentButton").disabled = requestBusy;
   for (const selector of ['#genesisForm button[type="submit"]', '#modelForm button[type="submit"]',
     '#continuumForm button[type="submit"]', '#ingestForm button[type="submit"]', '#saveFork', '#flushContinuum']) {
@@ -2660,7 +2733,6 @@ function renderOperationControls() {
   document.querySelectorAll(".faculty-card").forEach((card) => {
     if (card.tagName === "BUTTON") card.disabled = requestBusy || cognitionBusy;
   });
-  $("sendButton").title = held && !dormant ? "Review the native recovery hold before continuing" : "Send message";
   $("cognitionForm").querySelectorAll("input,button").forEach(control => {
     control.disabled = requestBusy || cognitionBusy;
   });
@@ -2733,20 +2805,11 @@ async function start() {
   setupWizard.start();
   setInterval(refreshState, 10000);
 }
-const nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, isConnected: () => !!token, onClose: renderState,
-  executeCommand: async command => {
-    const result = await api('/api/openclaw/command', { command });
-    if (result.state) applyState(result.state);
-    if (result.kind === 'turn') {
-      nativePanel.close();
-      $("messageInput").value = command;
-      $("chatForm").requestSubmit();
-    } else if (result.action === 'model') openModel();
-    else if (result.action === 'config') nativePanel.open();
-    else if (result.action === 'stop') chatController?.abort();
-    return result;
-  },
+nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, isConnected: () => !!token, onClose: renderState,
+  executeCommand: command => runComposerCommand(composerCommand(command)),
 });
+agentSkills = mountAgentSkills({ document, api, connected: () => !!token && state.executionRuntime?.backend === 'openclaw',
+  agentId: () => state.agent?.id || null });
 nativeMediaComposer = mountNativeMediaComposer({ document, button: $("attachMedia"), input: $("nativeMediaFiles"), notice: $("nativeMediaNotice"), queueMount: $("nativeAttachmentQueue"), api,
   context: () => `${token}:${agentId()}:${state.provider?.provider}:${state.provider?.tier}:${state.provider?.model}`,
   provider: () => token && state.agent ? state.provider : { configured: false }, isBusy: () => requestBusy || modelSwitchBusy,
