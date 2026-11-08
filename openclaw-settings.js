@@ -1,7 +1,7 @@
 import { chatToolAccess, chatToolActivity, hostToolChoices } from './chat-tools.js';
 
 const pretty = value => JSON.stringify(value ?? null, null, 2);
-const nativeUtilityModelNotice = 'Automatic native metadata utilities are off by default. Explicitly configuring agents.defaults.utilityModel requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms, even while chat uses Free models. The shared free-tier key is not supplied. These metadata-only calls have no action tools; agent answers and actions retain canonical PoI review.';
+const nativeUtilityModelNotice = 'Automatic native metadata utilities are off by default. Explicitly configuring agents.defaults.utilityModel requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms. These metadata-only calls have no action tools. Agent answers and actions retain canonical PoI review.';
 const nativeQueuePolicyNotice = 'ChainChat frontend messages use followup: each request keeps its own identity and PoI review, with commitment following the selected Timechain block policy. Native /queue preferences apply to other native events and channel inputs; frontend requests stay separate.';
 export function nativeCommandDescription(item = {}) {
   const original = `${String(item.description || '')}${item.mode ? ` · ${item.mode}` : ''}`;
@@ -382,7 +382,7 @@ export function nativeSecretView(value) {
 }
 export function nativeSecretPayload({ name, target, value }, view) {
   if (!nativeSecretName(name) || !nativeSecretView(view).targets.some(row => row.target === target) ||
-      typeof value !== 'string' || !value.length || new TextEncoder().encode(value).length > 16384 || value.includes('\0') || value === 'chainchat-free-tier')
+      typeof value !== 'string' || !value.length || new TextEncoder().encode(value).length > 16384 || value.includes('\0'))
     throw new Error('Choose a configured native target, a binding name and a dedicated credential.');
   return { action: 'set', name, target, value };
 }
@@ -390,7 +390,7 @@ export function mountNativeSecretCard({ document: doc, mount, api, context = () 
   const make = (tag, text = '', className = '') => { const node = doc.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
   const card = make('section', '', 'native-card native-secret-card'); card.append(make('h2', 'Dedicated native service credentials'));
   card.append(make('p', 'Add a dedicated credential for a configured native TTS provider. Credentials are stored in a local owner-protected plaintext file, not an encrypted vault. Only allowlisted secret references appear in native settings; the local app supplies values to its managed native process.', 'fine-print'));
-  card.append(make('p', 'Choose targets discovered from the native configuration. Set or remove restarts the managed runtime and cancels dynamic runs; finish the current primary turn first. Model API keys and the shared free-tier credential are not reused here.', 'fine-print'));
+  card.append(make('p', 'Choose targets discovered from the native configuration. Setting or removing a credential restarts the managed runtime and cancels dynamic runs, so finish the current primary turn first. Each target uses its own credential.', 'fine-print'));
   const status = make('p', '', 'native-capability-status'); status.id = 'nativeSecretsStatus'; status.setAttribute('role', 'status');
   const refresh = make('button', 'Refresh native credential targets', 'secondary-button'); refresh.type = 'button'; refresh.id = 'refreshNativeSecrets';
   const form = make('form'); form.id = 'nativeSecretForm';

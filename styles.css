@@ -3076,11 +3076,10 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
 }
 
 .model-selector-modal { max-width: 700px; }
-.model-tier-tabs { display: flex; gap: 8px; margin: 22px 0 16px; }
-.model-tier-tabs button { flex: 1; border: 1px solid var(--line-light); background: var(--panel-2); color: var(--muted); padding: 13px 10px; font-size: 10px; }
-.model-tier-tabs button[aria-selected="true"] { color: var(--text); border-color: var(--accent); }
+.model-catalogue-panel { margin-top: 22px; }
+.model-catalogue-panel h3 { font-size: 13px; }
 .model-catalogue-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.model-catalogue-heading p, .model-tier-notice { font-size: 10px; line-height: 1.8; color: var(--muted); }
+.model-catalogue-heading p, .model-connection-notice { font-size: 10px; line-height: 1.8; color: var(--muted); }
 .model-catalogue-heading button { flex-shrink: 0; font-size: 9px; }
 .model-search { margin-bottom: 10px; }
 .model-catalogue-list { display: grid; gap: 8px; max-height: 280px; overflow: auto; scrollbar-width: thin; padding: 2px; }
@@ -3098,8 +3097,6 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
 .model-connection-fields summary { font-size: 11px; cursor: pointer; line-height: 1.8; margin-bottom: 17px; }
 .model-key-status { color: var(--text); font-size: 9px; }
 @media (max-width: 700px) {
-  .model-tier-tabs { gap: 5px; }
-  .model-tier-tabs button { font-size: 9px; padding: 12px 8px; }
   .model-catalogue-heading { gap: 10px; }
   .model-catalogue-heading p { font-size: 8px; }
 }

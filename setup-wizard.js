@@ -35,8 +35,8 @@ export function setupCheckRows(report) {
       checks.runtime?.reason === 'RUNTIME_UNHEALTHY' ? 'Runtime health needs attention — reopen ChainChat'
         : checks.runtime?.running === true ? 'Running' : 'Runtime stopped — reopen ChainChat'],
     ['Model selected', checks.model?.ready === true,
-      checks.model?.availability === 'unavailable' ? 'Free model currently unavailable — choose another model'
-        : checks.model?.configured === true ? `${text(checks.model.model)} · credentials not tested yet` : 'Connect a model'],
+      checks.model?.ready !== true ? 'Check your model connection or choose another model'
+        : `${text(checks.model.model)} · credentials not tested yet`],
     ['Timechain integrity', checks.timechain?.ready === true,
       checks.timechain?.error === 'CHAIN_LOCKED' ? 'Recovery hold — review agent state in runtime settings'
         : checks.timechain?.error === 'CHAIN_PAUSED' ? 'Chain paused — resume it before using active memory'
@@ -79,7 +79,7 @@ export function mountSetupWizard({ document: doc, snapshot, api, actions, defer 
     $('setupLocalStatus').textContent = current.connected ? 'Installed app connected ✓'
       : current.local ? 'Open ChainChat from its application launcher to connect securely.' : 'Download the installer for your computer to begin.';
     $('setupModelStatus').textContent = current.connected && current.state?.provider?.configured
-      ? `Selected: ${text(current.state.provider.model)}` : 'Choose an available free model, your own API connection, or native OpenClaw sign-in.';
+      ? `Selected: ${text(current.state.provider.model)}` : 'Connect your own API provider or use native OpenClaw sign-in.';
     $('setupModelAction').disabled = !current.connected || busy;
     for (const id of ['setupNewChain', 'setupExistingChain', 'setupSelectSaved']) $(id).disabled = !current.connected || busy;
     $('setupChainStatus').textContent = current.connected && current.state?.agent
@@ -104,7 +104,7 @@ export function mountSetupWizard({ document: doc, snapshot, api, actions, defer 
     $('setupReadyTitle').textContent = progress.ready ? 'Your chat is ready to try.' : 'Let’s verify your setup.';
     $('setupReadyNote').textContent = progress.ready
       ? 'The local app, Timechain and PoI checks passed. Your first message will test provider access and answer review; provider limits or credentials can still need attention.'
-      : 'This check makes no model call and has no API charge. It checks configuration, current shared-free availability, chain integrity and PoI.';
+      : 'This check makes no model call and has no API charge. It checks model configuration, chain integrity and PoI.';
     $('setupPausedNote').hidden = report?.memoryPaused !== true;
     const list = $('setupCheckList'); list.replaceChildren();
     if (report) for (const row of setupCheckRows(report)) {
@@ -135,7 +135,7 @@ export function mountSetupWizard({ document: doc, snapshot, api, actions, defer 
       if (!active || id !== request || expected !== setupContext(snapshot())) return;
       if (result?.version !== 1 || typeof result.setupReady !== 'boolean') throw new Error('Invalid readiness response');
       const current = snapshot().state, model = current?.provider;
-      const tier = model?.provider === 'native' ? 'native' : model?.tier === 'free' ? 'free' : 'byok';
+      const tier = model?.provider === 'native' ? 'native' : 'byok';
       if (result.checks?.timechain?.agentId !== current?.agent?.id
         || result.checks?.timechain?.verified === true && result.checks.timechain.headHash !== current?.agent?.head?.hash
         || result.checks?.model?.model !== model?.model

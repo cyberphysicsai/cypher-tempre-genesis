@@ -1,11 +1,11 @@
 import { initMotifs } from "./motifs.js";
 import { initThemes } from "./themes.js";
 import { initFontModes } from "./font-modes.js";
-import { modelChoiceAction, mountNativeModelPicker } from "./model-catalogue.js";
+import { mountNativeModelPicker } from "./model-catalogue.js";
 import { mountNativeAuth } from "./native-auth.js";
 import { mountNativeMediaComposer, nativeChatPayload, nativeHistoryMedia, nativeMessageMedia, renderNativeMedia } from "./native-media.js";
 import { mergeHistoryMessages } from "./native-history.js";
-import { blockHeight, supportedBridgeVersion, modelCatalogueView, modelSwitchPayload } from "./chainchat-display.js";
+import { blockHeight, supportedBridgeVersion, modelCatalogueView, modelSwitchPayload, providerConnectionView } from "./chainchat-display.js";
 import {
   DEFAULT_COGNITION, normalizeCognition, normalizeActivity,
   abilityIndicators, facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
@@ -30,7 +30,7 @@ const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
 let auditedAgent = null;
 let modelCatalogue = null, modelCatalogueLoading = false, modelSwitchBusy = false,
-  modelCatalogueRevision = 0, selectedModelTier = 'byok', modelCatalogueError = '', lastByokDetails = null, nativeModelPicker = null, nativeAuthControls = null;
+  modelCatalogueRevision = 0, modelCatalogueError = '', lastByokDetails = null, nativeModelPicker = null, nativeAuthControls = null;
 let nativeMediaComposer = null, messageMediaDisposers = [];
 let setupWizard = null, setupSessionGeneration = 0;
 let nativePanel = null, agentSkills = null;
@@ -408,6 +408,7 @@ function applyState(result) {
   }
   if (next.agent !== undefined || next.agents !== undefined) {
     state = { ...state, ...next };
+    state.provider = providerConnectionView(state.provider);
     if (executionRuntime) state.executionRuntime = executionRuntime;
     state.settings = {
       ...DEFAULT_SETTINGS,
@@ -893,11 +894,11 @@ function renderState() {
     : "Install & open";
   $("modelLabel").textContent =
     paired && state.provider?.configured
-      ? `${state.provider.tier === 'free' ? 'Free · ' : ''}${state.provider.model}`
+      ? state.provider.model
       : "Connect a model";
   $("modelButton").title = state.provider?.configured
     ? `${state.provider.provider} · ${state.provider.model}`
-    : "Choose an API model or the free tier when available";
+    : "Connect your API provider or choose a local OpenClaw model";
   $("agentName").textContent =
     paired && agent
       ? agent.name || agent.genesis?.payload?.name || "Cypher agent"
@@ -1259,7 +1260,7 @@ function clearLocalSession() {
   runtimeHealthDisplay.reset();
   setupSessionGeneration++;
   modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false; modelSwitchBusy = false;
-  modelCatalogueError = ''; selectedModelTier = 'byok'; lastByokDetails = null;
+  modelCatalogueError = ''; lastByokDetails = null;
   pendingAction = null;
   state = {
     agent: null,
@@ -1303,7 +1304,7 @@ $("disconnectModel").addEventListener("click", async () => {
   try {
     const result = await api("/api/provider", { disconnect: true });
     chatController?.abort();
-    state.provider = result.provider || { configured: false };
+    state.provider = providerConnectionView(result.provider);
     modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false; lastByokDetails = null;
     $("apiKey").value = "";
     $("modelId").value = "";
@@ -1327,7 +1328,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 0.10.3 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 1.0.0 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     setupSessionGeneration++;
@@ -1402,85 +1403,47 @@ $("agentSelectButton").addEventListener("click", () =>
   requirePair(() => $("agentChoices").classList.toggle("hidden")),
 );
 function rememberByokProvider(provider) {
-  if (!provider?.configured || provider.tier === 'free' || !['openai', 'anthropic', 'gemini', 'compatible'].includes(provider.provider)) return;
+  if (!provider?.configured || !['openai', 'anthropic', 'gemini', 'compatible'].includes(provider.provider)) return;
   lastByokDetails = Object.fromEntries(['provider', 'model', 'baseUrl', 'reasoningCapable', 'contextWindow', 'maxOutputTokens', 'configured', 'tier']
     .filter(key => provider[key] !== undefined).map(key => [key, provider[key]]));
 }
 function renderModelCatalogue() {
-  const view = modelCatalogueView(modelCatalogue), tier = view.tiers.find(item => item.id === selectedModelTier);
+  const { active, tiers: [connection] } = modelCatalogueView(modelCatalogue);
   const query = $("modelCatalogueSearch").value.trim().toLowerCase();
-  const shown = tier.models.filter(model => `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(query));
+  const shown = connection.models.filter(model => `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(query));
   const list = $("modelCatalogueList"); list.replaceChildren();
-  for (const tab of document.querySelectorAll('[data-model-tier]')) {
-    const selected = tab.dataset.modelTier === selectedModelTier;
-    tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1;
-    tab.disabled = modelSwitchBusy;
-  }
-  $("modelCataloguePanel").setAttribute('aria-labelledby', selectedModelTier === 'free' ? 'modelTierFree' : 'modelTierByok');
-  $("modelCatalogueStatus").textContent = modelCatalogueLoading ? 'Checking advertised model availability…'
-    : modelCatalogueError || `${shown.length} of ${tier.models.length} advertised models · ${tier.label}`;
-  $("modelTierNotice").textContent = tier.notice || (selectedModelTier === 'free'
-    ? 'Free models — when available. Availability must be confirmed by the local app; no paid fallback is selected here.'
-    : 'Connect your API provider below. If it has no model-list endpoint, use its exact model ID with the current connection.');
-  if (!tier.models.length) list.append(el('p', 'fine-print', selectedModelTier === 'free'
-    ? 'No available free models are currently advertised.' : 'No model list is currently available. Manual API setup remains available below.'));
+  $("modelCatalogueStatus").textContent = modelCatalogueLoading ? 'Checking models from your API provider…'
+    : modelCatalogueError || `${shown.length} of ${connection.models.length} provider models`;
+  $("modelConnectionNotice").textContent = connection.notice ||
+    'Connect your API provider below. If it has no model-list endpoint, use its exact model ID with the current connection.';
+  if (!connection.models.length) list.append(el('p', 'fine-print', 'No provider model list is currently available. You can enter a model ID below.'));
   else if (!shown.length) list.append(el('p', 'fine-print', 'No models match this search.'));
   for (const model of shown) {
-    const ownFree = selectedModelTier === 'free' && model.access === 'byok';
-    const active = state.provider?.configured && view.active?.tier === (ownFree ? 'byok' : selectedModelTier) && view.active.model === model.id && (!ownFree || model.connectionReady);
-    const button = el('button', `model-choice${active ? ' selected' : ''}`); button.type = 'button';
+    const selected = state.provider?.configured && active?.tier === 'byok' && active.model === model.id;
+    const button = el('button', `model-choice${selected ? ' selected' : ''}`); button.type = 'button';
     button.disabled = !model.available || modelCatalogueLoading || modelSwitchBusy || requestBusy;
-    button.setAttribute('aria-label', `${active ? 'Active' : 'Use'} ${model.name}${model.available ? '' : ' · unavailable'}`);
-    button.setAttribute('aria-pressed', String(active));
-    const heading = el('span', 'model-choice-heading'); heading.append(el('strong', '', model.name), el('small', '', active ? 'ACTIVE' : !model.available ? 'UNAVAILABLE' : ownFree ? model.connectionReady ? 'YOUR KEY · SELECT' : 'YOUR KEY · CONNECT' : selectedModelTier === 'free' ? 'SHARED · SELECT' : 'SELECT'));
+    button.setAttribute('aria-label', `${selected ? 'Active' : 'Use'} ${model.name}${model.available ? '' : ' · unavailable'}`);
+    button.setAttribute('aria-pressed', String(selected));
+    const heading = el('span', 'model-choice-heading'); heading.append(el('strong', '', model.name), el('small', '', selected ? 'ACTIVE' : !model.available ? 'UNAVAILABLE' : 'SELECT'));
     button.append(heading, el('span', 'model-choice-id', model.id));
     const limits = [model.contextWindow ? `${model.contextWindow.toLocaleString()} context` : '', model.maxOutputTokens ? `${model.maxOutputTokens.toLocaleString()} output` : '', model.reasoningCapable ? 'Reasoning settings supported' : ''].filter(Boolean);
     if (limits.length) button.append(el('span', 'model-choice-details', limits.join(' · ')));
-    if (!model.available) button.append(el('span', 'model-choice-reason', model.reason || tier.notice || 'Not currently available.'));
+    if (!model.available) button.append(el('span', 'model-choice-reason', model.reason || connection.notice || 'Not currently available.'));
     if (model.privacyNotice) button.append(el('span', 'model-choice-privacy', model.privacyNotice));
-    button.addEventListener('click', () => { void chooseCatalogueModel(model, selectedModelTier); });
+    button.addEventListener('click', () => { void switchModel(model.id); });
     list.append(button);
   }
-  const byok = selectedModelTier === 'byok';
-  $("restoreByokModel").classList.toggle('hidden', !byok || !tier.available || !['free', 'native'].includes(view.active?.tier));
+  $("restoreByokModel").classList.toggle('hidden', !connection.available || active?.tier === 'byok');
   $("restoreByokModel").disabled = modelCatalogueLoading || modelSwitchBusy || requestBusy;
-  $("modelCustomSwitch").classList.toggle('hidden', !byok);
-  $("modelCustomId").disabled = !byok || !tier.available || modelCatalogueLoading || modelSwitchBusy || requestBusy;
+  $("modelCustomId").disabled = !connection.available || modelCatalogueLoading || modelSwitchBusy || requestBusy;
   $("switchCustomModel").disabled = $("modelCustomId").disabled;
-  $("byokConnectionFields").classList.toggle('hidden', !byok);
-  $("byokConnectionFields").disabled = !byok || modelSwitchBusy;
+  $("byokConnectionFields").disabled = modelSwitchBusy;
   $("refreshModelCatalogue").disabled = modelCatalogueLoading || modelSwitchBusy;
-  $("modelPrivacyNotice").textContent = byok ? 'Switching uses your current private API connection. Changing a provider or endpoint requires the connection form.'
-    : 'Shared models use the hosted relay. OpenRouter entries use your own key and go directly to that provider; quotas and privacy policies apply. No paid fallback is selected.';
   $("modelKeyStatus").textContent = lastByokDetails?.configured
     ? lastByokDetails.provider === 'compatible' ? 'Provider connection active' : 'API key connected' : '';
   nativeModelPicker?.sync();
   nativeAuthControls?.sync();
   nativeMediaComposer?.sync();
-}
-async function chooseCatalogueModel(model, tier) {
-  if (modelSwitchBusy || requestBusy) return;
-  let action;
-  try { action = modelChoiceAction(model, tier); }
-  catch (error) { $("modelForm").querySelector('.dialog-error').textContent = error.message; return; }
-  if (action.kind === 'switch') { await switchModel(action.tier, action.model); return; }
-  // Preparing a different service never sends or reuses the current provider's key.
-  selectedModelTier = 'byok';
-  $("provider").value = action.preset.provider;
-  $("baseUrl").value = action.preset.baseUrl;
-  $("modelId").value = action.preset.model;
-  $("modelCustomId").value = action.preset.model;
-  $("reasoningCapable").checked = action.preset.reasoningCapable;
-  $("modelContextWindow").value = '';
-  $("modelOutputLimit").value = '';
-  $("apiKey").value = '';
-  $("byokManualDetails").open = true;
-  updateProviderPlaceholder();
-  $("apiKey").required = true;
-  $("apiKey").placeholder = 'Enter your own OpenRouter API key';
-  renderModelCatalogue();
-  $("modelForm").querySelector('.dialog-error').textContent = 'Enter your own OpenRouter key and connect. Your existing provider key is not copied or sent.';
-  $("apiKey").focus();
 }
 async function refreshModelCatalogue(force = false) {
   if (!token || modelSwitchBusy) return;
@@ -1504,18 +1467,18 @@ async function refreshModelCatalogue(force = false) {
     if (owner === token && revision === modelCatalogueRevision) { modelCatalogueLoading = false; renderModelCatalogue(); }
   }
 }
-async function switchModel(tier, model) {
+async function switchModel(model) {
   if (requestBusy || modelSwitchBusy) { toast('Finish or stop the current operation before switching models.'); return; }
   const errors = $("modelForm").querySelector('.dialog-error'); errors.textContent = '';
   let payload;
-  try { payload = modelSwitchPayload(modelCatalogue, tier, model); }
+  try { payload = modelSwitchPayload(modelCatalogue, model); }
   catch (error) { errors.textContent = error.message; return; }
   const owner = token, revision = ++modelCatalogueRevision;
   modelSwitchBusy = true; modelCatalogueLoading = false; $("apiKey").value = ''; renderModelCatalogue();
   try {
     const result = await api('/api/model', payload);
     if (owner !== token || revision !== modelCatalogueRevision) return;
-    state.provider = result.provider || { configured: false };
+    state.provider = providerConnectionView(result.provider);
     rememberByokProvider(state.provider);
     if (result.active) modelCatalogue = modelCatalogueView({ ...modelCatalogue, active: result.active });
     renderState(); closeDialog('modelDialog'); toast('Model switched. Your Timechain stays the same.');
@@ -1526,7 +1489,7 @@ async function switchModel(tier, model) {
 }
 function openModel() {
   rememberByokProvider(state.provider);
-  const provider = ['free', 'native'].includes(state.provider?.tier) || state.provider?.provider === 'native' ? lastByokDetails || {} : state.provider || {};
+  const provider = state.provider?.configured && state.provider.provider !== 'native' ? state.provider : lastByokDetails || {};
   $("provider").value = ['openai', 'anthropic', 'gemini', 'compatible'].includes(provider.provider) ? provider.provider : 'openai';
   $("modelId").value = provider.model || "";
   $("baseUrl").value = provider.baseUrl || "";
@@ -1538,7 +1501,6 @@ function openModel() {
   nativeAuthControls?.reset({ cancel: true });
   $("modelCustomId").value = provider.model || '';
   $("modelCatalogueSearch").value = '';
-  selectedModelTier = state.provider?.tier === 'free' ? 'free' : 'byok';
   $("byokManualDetails").open = !provider.configured;
   updateProviderPlaceholder();
   renderOperationControls();
@@ -1563,24 +1525,11 @@ nativeAuthControls = mountNativeAuth({ document, mount: $("nativeModelPickerMoun
   openSettings() { setupWizard?.dismiss(); closeDialog('modelDialog'); nativePanel.open('configuration'); $("nativeSchemaSearch").value = 'models.providers'; $("nativeSchemaSearch").dispatchEvent(new Event('input')); },
 });
 $("modelButton").addEventListener("click", () => requirePair(openModel));
-const modelTierTabs = [...document.querySelectorAll('[data-model-tier]')];
-function selectModelTier(tab) {
-  selectedModelTier = tab.dataset.modelTier; $("apiKey").value = ''; $("modelCatalogueSearch").value = '';
-  $("modelForm").querySelector('.dialog-error').textContent = ''; renderModelCatalogue();
-}
-for (const tab of modelTierTabs) {
-  tab.addEventListener('click', () => selectModelTier(tab));
-  tab.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || modelSwitchBusy) return;
-    event.preventDefault(); const index = event.key === 'Home' ? 0 : event.key === 'End' ? modelTierTabs.length - 1 : (modelTierTabs.indexOf(tab) + 1) % modelTierTabs.length;
-    selectModelTier(modelTierTabs[index]); modelTierTabs[index].focus();
-  });
-}
 $("modelCatalogueSearch").addEventListener('input', renderModelCatalogue);
 $("refreshModelCatalogue").addEventListener('click', () => { void refreshModelCatalogue(true); });
-$("switchCustomModel").addEventListener('click', () => { void switchModel('byok', $("modelCustomId").value); });
-$("restoreByokModel").addEventListener('click', () => { void switchModel('byok'); });
-$("modelCustomId").addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); void switchModel('byok', $("modelCustomId").value); } });
+$("switchCustomModel").addEventListener('click', () => { void switchModel($("modelCustomId").value); });
+$("restoreByokModel").addEventListener('click', () => { void switchModel(); });
+$("modelCustomId").addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); void switchModel($("modelCustomId").value); } });
 function updateProviderPlaceholder() {
   const provider = $("provider").value;
   const bases = {
@@ -1606,7 +1555,7 @@ $("provider").addEventListener("change", () => {
 });
 $("modelForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  if (selectedModelTier !== 'byok' || modelSwitchBusy) return;
+  if (modelSwitchBusy) return;
   runForm(event.currentTarget, async () => {
     let data;
     try {

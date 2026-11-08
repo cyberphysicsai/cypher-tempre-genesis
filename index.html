@@ -110,7 +110,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v0.10.3</span>
+        ><span class="mono" id="appVersion">v1.0.0</span>
       </div>
       <div class="top-actions">
         <button class="quiet-button setup-guide-button" id="setupGuideButton" type="button">Setup guide</button>
@@ -431,7 +431,7 @@
       <legend class="sr-only">Authenticated native configuration</legend>
       <section data-native-section="configuration">
         <p id="nativeQueuePolicyNotice" class="info-box fine-print">ChainChat frontend messages use <code>followup</code>: each request keeps its own identity and PoI review, with commitment following the selected Timechain block policy. Native <code>/queue</code> preferences apply to other native events and channel inputs; frontend requests stay separate.</p>
-        <p id="nativeUtilityModelNotice" class="info-box fine-print">Automatic native metadata utilities are off by default. Explicitly configuring <code>agents.defaults.utilityModel</code> requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms, even while chat uses Free models. The shared free-tier key is not supplied. These metadata-only calls have no action tools; agent answers and actions retain canonical PoI review.</p>
+        <p id="nativeUtilityModelNotice" class="info-box fine-print">Automatic native metadata utilities are off by default. Explicitly configuring <code>agents.defaults.utilityModel</code> requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms. These metadata-only calls have no action tools. Agent answers and actions retain canonical PoI review.</p>
         <div class="native-card native-family-card"><h3>Configuration families</h3><p>Browse the complete native schema. Managed families stay visible with the reason they require their dedicated control or local operator.</p><div id="nativeConfigFamilies" class="native-config-families" aria-label="Native configuration families"></div><p id="nativeFamilyNotice" class="native-family-notice" role="status">Connect the local app to load its exact OpenClaw schema.</p></div>
         <div class="native-card"><h2>Native configuration</h2><p>Edit a JSON settings overlay against OpenClaw's own schema. Provider keys stay in the model connection panel. Required PoI and private-service settings remain managed.</p><label class="field">Settings overlay<textarea id="nativeConfigEditor" rows="13" spellcheck="false" autocomplete="off">{}</textarea></label><div class="native-actions"><button id="saveNativeConfig" class="primary-button" type="button">Validate & apply settings</button><button id="refreshNativeControls" class="secondary-button" type="button" title="Reloading replaces unapplied editor contents">Reload saved settings</button></div><p id="nativeConfigNotice" class="fine-print"></p><details><summary>Operator-protected settings and reasons</summary><pre id="nativeProtectedPaths"></pre></details></div>
         <div class="native-card"><h2>OpenClaw settings reference</h2><label class="field">Find a setting<input id="nativeSchemaSearch" type="search" placeholder="messages.queue, session, agents.defaults…" autocomplete="off"></label><div id="nativeSchemaFields" class="native-schema-list"></div><details><summary>Full native schema</summary><pre id="nativeSchemaJson"></pre></details><details><summary>Current native configuration (credentials redacted)</summary><pre id="nativeEffectiveConfig"></pre></details></div>
@@ -553,7 +553,7 @@
 
     <section class="beta-access" aria-labelledby="betaTitle">
       <div>
-        <span class="eyebrow">CYPHER TEMPRE CHAINCHAT / LIVE BETA</span>
+        <span class="eyebrow">CYPHER TEMPRE CHAINCHAT</span>
         <h2 id="betaTitle">Your agent. Your machine.</h2>
         <p>Launch ChainChat, choose your API model, and create a genesis or select an existing Timechain.</p>
         <p class="fine-print">Your agent runs locally. Its model connection and Timechain stay under your control.</p>
@@ -561,13 +561,13 @@
       <div class="beta-actions">
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.0/CypherTempre-ChainChat-Setup-1.0.0-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
         >
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-macos.zip" rel="noopener noreferrer">Install for macOS</a>
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.0/CypherTempre-ChainChat-Setup-1.0.0-macos.zip" rel="noopener noreferrer">Install for macOS</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.0/CypherTempre-ChainChat-Setup-1.0.0-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
     </section>
@@ -637,7 +637,7 @@
         <h3 id="setupModelTitle">Choose how your agent thinks.</h3>
         <p id="setupModelStatus" class="info-box" role="status"></p>
         <button id="setupModelAction" type="button" class="primary-button">Choose or connect a model →</button>
-        <p class="fine-print">Shared free models, when available, need no personal API key. Some provider-listed free models require your own key. You can also bring your own API or use native OpenClaw sign-in. Direct keys stay in local app memory; native sign-in can save credentials privately on your computer. Selected context goes to your chosen provider for inference and review.</p>
+        <p class="fine-print">Connect your own API provider or use native OpenClaw sign-in. Direct keys stay in local app memory. Native sign-in can save credentials privately on your computer. Selected context goes to your chosen provider for inference and review.</p>
       </section>
       <section data-setup-panel="2" class="setup-step-panel" aria-labelledby="setupChainTitle" hidden>
         <h3 id="setupChainTitle">Give your agent a continuous history.</h3>
@@ -692,9 +692,9 @@
         <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
       </ol>
       <div class="platform-downloads">
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/proof-of-interaction/releases/download/chat-beta-v0.10.3/CypherTempre-ChainChat-Setup-0.10.3-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.0/CypherTempre-ChainChat-Setup-1.0.0-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.0/CypherTempre-ChainChat-Setup-1.0.0-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.0/CypherTempre-ChainChat-Setup-1.0.0-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
       </div>
       <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
       <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>
@@ -886,20 +886,16 @@
         <h2>Choose your model.</h2>
         <p>Switch models without changing your agent or its saved Timechain.</p>
         <section id="nativeModelPickerMount" class="native-model-picker" aria-label="Native OpenClaw model connection"></section>
-        <div class="model-tier-tabs" role="tablist" aria-label="Model source">
-          <button id="modelTierByok" type="button" role="tab" data-model-tier="byok" aria-selected="true" aria-controls="modelCataloguePanel">Your API connection</button>
-          <button id="modelTierFree" type="button" role="tab" data-model-tier="free" aria-selected="false" aria-controls="modelCataloguePanel">Free models — when available</button>
-        </div>
-        <section id="modelCataloguePanel" role="tabpanel" aria-labelledby="modelTierByok">
-          <div class="model-catalogue-heading"><p id="modelCatalogueStatus" role="status">Loading advertised models…</p><button id="refreshModelCatalogue" type="button" class="text-button">Refresh models</button></div>
-          <p id="modelTierNotice" class="model-tier-notice"></p>
+        <section class="model-catalogue-panel" aria-labelledby="modelCatalogueTitle">
+          <h3 id="modelCatalogueTitle">Your API connection</h3>
+          <div class="model-catalogue-heading"><p id="modelCatalogueStatus" role="status">Loading provider models…</p><button id="refreshModelCatalogue" type="button" class="text-button">Refresh models</button></div>
+          <p id="modelConnectionNotice" class="model-connection-notice"></p>
           <label class="field model-search">Find a model<input id="modelCatalogueSearch" type="search" autocomplete="off" placeholder="Model name, ID or provider"></label>
           <div id="modelCatalogueList" class="model-catalogue-list" aria-label="Model catalogue"></div>
           <button id="restoreByokModel" class="secondary-button full-width hidden" type="button">Return to saved API connection</button>
-          <div id="modelCustomSwitch" class="model-custom-switch"><label class="field">Custom model ID on your current API connection<input id="modelCustomId" maxlength="256" spellcheck="false" autocomplete="off" placeholder="Enter your provider's exact model ID"></label><button id="switchCustomModel" class="secondary-button" type="button">Use current connection</button></div>
-          <p id="modelPrivacyNotice" class="fine-print"></p>
+          <div class="model-custom-switch"><label class="field">Custom model ID on your current API connection<input id="modelCustomId" maxlength="256" spellcheck="false" autocomplete="off" placeholder="Enter your provider's exact model ID"></label><button id="switchCustomModel" class="secondary-button" type="button">Use current connection</button></div>
+          <p class="fine-print">Switching uses your current private API connection. Use the form below to change providers or endpoints.</p>
         </section>
-        <p class="fine-print">Free models are offered when available. Shared access has limits; OpenRouter entries require your own key. Your API connection remains available.</p>
         <fieldset id="byokConnectionFields" class="model-connection-fields"><legend class="sr-only">Connect your API provider</legend>
           <details id="byokManualDetails" open><summary>Connect or change your API provider</summary>
           <p id="modelKeyStatus" class="model-key-status"></p>

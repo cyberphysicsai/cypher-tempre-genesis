@@ -1,18 +1,3 @@
-/** Catalogue actions contain public model IDs and fixed presets, never API keys. */
-export function modelChoiceAction(model, tier) {
-  if (!model || model.available !== true || !['free', 'byok'].includes(tier) ||
-      typeof model.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(model.id))
-    throw new Error('Refresh the catalogue and choose an available model.');
-  if (tier === 'free' && model.access === 'byok') {
-    if (model.service !== 'openrouter') throw new Error('This model requires a supported private provider connection.');
-    if (model.connectionReady === true) return { kind: 'switch', tier: 'byok', model: model.id };
-    return { kind: 'connect', preset: { provider: 'compatible', baseUrl: 'https://openrouter.ai/api/v1', model: model.id,
-      reasoningCapable: model.reasoningCapable === true } };
-  }
-  return { kind: 'switch', tier, model: model.id };
-}
-
-
 export function nativeModelCatalogueView(value) {
   const valid = id => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(id);
   const seen = new Set(), text = (value, max = 1000) => typeof value === 'string' ? value.slice(0, max) : '';

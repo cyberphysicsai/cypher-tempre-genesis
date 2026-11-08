@@ -40,7 +40,7 @@ export function createNativeAttachmentQueue({ api, context, provider, encode = e
   function clear() { epoch++; assets = []; uploading = false; onChange(snapshot()); }
   async function upload(files) {
     sync(); if (uploading) return;
-    if (!isNative(provider())) { onError('Choose a configured native OpenClaw model before attaching files. Shared free and direct API chat do not receive these uploads.'); return; }
+    if (!isNative(provider())) { onError('Choose a configured native OpenClaw model before attaching files.'); return; }
     const selected = Array.from(files || []); let metadata;
     try {
       metadata = selected.map(nativeMediaFile);
