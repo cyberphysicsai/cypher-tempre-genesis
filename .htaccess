@@ -3,7 +3,8 @@ DirectoryIndex index.html
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteRule ^api/free-model/v1/chat/completions$ api/free-model.php [L]
+  # The hosted site is static. Keep stale API files inaccessible during deployment.
+  RewriteRule ^api(?:/|$) - [G,L,NC]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^ index.html [L]

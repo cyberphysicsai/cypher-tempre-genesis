@@ -1,7 +1,0 @@
-<IfModule LiteSpeed>
-    php_value output_buffering Off
-</IfModule>
-<IfModule mod_headers.c>
-    Header always set Cache-Control "no-store, no-transform"
-    Header always set X-Accel-Buffering "no"
-</IfModule>
