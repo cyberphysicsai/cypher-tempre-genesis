@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Sign an Emergency Halt · ChainChat</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/emergency-halt.css" />
+    <script type="module" src="/emergency-halt-sign.js"></script>
+  </head>
+  <body>
+    <main class="emergency-halt-signer">
+      <span class="eyebrow">CYPHER TEMPRE CHAINCHAT</span>
+      <h1>Sign an Emergency Halt</h1>
+      <p>Open the enrollment profile you downloaded from the installed app. This page requests a wallet signature on Base and prepares a one-use command for that installation.</p>
+      <form id="haltSignerForm">
+        <label class="field" for="haltSignerProfile">Enrollment profile JSON
+          <input id="haltSignerProfile" type="file" accept=".json,application/json" required />
+        </label>
+        <p id="haltSignerSummary" role="status"></p>
+        <div id="haltSignerCphy" hidden>
+          <label class="field" for="haltSignerTransaction">Finalized CPHY transaction hash (optional)
+            <input id="haltSignerTransaction" type="text" maxlength="66" autocomplete="off" spellcheck="false" placeholder="0x…" />
+          </label>
+          <p class="fine-print">Enter the hash only to bind the halt to a direct CPHY transfer from your enrolled wallet to the dedicated Base address. Leave it blank for a wallet-only halt.</p>
+        </div>
+        <div class="emergency-halt-actions">
+          <button class="emergency-halt-button" id="haltSignerSign" type="submit" disabled>Sign halt command</button>
+          <button class="secondary-button" id="haltSignerDownload" type="button" hidden>Download signed JSON</button>
+        </div>
+        <p id="haltSignerResult" role="status"></p>
+        <p id="haltSignerError" class="dialog-error" role="alert"></p>
+      </form>
+    </main>
+  </body>
+</html>

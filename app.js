@@ -25,6 +25,9 @@ import { mountSetupWizard } from "./setup-wizard.js";
 import { createRuntimeHealthDisplay } from "./runtime-health.js";
 import { composerCommand, mountChatCommands } from "./chat-commands.js";
 import { mountAgentSkills } from "./agent-skills.js";
+import { mountEmergencyHalt } from "./emergency-halt.js";
+import { mountTimechainBackups } from "./timechain-backup.js";
+import { mountTimechainMaintenance } from "./timechain-maintenance.js";
 const $ = (id) => document.getElementById(id);
 const localBridgePage = isLocalBridgePage(location.origin);
 let selectedBridgePort = "8790";
@@ -34,6 +37,7 @@ let modelCatalogue = null, modelCatalogueLoading = false, modelSwitchBusy = fals
 let nativeMediaComposer = null, messageMediaDisposers = [];
 let setupWizard = null, setupSessionGeneration = 0;
 let nativePanel = null, agentSkills = null;
+let emergencyHalt = null, emergencyHaltBlocksWork = false;
 const runtimeHealthDisplay = createRuntimeHealthDisplay();
 const FRUITS = [
   "Love",
@@ -267,6 +271,10 @@ async function api(path, data, options = {}) {
     if (requestToken === token && runtimeHealthDisplay.unavailable(healthRevision)) invalidateRuntimeConfirmation();
     throw new Error("The local app returned an unreadable response.");
   }
+  if (requestToken === token) {
+    const haltStatus = (result.state || result).emergencyHalt;
+    if (haltStatus) emergencyHalt?.sync(haltStatus);
+  }
   if (!response.ok) {
     const error = new Error(
       typeof result.error === "string"
@@ -300,7 +308,9 @@ function invalidateRuntimeConfirmation() {
   renderRuntimeConnection(); setupWizard?.update();
 }
 function renderRuntimeConnection() {
-  const view = runtimeHealthDisplay.view({ paired: !!token, local: localBridgePage });
+  const view = emergencyHaltBlocksWork
+    ? { online: false, label: "EMERGENCY HALT", detail: "" }
+    : runtimeHealthDisplay.view({ paired: !!token, local: localBridgePage });
   $("bridgeDot").classList.toggle("online", view.online);
   $("bridgeStatus").textContent = view.label;
   $("bridgeStatus").title = view.detail;
@@ -619,6 +629,7 @@ async function openCognition() {
     await refreshCognition();
     const current = cognition();
     for (const [id, key] of [["learningEnabled", "learning"], ["autoRoute", "autoRoute"], ["semanticRecall", "semanticRecall"], ["autoSprout", "autoSprout"], ["autoDream", "autoDream"]]) $(id).checked = current[key];
+    $("sessionAutoEquip").checked = state.sessionEquipment?.enabled === true;
     $("revisionLimit").value = current.revisionLimit;
     const result = await api("/api/capabilities");
     capabilities = Array.isArray(result.capabilities) ? result.capabilities : Array.isArray(result.items) ? result.items : [];
@@ -638,7 +649,11 @@ function isEquipped(faculty) {
   const chosen =
     state.loadout?.[faculty.kind === "modality" ? "modalities" : "senses"] ||
     [];
-  return chosen.some((id) => rawId(id) === rawId(facultyId(faculty)));
+  return isSessionEquipped(faculty) || chosen.some((id) => rawId(id) === rawId(facultyId(faculty)));
+}
+function isSessionEquipped(faculty) {
+  const field = faculty.kind === "modality" ? "modalities" : "senses";
+  return state.sessionEquipment?.[field]?.includes(facultyId(faculty)) === true;
 }
 function renderFaculties() {
   const faculties = normalizeFaculties(),
@@ -667,7 +682,8 @@ function renderFaculties() {
     : "BASE\nCATALOGUE";
   $("growthNote").textContent = state.agent
     ? cognition().mode === "dormant" ? "Timechain is paused. Equipped faculties are saved for when you resume."
-      : "Your live catalogue refreshes as this agent learns. New faculties wait for your equipment choice."
+      : state.sessionEquipment?.enabled ? "Newly promoted faculties can equip for this chat session."
+        : "Your live catalogue refreshes as this agent learns. New faculties wait for your equipment choice."
     : "Your catalogue grows as your agent learns. Pair a chain to equip faculties.";
   if (executions.length) $("growthNote").textContent += " Receipt badges describe the last chain turn; equipped does not mean running.";
   const list = $("facultyList");
@@ -724,7 +740,8 @@ function renderFaculties() {
       el(
         "span",
         "",
-        freshIds.has(facultyIdentity(faculty)) ? "NEW · " + (faculty.equippable === false ? "EMERGING" : "AVAILABLE") : selected
+        isSessionEquipped(faculty) ? "EQUIPPED FOR SESSION" :
+          freshIds.has(facultyIdentity(faculty)) ? "NEW · " + (faculty.equippable === false ? "EMERGING" : selected ? "EQUIPPED" : "AVAILABLE") : selected
           ? "EQUIPPED"
           : faculty.equippable === false
             ? "EMERGING"
@@ -759,6 +776,13 @@ async function toggleFaculty(faculty) {
     toast(
       "Your current turn is using this loadout. Change it after the turn completes.",
     );
+    return;
+  }
+  if (isSessionEquipped(faculty)) {
+    try {
+      applyState(await api("/api/loadout/session", { unequip: facultyId(faculty) }));
+      toast(`${faculty.name} unequipped for this session.`);
+    } catch (error) { toast(error.message, true); }
     return;
   }
   const kind = faculty.kind === "modality" ? "modalities" : "senses";
@@ -1257,6 +1281,7 @@ function clearLocalSession() {
   clearLocalResume(localBridgePage ? localTabStorage() : null);
   chatController?.abort();
   token = "";
+  emergencyHalt?.syncConnection();
   runtimeHealthDisplay.reset();
   setupSessionGeneration++;
   modelCatalogueRevision++; modelCatalogue = null; modelCatalogueLoading = false; modelSwitchBusy = false;
@@ -1328,7 +1353,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 1.0.3 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 1.0.4 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     setupSessionGeneration++;
@@ -1593,6 +1618,7 @@ function clearComposerDraft() {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 async function runComposerCommand(route, { fromComposer = false } = {}) {
+  if (emergencyHaltBlocksWork) throw new Error("Emergency Halt is active.");
   if (!route) throw new Error('Enter a native slash command.');
   if (!token) throw new Error('Open the installed ChainChat app to run commands.');
   if (state.executionRuntime?.backend === 'direct')
@@ -1648,6 +1674,7 @@ async function runComposerCommand(route, { fromComposer = false } = {}) {
   return result;
 }
 async function sendChatMessage(message, { fromComposer = true, command = false } = {}) {
+  if (emergencyHaltBlocksWork) throw new Error("Emergency Halt is active.");
   if (!state.agent) {
     openDialog("genesisDialog");
     throw new Error("Begin a new genesis or pair your existing agent first.");
@@ -1681,7 +1708,7 @@ async function sendChatMessage(message, { fromComposer = true, command = false }
       payload,
       { signal: chatController.signal },
     );
-    if (token !== chatSession || agentId() !== chatAgent) return;
+    if (emergencyHaltBlocksWork || token !== chatSession || agentId() !== chatAgent) return;
     if (result.state) applyState(result.state);
     const response = result.message || result;
     if (typeof response.content !== "string")
@@ -1702,6 +1729,7 @@ async function sendChatMessage(message, { fromComposer = true, command = false }
     return { kind: 'turn', text: 'Reviewed chat command completed.' };
   } catch (error) {
     if (token !== chatSession || agentId() !== chatAgent) return;
+    if (emergencyHaltBlocksWork && error.name === "AbortError") return;
     const failure = chatFailure(error);
     addMessage({
       role: "assistant",
@@ -1726,6 +1754,7 @@ async function sendChatMessage(message, { fromComposer = true, command = false }
 }
 $("chatForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (emergencyHaltBlocksWork) return;
   const message = $("messageInput").value.trim();
   if (!message) return;
   if (message === '/' && $("chatCommands")) {
@@ -2207,6 +2236,24 @@ $("cognitionForm").addEventListener("submit", event => {
     toast("Cognition settings saved for this agent.");
   });
 });
+$("sessionAutoEquip").addEventListener("change", async event => {
+  const toggle = event.currentTarget;
+  const previous = state.sessionEquipment?.enabled === true;
+  if (requestBusy || cognitionBusy) {
+    toggle.checked = previous;
+    toast("Change session equipment after the current turn.");
+    return;
+  }
+  toggle.disabled = true;
+  try {
+    applyState(await api("/api/loadout/session", { enabled: toggle.checked }));
+    toast(state.sessionEquipment?.enabled ? "Newly promoted faculties can equip for this session." : "Session equipment cleared.");
+  } catch (error) { toast(error.message, true); }
+  finally {
+    toggle.checked = state.sessionEquipment?.enabled === true;
+    toggle.disabled = false;
+  }
+});
 
 $("toggleChainMode").addEventListener("click", async () => {
   if (cognition().mode !== "dormant") {
@@ -2663,9 +2710,10 @@ function renderSendButton() {
   const nativeControl = command?.path === '/api/openclaw/command';
   const blockedByHold = held && !dormant && !nativeControl;
   const button = $("sendButton");
-  button.disabled = stoppingBusy || (requestBusy && !command?.interrupt) ||
+  button.disabled = emergencyHaltBlocksWork || stoppingBusy || (requestBusy && !command?.interrupt) ||
     (!command && nativeMediaComposer?.snapshot().uploading === true) || blockedByHold;
-  button.title = blockedByHold ? "Review the native recovery hold before continuing" : command ? "Run chat command" : "Send message";
+  button.title = emergencyHaltBlocksWork ? "Emergency Halt is active"
+    : blockedByHold ? "Review the native recovery hold before continuing" : command ? "Run chat command" : "Send message";
   button.setAttribute('aria-label', command ? "Run chat command" : "Send message");
 }
 function renderOperationControls() {
@@ -2730,14 +2778,16 @@ async function start() {
   }
   try {
     const status = await api("/api/status");
-    $("bridgeStatus").textContent = supportedBridgeVersion(status.version)
-      ? "CONNECTING TO LOCAL APP"
-      : "APP UPDATE REQUIRED";
+    if (!emergencyHaltBlocksWork)
+      $("bridgeStatus").textContent = supportedBridgeVersion(status.version)
+        ? "CONNECTING TO LOCAL APP"
+        : "APP UPDATE REQUIRED";
     if (status.version) $("appVersion").textContent = `v${status.version}`;
-    if (!supportedBridgeVersion(status.version)) throw new Error("Install ChainChat 1.0.3 or newer to connect automatically.");
+    if (!supportedBridgeVersion(status.version)) throw new Error("Install ChainChat 1.0.4 or newer to connect automatically.");
     const paired = await connectLocalSession({ origin: location.origin, nonce: bootstrap,
       storage: localTabStorage(), request: api });
     token = paired.token;
+    emergencyHalt?.syncConnection();
     setupSessionGeneration++;
     applyState(await api("/api/state"));
     toast("Local app session connected. Check the runtime status above.");
@@ -2757,11 +2807,32 @@ async function start() {
 nativePanel = initOpenClawSettings({ api, requireConnection: requirePair, isConnected: () => !!token, onClose: renderState,
   executeCommand: command => runComposerCommand(composerCommand(command)),
 });
+mountTimechainMaintenance({ document, api, local: localBridgePage, connected: () => !!token,
+  onChange: () => { void refreshState(); } });
 agentSkills = mountAgentSkills({ document, api, connected: () => !!token && state.executionRuntime?.backend === 'openclaw',
   agentId: () => state.agent?.id || null });
+emergencyHalt = mountEmergencyHalt({
+  document, api, local: localBridgePage, connected: () => !!token, requireConnection: requirePair,
+  onChange(blocked) {
+    emergencyHaltBlocksWork = blocked;
+    if (blocked) {
+      chatController?.abort();
+      invalidateRuntimeConfirmation();
+    } else {
+      renderRuntimeConnection();
+      void refreshState();
+    }
+    renderOperationControls();
+  },
+  onError: message => toast(message, true),
+});
+mountTimechainBackups({
+  document, local: localBridgePage, openDialog, requirePair, refreshState,
+  session: () => ({ token, agent: state.agent }),
+});
 nativeMediaComposer = mountNativeMediaComposer({ document, button: $("attachMedia"), input: $("nativeMediaFiles"), notice: $("nativeMediaNotice"), queueMount: $("nativeAttachmentQueue"), api,
   context: () => `${token}:${agentId()}:${state.provider?.provider}:${state.provider?.tier}:${state.provider?.model}`,
-  provider: () => token && state.agent ? state.provider : { configured: false }, isBusy: () => requestBusy || modelSwitchBusy,
+  provider: () => token && state.agent && !emergencyHaltBlocksWork ? state.provider : { configured: false }, isBusy: () => requestBusy || modelSwitchBusy,
   onError: message => { if (message) toast(message, true); }, onChange: () => renderOperationControls(),
 });
 window.addEventListener('pagehide', () => { nativeMediaComposer?.dispose(); for (const cleanup of messageMediaDisposers) cleanup(); messageMediaDisposers = []; });

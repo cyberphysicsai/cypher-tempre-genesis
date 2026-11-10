@@ -6,6 +6,8 @@ const STAGES = Object.freeze({
   provider: 'Provider connection', runtime: 'Local runtime', authorization: 'Authorization', cancellation: 'Cancellation',
 });
 const GROUPS = [
+  { codes: ['EMERGENCY_HALTED'], stage: 'runtime', title: 'EMERGENCY HALT ACTIVE', kind: 'cancelled',
+    message: 'ChainChat held this request. Open the installed app to verify and re-arm.', action: null },
   { codes: ['OPENCLAW_MEMORY_EXHAUSTED'], stage: 'runtime', title: 'LOCAL MEMORY EXHAUSTED', kind: 'runtime',
     message: 'The local runtime reported a memory-allocation failure. Free system memory and inspect its diagnostics before restarting. No unreviewed answer was released.', action: 'native' },
   { codes: ['OPENCLAW_PROCESS_KILLED'], stage: 'runtime', title: 'GATEWAY KILLED EXTERNALLY', kind: 'runtime',

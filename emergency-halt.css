@@ -1,0 +1,81 @@
+.emergency-halt-controls,
+.emergency-halt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.emergency-halt-button {
+  min-height: 28px;
+  padding: 4px 10px;
+  background: #73382f;
+  color: #fff;
+  border: 1px solid #d48376;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.emergency-halt-button:hover:not(:disabled) {
+  background: #91473b;
+}
+
+.emergency-halt-banner {
+  margin: 8px 16px 0;
+  padding: 9px 11px;
+  border-left: 3px solid #d48376;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.emergency-halt-dialog .emergency-halt-actions {
+  margin-block: 12px;
+}
+
+.emergency-halt-dialog details {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.emergency-halt-dialog summary {
+  cursor: pointer;
+}
+
+.emergency-halt-dialog code {
+  overflow-wrap: anywhere;
+}
+
+.emergency-halt-signer {
+  width: min(100% - 32px, 640px);
+  margin: 28px auto;
+  padding: clamp(16px, 4vw, 32px);
+  border: 1px solid var(--line-light);
+  border-radius: 10px;
+  background: var(--panel);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.emergency-halt-signer h1 {
+  font-size: clamp(1.3rem, 5vw, 1.9rem);
+  margin-block: 8px;
+}
+
+.emergency-halt-signer p {
+  margin-block: 8px;
+}
+
+.emergency-halt-signer input[type="file"] {
+  min-width: 0;
+  width: 100%;
+}
+
+.emergency-halt-controls[hidden],
+.emergency-halt-controls [hidden],
+.emergency-halt-dialog [hidden],
+.emergency-halt-signer [hidden] {
+  display: none;
+}

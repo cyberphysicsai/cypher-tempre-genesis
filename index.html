@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="/setup-wizard.css" />
     <link rel="stylesheet" href="/chat-controls.css" />
     <link rel="stylesheet" href="/font-modes.css" />
+    <link rel="stylesheet" href="/emergency-halt.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
@@ -110,7 +111,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v1.0.3</span>
+        ><span class="mono" id="appVersion">v1.0.4</span>
       </div>
       <div class="top-actions">
         <button class="quiet-button setup-guide-button" id="setupGuideButton" type="button">Setup guide</button>
@@ -178,7 +179,12 @@
           <span id="learningIndicator">LEARNING —</span>
           <button class="text-button" id="quickCognition" type="button">Controls ↗</button>
           <button class="text-button hidden" id="cancelTurn" type="button">Stop current run ■</button>
+          <div class="emergency-halt-controls" id="emergencyHaltControls" hidden>
+            <button class="emergency-halt-button" id="emergencyHaltStop" type="button">Emergency halt</button>
+            <button class="text-button" id="emergencyHaltManage" type="button" aria-haspopup="dialog">Halt settings</button>
+          </div>
         </div>
+        <p id="emergencyHaltBanner" class="emergency-halt-banner" role="status" hidden></p>
         <p id="runtimeHealthNotice" class="runtime-health-notice hidden" role="status"></p>
         <div class="conversation-scroll" id="conversationScroll">
           <section class="welcome" id="welcome">
@@ -412,6 +418,7 @@
 
     <section id="openclawPanel" class="native-workspace agent-card-section" aria-labelledby="nativeTitle">
       <div class="native-heading"><div><span class="eyebrow">02 / OPENCLAW CONTROL CENTER</span><h2 id="nativeTitle" tabindex="-1">Your runtime. In reach.</h2><p>Configure native OpenClaw below your Cypher Tempre chat.</p></div><button class="secondary-button" id="closeOpenclawPanel" type="button">Back to chat ↑</button></div>
+      <p class="native-boundary-note">Some features originate with OpenClaw for those who expect that and associate it those features with agents, copyright 2026 OpenClaw Foundation</p>
       <div class="native-connection"><p id="nativeConnection" role="status">Open your installed ChainChat app to load authenticated native controls.</p><button id="connectNativeControls" class="secondary-button" type="button">Connect local app</button></div>
       <p class="native-boundary-note">Local authentication, private credentials, required PoI enforcement and explicit tool grants remain operator-protected. Every native configuration family is discoverable in Settings; managed paths explain their restrictions.</p>
       <div class="native-tabs" role="tablist" aria-label="OpenClaw settings sections">
@@ -491,6 +498,9 @@
           ><button class="text-button" id="existingAgentButton">
             <svg><use href="#i-link" /></svg> Pair existing Timechain
           </button>
+          <button class="text-button" id="openTimechainBackup" type="button">
+            <svg><use href="#i-shield" /></svg> Backup &amp; restore
+          </button>
         </div>
         <div class="sidebar-section chain-section">
           <div class="section-caption">
@@ -523,6 +533,7 @@
           ><button class="text-button full-width" id="historyButton">
             <svg><use href="#i-blocks" /></svg> Inspect chain
           </button>
+          <button class="text-button full-width" id="openTimechainMaintenance" type="button">Advanced Timechain maintenance</button>
         </div>
         <div class="sidebar-section covenant-mini">
           <div class="section-caption">
@@ -561,13 +572,13 @@
       <div class="beta-actions">
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.3/CypherTempre-ChainChat-Setup-1.0.3-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.4/CypherTempre-ChainChat-Setup-1.0.4-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
         >
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.3/CypherTempre-ChainChat-Setup-1.0.3-macos.zip" rel="noopener noreferrer">Install for macOS</a>
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.3/CypherTempre-ChainChat-Setup-1.0.3-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.4/CypherTempre-ChainChat-Setup-1.0.4-macos.zip" rel="noopener noreferrer">Install for macOS</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.4/CypherTempre-ChainChat-Setup-1.0.4-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
     </section>
@@ -692,9 +703,9 @@
         <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
       </ol>
       <div class="platform-downloads">
-        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.3/CypherTempre-ChainChat-Setup-1.0.3-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.3/CypherTempre-ChainChat-Setup-1.0.3-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.3/CypherTempre-ChainChat-Setup-1.0.3-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.4/CypherTempre-ChainChat-Setup-1.0.4-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.4/CypherTempre-ChainChat-Setup-1.0.4-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.0.4/CypherTempre-ChainChat-Setup-1.0.4-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
       </div>
       <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
       <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>
@@ -870,6 +881,39 @@
           Verify & pair <span>↗</span>
         </button>
       </form>
+    </dialog>
+    <dialog id="timechainBackupDialog" class="modal compact-modal" aria-labelledby="timechainBackupTitle">
+      <div class="dialog-top">
+        <span class="eyebrow">TIMECHAIN / BACKUP &amp; RESTORE</span>
+        <button type="button" class="icon-button" data-close aria-label="Close dialog"><svg><use href="#i-close" /></svg></button>
+      </div>
+      <h2 id="timechainBackupTitle">Keep a private copy.</h2>
+      <p id="timechainBackupLocalNotice">Open the installed ChainChat app to create or restore a backup. This guide handles your file and passphrase locally.</p>
+      <div id="timechainBackupLocalControls" hidden>
+        <p>Backups contain verified rings, blockspace attachments, faculty registries, and any local witness keys. They exclude model credential stores, tool grants, and installation settings. Save your passphrase separately. You’ll need it to restore.</p>
+        <details open>
+          <summary>Create an encrypted backup</summary>
+          <form id="timechainBackupForm" autocomplete="off">
+            <p id="timechainBackupAgent"></p>
+            <label class="field">Backup passphrase<input id="timechainBackupPassword" type="password" required minlength="12" maxlength="1024" autocomplete="off"></label>
+            <label class="field">Repeat passphrase<input id="timechainBackupConfirmation" type="password" required minlength="12" maxlength="1024" autocomplete="off"></label>
+            <p class="fine-print">Use at least 12 characters. Commit any pending conversation block before backing up. The guide supports up to 512 MiB of chain data.</p>
+            <button class="primary-button" type="submit">Verify &amp; save backup</button>
+          </form>
+        </details>
+        <details>
+          <summary>Restore an encrypted backup</summary>
+          <form id="timechainRestoreForm" autocomplete="off">
+            <label class="field">Encrypted backup file<input id="timechainRestoreFile" type="file" required accept=".ctbackup"></label>
+            <label class="field">Backup passphrase<input id="timechainRestorePassword" type="password" required maxlength="1024" autocomplete="off"></label>
+            <p class="fine-print">ChainChat verifies the file and adds a separate copy to your agent list.</p>
+            <button class="primary-button" type="submit">Verify &amp; restore a copy</button>
+          </form>
+        </details>
+        <button class="text-button" id="cancelTimechainBackup" type="button" hidden>Cancel operation</button>
+        <p id="timechainBackupStatus" class="fine-print" role="status"></p>
+        <p class="dialog-error" role="alert"></p>
+      </div>
     </dialog>
     <dialog id="clearLoadoutDialog" class="modal compact-modal">
       <form id="clearLoadoutForm">
@@ -1321,6 +1365,84 @@
         </form>
       </section>
     </dialog>
+    <dialog id="timechainMaintenance" class="modal history-modal" aria-labelledby="timechainMaintenanceTitle">
+      <div class="dialog-top"><span class="eyebrow">TIMECHAIN MAINTENANCE</span><button class="icon-button" type="button" data-close aria-label="Close Timechain maintenance"><svg><use href="#i-close" /></svg></button></div>
+      <h2 id="timechainMaintenanceTitle">Recovery, witnesses and review</h2>
+      <p id="timechainMaintenanceNotice" role="status" aria-live="polite"></p>
+      <fieldset id="timechainMaintenanceControls" class="native-connected-controls hidden">
+        <legend class="sr-only">Timechain maintenance controls</legend>
+        <label class="field">Saved Timechain<select id="maintenanceAgent"></select></label>
+        <p id="maintenanceSummary" class="info-box"></p>
+        <div class="native-card">
+          <h3>Recover a managed store</h3>
+          <p>Preview a validated legacy encoding repair or restore a sealed registry snapshot. Each write keeps a local copy of the original file. Re-anchor only after inspecting the recovered registry and its backup.</p>
+          <label class="field">Managed store<select id="maintenanceTarget"></select></label>
+          <div class="native-actions">
+            <button type="button" class="secondary-button" id="maintenanceEncoding">Inspect encoding</button>
+            <button type="button" class="secondary-button" id="maintenanceSnapshots">Find sealed snapshots</button>
+          </div>
+          <div id="maintenanceSnapshotChoice" class="hidden">
+            <label class="field">Verified registry snapshot<select id="maintenanceSnapshotRing"></select></label>
+            <button type="button" class="secondary-button" id="maintenanceRestoreRegistry">Preview registry restore</button>
+          </div>
+          <label class="field">Recovery reason<input id="maintenanceRecoveryReason" maxlength="512" autocomplete="off"></label>
+          <button type="button" class="secondary-button" id="maintenanceReanchor">Preview registry re-anchor</button>
+        </div>
+        <div class="native-card" id="maintenanceImmune">
+          <h3>Recover from immune lockdown</h3>
+          <p>After you verify the ledger and inspect the affected history, choose the first affected ring. Recovery appends a receipt and excludes that ring through the current head from active memory.</p>
+          <label class="field">First affected ring<input id="maintenanceFirstRing" type="number" min="1" step="1"></label>
+          <button type="button" class="secondary-button" id="maintenanceRecoverImmune">Preview quarantine and recovery</button>
+        </div>
+        <div class="native-card" id="maintenanceWitnessGroup">
+          <h3>Local witness quorum</h3>
+          <p>Witnesses attest to ring hashes. These keys share this machine’s trust boundary. New seals are automatically attested after setup.</p>
+          <p id="maintenanceWitnessStatus" class="fine-print"></p>
+          <div id="maintenanceWitnessSetup" class="native-service-grid">
+            <label class="field">Witnesses<input id="maintenanceWitnessCount" type="number" min="1" max="16" value="3" step="1"></label>
+            <label class="field">Required agreement<input id="maintenanceWitnessThreshold" type="number" min="1" max="16" value="2" step="1"></label>
+          </div>
+          <div class="native-actions">
+            <button type="button" class="secondary-button" id="maintenanceInitWitnesses">Preview witness setup</button>
+            <button type="button" class="secondary-button" id="maintenanceVerifyWitnesses">Verify witnesses</button>
+            <button type="button" class="secondary-button" id="maintenanceAttestHead">Preview head attestation</button>
+          </div>
+        </div>
+        <div class="native-card" id="maintenanceCorpusGroup">
+          <h3>Full corpus review</h3>
+          <p>Read ingested Continuum blocks and record a specific observation for each one. The chain keeps your place across sessions. Review is manual, and source text stays in this app.</p>
+          <p id="maintenanceCorpusStatus" class="fine-print"></p>
+          <div id="maintenanceCorpusSetup">
+            <label class="field">Review objective<input id="maintenanceCorpusObjective" maxlength="512" autocomplete="off"></label>
+            <button type="button" class="secondary-button" id="maintenanceOpenCorpus">Preview new review ledger</button>
+          </div>
+          <div class="native-actions">
+            <button type="button" class="secondary-button" id="maintenanceNextBlock">Read next block</button>
+            <button type="button" class="secondary-button" id="maintenanceCorpusReport">Validate and show report</button>
+          </div>
+          <div id="maintenanceSourceBlock" class="hidden">
+            <p id="maintenanceSourceCaption" class="fine-print"></p>
+            <pre id="maintenanceSourceText" tabindex="0" aria-label="Current source page"></pre>
+            <button type="button" class="secondary-button" id="maintenanceNextPage">Next page in this block</button>
+            <div id="maintenanceFindingControls" class="hidden">
+              <label class="field">Finding with an exact symbol or value from the block<textarea id="maintenanceFinding" rows="4" minlength="60" maxlength="4000" spellcheck="false"></textarea></label>
+              <label class="native-check"><input id="maintenanceFindingConfirmed" type="checkbox">I read the entire block and checked the finding against the source.</label>
+              <button type="button" class="secondary-button" id="maintenanceRecordFinding">Preview finding</button>
+            </div>
+          </div>
+          <pre id="maintenanceReport" class="hidden" tabindex="0" aria-label="Corpus review report"></pre>
+        </div>
+      </fieldset>
+      <section class="native-card hidden" id="maintenancePreview" aria-labelledby="maintenancePreviewTitle">
+        <h3 id="maintenancePreviewTitle" tabindex="-1">Confirm the preview</h3>
+        <pre id="maintenancePreviewText" tabindex="0"></pre>
+        <div class="native-actions">
+          <button type="button" class="primary-button" id="maintenanceApply">Apply this change</button>
+          <button type="button" class="secondary-button" id="maintenanceCancelPreview">Cancel preview</button>
+        </div>
+      </section>
+    </dialog>
+
     <dialog id="historyDialog" class="modal history-modal">
       <div class="dialog-top">
         <span class="eyebrow">TIMECHAIN INSPECTOR</span
@@ -1349,6 +1471,7 @@
         <label class="toggle-row"><span>Route before generation<small>Requires Recall equipped. Check verified memory for replay or useful partial context.</small></span><input id="autoRoute" type="checkbox" role="switch" checked /></label>
         <label class="toggle-row"><span>Semantic recall selection<small>Requires Recall equipped. Let the model select relevant evidence beyond lexical retrieval.</small></span><input id="semanticRecall" type="checkbox" role="switch" checked /></label>
         <label class="toggle-row"><span>Automatic sprouting<small>Allow new safe faculties to grow. New faculties are shown for your equipment choice.</small></span><input id="autoSprout" type="checkbox" role="switch" checked /></label>
+        <label class="toggle-row"><span>Equip newly promoted faculties for this session<small>New Cambium modalities and senses can join your next chat turn once the Timechain verifies them. This never saves them to your loadout.</small></span><input id="sessionAutoEquip" type="checkbox" role="switch" /></label>
         <label class="toggle-row"><span>Consolidate when due<small>Run native Dream consolidation while idle after every 100 new blocks, while learning is enabled. Off by default.</small></span><input id="autoDream" type="checkbox" role="switch" /></label>
         <label class="field">Maximum response revisions<input id="revisionLimit" type="number" min="0" max="3" value="1" /></label>
         <button class="primary-button" type="submit">Apply cognition settings</button>
@@ -1382,6 +1505,47 @@
       <div id="lifecycleList" class="lifecycle-list"></div>
       <section id="lifecyclePreview" class="lifecycle-preview hidden"><strong id="lifecyclePreviewTitle"></strong><p id="lifecyclePreviewDescription"></p><button class="primary-button" id="confirmLifecycle" type="button">Confirm</button><button class="text-button" id="cancelLifecycle" type="button">Cancel</button></section>
       <div class="dialog-error" role="alert"></div>
+    </dialog>
+    <dialog id="emergencyHaltDialog" class="modal emergency-halt-dialog" aria-labelledby="emergencyHaltTitle">
+      <div class="dialog-top">
+        <span class="eyebrow">FINCH SWITCH</span>
+        <button type="button" class="icon-button" data-close aria-label="Close Emergency Halt settings"><svg><use href="#i-close" /></svg></button>
+      </div>
+      <h2 id="emergencyHaltTitle">Emergency Halt</h2>
+      <p id="emergencyHaltStatus" role="status"></p>
+      <p>Stop chat and managed work across this installation. The halt stays active after restart until you verify and re-arm. Actions already completed stay in effect.</p>
+      <div class="emergency-halt-actions">
+        <button type="button" class="emergency-halt-button" id="emergencyHaltDialogStop">Halt this installation</button>
+        <button type="button" class="primary-button" id="emergencyHaltRearm" hidden>Verify and re-arm</button>
+      </div>
+      <details>
+        <summary>Set up remote halt</summary>
+        <p class="fine-print">The local supervisor checks an HTTPS feed you control for a one-use command signed by your enrolled wallet. The wallet signature alone moves no tokens.</p>
+        <form id="emergencyHaltRemoteForm">
+          <label class="field" for="emergencyHaltWallet">Owner wallet address
+            <input id="emergencyHaltWallet" type="text" autocomplete="off" spellcheck="false" maxlength="42" required placeholder="0x…" />
+          </label>
+          <label class="field" for="emergencyHaltFeed">HTTPS feed URL
+            <input id="emergencyHaltFeed" type="url" autocomplete="off" spellcheck="false" maxlength="2048" required placeholder="https://your-host.example/chainchat-halt.json" />
+          </label>
+          <label class="field" for="emergencyHaltDestination">Dedicated CPHY halt destination on Base (optional)
+            <input id="emergencyHaltDestination" type="text" autocomplete="off" spellcheck="false" maxlength="42" placeholder="0x…" />
+          </label>
+          <p class="fine-print">For a CPHY signal, use a dedicated address you control. After a direct CPHY transfer from the enrolled wallet to that address finalizes on Base, sign a command containing its transaction hash. The Base token contract is <code id="emergencyHaltToken"></code>. Ordinary deposits and tips have no effect.</p>
+          <div class="emergency-halt-actions">
+            <button type="submit" class="primary-button">Save remote halt settings</button>
+            <button type="button" class="secondary-button" id="emergencyHaltDisableRemote" hidden>Disable remote halt</button>
+          </div>
+        </form>
+        <div id="emergencyHaltProfileControls" hidden>
+          <p class="fine-print">Download a fresh enrollment profile after changing settings or re-arming. Open it on a device with the enrolled wallet, sign a halt command, and publish the signed JSON to your feed.</p>
+          <div class="emergency-halt-actions">
+            <button type="button" class="secondary-button" id="emergencyHaltExport">Download enrollment profile</button>
+            <a class="text-button" href="/emergency-halt-sign.html" target="_blank" rel="noopener noreferrer">Wallet signer ↗</a>
+          </div>
+        </div>
+      </details>
+      <p id="emergencyHaltError" class="dialog-error" role="alert"></p>
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
