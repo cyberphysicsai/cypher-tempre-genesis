@@ -2982,7 +2982,7 @@ optgroup,
   row-gap: 10px;
 }
 .top-actions { flex-wrap: wrap; justify-content: flex-end; }
-.theme-selector {
+:is(.theme-selector, .font-selector, .transcript-size-selector) {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2991,7 +2991,7 @@ optgroup,
   border-radius: 6px;
   background: var(--panel);
 }
-.theme-selector button {
+:is(.theme-selector, .font-selector, .transcript-size-selector) button {
   padding: 7px 8px;
   border-radius: 3px;
   background: transparent;
@@ -2999,10 +2999,11 @@ optgroup,
   white-space: nowrap;
   font-size: 8px;
 }
-.theme-selector button:hover { background: var(--panel-2); color: var(--text); }
-.theme-selector button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+:is(.theme-selector, .font-selector, .transcript-size-selector) button:hover { background: var(--panel-2); color: var(--text); }
+:is(.theme-selector, .font-selector, .transcript-size-selector) button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+:is(.font-selector, .transcript-size-selector) button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .workspace { height: calc(100dvh - var(--app-chrome-height, 106px)); }
-html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
+html[data-theme="matrix"] :is(.theme-selector, .font-selector, .transcript-size-selector) button[aria-pressed="true"] {
   background: var(--panel-2);
   color: var(--text);
   box-shadow: inset 0 0 0 1px var(--accent);
@@ -3014,7 +3015,8 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
   .responsibility-notice { padding: 6px 12px; font-size: 7px; }
   .topbar { min-height: 112px; }
   .theme-selector { margin-right: auto; }
-  .theme-selector button { padding: 7px 6px; font-size: 7px; }
+  :is(.font-selector, .transcript-size-selector) { max-width: 100%; }
+  :is(.theme-selector, .font-selector, .transcript-size-selector) button { padding: 7px 6px; font-size: 7px; }
   html, body { max-width: 100%; overflow-x: clip; }
   .workspace { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; min-width: 0; }
   .agent-sidebar:not(.mobile-open), .loadout-sidebar:not(.mobile-open) { display: none; }
