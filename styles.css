@@ -3134,7 +3134,7 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
 .agent-card .conversation-scroll {
   box-sizing: content-box;
   flex: none;
-  height: 52lh;
+  height: 21lh;
   padding: 18px clamp(18px, 4vw, 60px);
 }
 .agent-card .welcome { max-width: 800px; padding-block: 36px; }
