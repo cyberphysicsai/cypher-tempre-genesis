@@ -79,7 +79,7 @@ export function mountSetupWizard({ document: doc, snapshot, api, actions, defer 
     $('setupLocalStatus').textContent = current.connected ? 'Installed app connected ✓'
       : current.local ? 'Open ChainChat from its application launcher to connect securely.' : 'Download the installer for your computer to begin.';
     $('setupModelStatus').textContent = current.connected && current.state?.provider?.configured
-      ? `Selected: ${text(current.state.provider.model)}` : 'Connect your own API provider or use native OpenClaw sign-in.';
+      ? `Selected: ${text(current.state.provider.model)}` : 'Connect your API provider or use a model configured in local OpenClaw.';
     $('setupModelAction').disabled = !current.connected || busy;
     for (const id of ['setupNewChain', 'setupExistingChain', 'setupSelectSaved']) $(id).disabled = !current.connected || busy;
     $('setupChainStatus').textContent = current.connected && current.state?.agent

@@ -102,11 +102,10 @@
 .native-auth .field { font-size: 10px; margin-top: 18px; }
 .native-auth input:not([type="checkbox"]), .native-auth textarea { width: 100%; min-width: 0; }
 .native-auth .secondary-button { margin-block: 10px; max-width: 100%; overflow-wrap: anywhere; }
-.native-auth-options, .native-auth-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; max-height: 360px; overflow: auto; }
+.native-auth-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; max-height: 360px; overflow: auto; }
 .native-auth-provider { padding: 14px; border: 1px solid var(--line); min-width: 0; }
 .native-auth h4 { font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; margin: 0 0 12px; }
 .native-auth .fine-print { font-size: 9px; line-height: 1.9; overflow-wrap: anywhere; }
-.native-auth-wizard:not(:empty) { margin-block: 22px; padding: 18px; border: 1px solid var(--accent); }
 .native-wizard-message { white-space: pre-wrap; font-size: 10px; line-height: 1.9; overflow-wrap: anywhere; }
 .native-device-code { display: block; padding: 15px; border: 1px dashed var(--line-light); font-size: 18px; letter-spacing: 2px; overflow-wrap: anywhere; }
 .native-auth-configuration { margin-top: 24px; }

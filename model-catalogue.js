@@ -16,7 +16,8 @@ export function mountNativeModelPicker({ document: doc, mount, api, onSelected, 
   context = () => '', activeModel = () => '' }) {
   const make = (tag, text = '', className = '') => { const node = doc.createElement(tag); node.textContent = text; node.className = className; return node; };
   const open = make('button', 'Use native OpenClaw model', 'secondary-button full-width'); open.type = 'button';
-  const note = make('p', 'Use models and credentials already configured in your local OpenClaw. Configure missing authentication in OpenClaw first.', 'fine-print');
+  const connectionNotice = 'Use models with API access configured in your local OpenClaw. Manage native API keys below.';
+  const note = make('p', connectionNotice, 'fine-print');
   const panel = make('div', '', 'hidden'), status = make('p', '', 'fine-print'); status.setAttribute('role', 'status');
   panel.id = 'nativeModelCatalogue'; open.setAttribute('aria-controls', panel.id); open.setAttribute('aria-expanded', 'false');
   const list = make('div', '', 'model-catalogue-list'), refresh = make('button', 'Refresh native models', 'text-button'); refresh.type = 'button';
@@ -26,13 +27,13 @@ export function mountNativeModelPicker({ document: doc, mount, api, onSelected, 
     if (boundContext !== context()) { reset(); return; }
     const locked = busy || loading || isBusy(); open.disabled = locked; refresh.disabled = locked; list.replaceChildren();
     note.textContent = activeModel() ? `Native OpenClaw model active: ${String(activeModel()).slice(0, 256)}. Its credentials stay in local OpenClaw.`
-      : 'Use models and credentials already configured in your local OpenClaw. Configure missing authentication in OpenClaw first.';
+      : connectionNotice;
     for (const model of view.models) {
       const button = make('button', '', 'model-choice'); button.type = 'button'; button.disabled = locked || !model.available;
       const heading = make('span', '', 'model-choice-heading');
       heading.append(make('strong', model.name), make('small', activeModel() === model.id ? 'ACTIVE' : !model.available ? 'UNAVAILABLE' : view.current === model.id ? 'DEFAULT · USE' : 'USE'));
       button.append(heading, make('span', model.id, 'model-choice-id'));
-      if (!model.available) button.append(make('span', model.reason || 'Configure authentication for this model in local OpenClaw.', 'model-choice-reason'));
+      if (!model.available) button.append(make('span', model.reason || 'Configure API access for this model in local OpenClaw.', 'model-choice-reason'));
       button.addEventListener('click', () => select(model)); list.append(button);
     }
     if (!view.models.length && !loading) list.append(make('p', 'No eligible configured native models are currently listed.', 'fine-print'));
@@ -43,7 +44,7 @@ export function mountNativeModelPicker({ document: doc, mount, api, onSelected, 
     try {
       const result = await api('/api/openclaw/provider');
       if (owner !== context() || version !== epoch) return;
-      view = nativeModelCatalogueView(result); status.textContent = view.notice || 'Choose an available model configured in local OpenClaw. Provider credentials stay in the native runtime.';
+      view = nativeModelCatalogueView(result); status.textContent = view.notice || 'Choose an available model configured in local OpenClaw. Native API keys stay in the local runtime.';
     } catch { if (owner === context() && version === epoch) { view = nativeModelCatalogueView(null); status.textContent = 'Native model settings are unavailable. Open the installed app and configure OpenClaw locally.'; } }
     finally { if (owner === context() && version === epoch) { loading = false; sync(); } }
   }

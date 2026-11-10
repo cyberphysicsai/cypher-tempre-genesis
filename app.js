@@ -1328,7 +1328,7 @@ $("pairForm").addEventListener("submit", (event) => {
       selectedBridgePort = bridgePort($("bridgePort").value);
     const bridge = await api("/api/status");
     if (!supportedBridgeVersion(bridge.version))
-      throw new Error("Install ChainChat 1.0.0 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
+      throw new Error("Install ChainChat 1.0.3 or newer to use this interface and its setup guide. OpenClaw and PoI are included.");
     const result = await api("/api/pair", { code: $("pairCode").value.trim() });
     token = result.token;
     setupSessionGeneration++;
@@ -1498,7 +1498,7 @@ function openModel() {
   $("modelOutputLimit").value = provider.maxOutputTokens ?? "";
   $("apiKey").value = "";
   nativeModelPicker?.reset();
-  nativeAuthControls?.reset({ cancel: true });
+  nativeAuthControls?.reset();
   $("modelCustomId").value = provider.model || '';
   $("modelCatalogueSearch").value = '';
   $("byokManualDetails").open = !provider.configured;
@@ -1586,7 +1586,7 @@ $("modelForm").addEventListener("submit", (event) => {
     }
   });
 });
-$("modelDialog").addEventListener("close", () => { $("apiKey").value = ""; nativeAuthControls?.reset({ cancel: true }); });
+$("modelDialog").addEventListener("close", () => { $("apiKey").value = ""; nativeAuthControls?.reset(); });
 function clearComposerDraft() {
   const input = $("messageInput");
   input.value = '';
@@ -2734,7 +2734,7 @@ async function start() {
       ? "CONNECTING TO LOCAL APP"
       : "APP UPDATE REQUIRED";
     if (status.version) $("appVersion").textContent = `v${status.version}`;
-    if (!supportedBridgeVersion(status.version)) throw new Error("Install the latest ChainChat app to connect automatically.");
+    if (!supportedBridgeVersion(status.version)) throw new Error("Install ChainChat 1.0.3 or newer to connect automatically.");
     const paired = await connectLocalSession({ origin: location.origin, nonce: bootstrap,
       storage: localTabStorage(), request: api });
     token = paired.token;
