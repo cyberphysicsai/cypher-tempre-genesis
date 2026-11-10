@@ -2748,11 +2748,33 @@ $("loadAuditor").addEventListener("click", () => {
     auditedAgent = agentId();
   });
 });
+function initTranscriptSize() {
+  const storageKey = "cypher-tempre.transcript-lines.v1";
+  const buttons = document.querySelectorAll("[data-transcript-size]");
+  const transcript = $("conversationScroll");
+  function apply(value) {
+    const lines = ["21", "52", "121"].includes(value) ? value : "21";
+    const atBottom = transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 1;
+    document.documentElement.dataset.transcriptLines = lines;
+    for (const button of buttons)
+      button.setAttribute("aria-pressed", String(button.dataset.transcriptSize === lines));
+    if (atBottom) transcript.scrollTop = transcript.scrollHeight;
+  }
+  let saved;
+  try { saved = localStorage.getItem(storageKey); } catch {}
+  apply(saved);
+  for (const button of buttons) button.addEventListener("click", () => {
+    const lines = button.dataset.transcriptSize;
+    apply(lines);
+    try { localStorage.setItem(storageKey, lines); } catch {}
+  });
+}
 async function start() {
   const bootstrap = localBridgePage ? new URLSearchParams(location.hash.slice(1)).get("launch") : null;
   if (bootstrap !== null) history.replaceState(null, "", location.pathname + location.search);
   initThemes();
   initFontModes();
+  initTranscriptSize();
   initMotifs();
   renderState();
   setInterval(() => { void refreshActivity(); }, 1000);

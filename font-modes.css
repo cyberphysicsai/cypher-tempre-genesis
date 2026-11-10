@@ -110,7 +110,7 @@ html:is([data-font-mode="typewriter"], [data-font-mode="clarity"]) .message-body
 html:is([data-font-mode="typewriter"], [data-font-mode="clarity"]) .message-body.formatted pre code {
   font-size: 14px;
 }
-.font-selector {
+:is(.font-selector, .transcript-size-selector) {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -119,7 +119,7 @@ html:is([data-font-mode="typewriter"], [data-font-mode="clarity"]) .message-body
   border-radius: 6px;
   background: var(--panel);
 }
-.font-selector button {
+:is(.font-selector, .transcript-size-selector) button {
   min-height: 32px;
   padding: 7px 9px;
   border-radius: 3px;
@@ -129,15 +129,15 @@ html:is([data-font-mode="typewriter"], [data-font-mode="clarity"]) .message-body
   font-size: 11px;
   letter-spacing: normal;
 }
-.font-selector button:hover { background: var(--panel-2); color: var(--text); }
-.font-selector button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
-.font-selector button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-html[data-theme="matrix"] .font-selector button[aria-pressed="true"] {
+:is(.font-selector, .transcript-size-selector) button:hover { background: var(--panel-2); color: var(--text); }
+:is(.font-selector, .transcript-size-selector) button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+:is(.font-selector, .transcript-size-selector) button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+html[data-theme="matrix"] :is(.font-selector, .transcript-size-selector) button[aria-pressed="true"] {
   background: var(--panel-2);
   color: var(--text);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 @media (max-width: 700px) {
-  .font-selector { max-width: 100%; }
-  .font-selector button { padding-inline: 8px; }
+  :is(.font-selector, .transcript-size-selector) { max-width: 100%; }
+  :is(.font-selector, .transcript-size-selector) button { padding-inline: 8px; }
 }

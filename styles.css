@@ -3137,6 +3137,8 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
   height: 21lh;
   padding: 18px clamp(18px, 4vw, 60px);
 }
+html[data-transcript-lines="52"] .agent-card .conversation-scroll { height: 52lh; }
+html[data-transcript-lines="121"] .agent-card .conversation-scroll { height: 121lh; }
 .agent-card .welcome { max-width: 800px; padding-block: 36px; }
 .agent-card .welcome-copy { font-size: 14px; line-height: 2; }
 .agent-card .messages { width: 100%; max-width: 1120px; margin-inline: auto; }
