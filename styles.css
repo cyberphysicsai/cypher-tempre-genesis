@@ -1205,9 +1205,12 @@ p {
 .message.user .message-label {
   color: var(--theme-fg-hex-b5b5b5);
 }
+.conversation-scroll,
 .message-body {
   font-size: 13px;
-  line-height: 1.8;
+  line-height: 1.85;
+}
+.message-body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2151,6 +2154,7 @@ p {
   .messages {
     padding: 15px 20px;
   }
+  .conversation-scroll,
   .message-body {
     font-size: 12px;
   }
@@ -2754,9 +2758,6 @@ optgroup,
 .skill-slot {
   min-width: 0;
 }
-.message-body {
-  line-height: 1.85;
-}
 #appVersion {
   font-size: 8px;
   letter-spacing: 0.8px;
@@ -3116,21 +3117,26 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
   width: 100%;
   max-width: none;
   min-width: 0;
-  height: max(740px, calc(100dvh - var(--app-chrome-height, 106px) - 36px));
+  height: auto;
   margin: 0;
   border: 1px solid var(--line-light);
   border-radius: 12px;
   overflow: hidden;
   scroll-margin-top: 20px;
 }
-.agent-card .conversation-panel { width: 100%; height: 100%; min-height: 0; }
+.agent-card .conversation-panel { width: 100%; min-height: 0; }
 .agent-card .conversation-header { padding: 24px clamp(20px, 3vw, 48px) 20px; }
 .agent-card .conversation-header .section-caption { font-size: 9px; }
 .agent-card .conversation-header h1 { font-size: 18px; }
 .agent-card #currentBlockHeight { font-size: 27px; }
 .agent-card .conversation-tags { flex-direction: row; }
 .agent-card .cognition-strip { padding: 12px clamp(20px, 3vw, 48px); font-size: 8px; }
-.agent-card .conversation-scroll { padding: 18px clamp(18px, 4vw, 60px); }
+.agent-card .conversation-scroll {
+  box-sizing: content-box;
+  flex: none;
+  height: 52lh;
+  padding: 18px clamp(18px, 4vw, 60px);
+}
 .agent-card .welcome { max-width: 800px; padding-block: 36px; }
 .agent-card .welcome-copy { font-size: 14px; line-height: 2; }
 .agent-card .messages { width: 100%; max-width: 1120px; margin-inline: auto; }
@@ -3263,7 +3269,7 @@ html[data-theme="matrix"] .theme-selector button[aria-pressed="true"] {
 }
 @media (max-width: 700px) {
   .agent-card { --card-gutter: 12px; gap: 18px; padding-top: 12px; }
-  .agent-card > .workspace { height: max(700px, calc(100dvh - var(--app-chrome-height, 142px) - 24px)); border-radius: 8px; }
+  .agent-card > .workspace { border-radius: 8px; }
   .agent-card .conversation-header { align-items: flex-start; padding: 20px 16px 15px; }
   .agent-card .conversation-header h1 { font-size: 13px; line-height: 1.7; }
   .agent-card #currentBlockHeight { font-size: 22px; }

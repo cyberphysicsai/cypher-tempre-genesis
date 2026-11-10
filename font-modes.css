@@ -98,7 +98,7 @@ html[data-font-mode="clarity"] :is(pre, code, kbd, samp) * {
   font-family: var(--font-code) !important;
   font-variant-ligatures: none;
 }
-html:is([data-font-mode="typewriter"], [data-font-mode="clarity"]) :is(.message-body, .agent-card .composer textarea) {
+html:is([data-font-mode="typewriter"], [data-font-mode="clarity"]) :is(.conversation-scroll, .message-body, .agent-card .composer textarea) {
   font-size: 16px;
   line-height: 1.8;
   letter-spacing: normal;
