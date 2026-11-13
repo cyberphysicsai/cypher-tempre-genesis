@@ -5,7 +5,7 @@ import { mountNativeModelPicker } from "./model-catalogue.js";
 import { mountNativeAuth } from "./native-auth.js";
 import { mountNativeMediaComposer, nativeChatPayload, nativeHistoryMedia, nativeMessageMedia, renderNativeMedia } from "./native-media.js";
 import { mergeHistoryMessages } from "./native-history.js";
-import { blockHeight, supportedBridgeVersion, modelCatalogueView, modelSwitchPayload, providerConnectionView } from "./chainchat-display.js";
+import { blockHeight, supportedBridgeVersion, modelCatalogueView, modelSwitchPayload, providerConnectionView, covenantThresholdLabel, gateRequirementsNote } from "./chainchat-display.js";
 import {
   DEFAULT_COGNITION, normalizeCognition, normalizeActivity,
   abilityIndicators, facultyIdentity, facultyLifecycleAction, messageIsDormant, nativeSearchView,
@@ -227,7 +227,7 @@ function covenantReview(gate) {
       el(
         "p",
         "review-note",
-        `Overall covenant: ${gate.scores.covenant} / 255 · required minimum: ${gate.threshold ?? 180} / 255.`,
+        `Overall covenant: ${gate.scores.covenant} / 255 · required minimum: ${covenantThresholdLabel(gate)}.`,
       ),
     );
   if (typeof gate.rationale === "string" && gate.rationale)
@@ -1018,9 +1018,7 @@ function renderState() {
   $("loadoutRepairNotice").classList.toggle("hidden", !repairNotice);
   $("clearLoadout").disabled = !token || !state.agent || requestBusy;
   if ($("exchangeDialog").open) renderExportFaculties();
-  if (state.gate?.threshold)
-    $("thresholdNote").textContent =
-      `Every response must meet the server-enforced fruitage minimum (${state.gate.threshold}/255), alongside native PoI acceptance. Pausing real-time memory keeps this gate required and stops new chain recording.`;
+  $("thresholdNote").textContent = gateRequirementsNote(state.gate);
   renderOperationControls();
   renderCognition();
   nativeMediaComposer?.sync();

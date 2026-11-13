@@ -10,6 +10,26 @@ export function supportedBridgeVersion(version) {
   return true;
 }
 
+const reportedThreshold = value => Number.isInteger(value) && value >= 0 && value <= 255 ? value : null;
+
+/** Historical receipts retain their actual floor; missing policy is not inferred. */
+export function covenantThresholdLabel(gate) {
+  const threshold = reportedThreshold(gate?.threshold);
+  return threshold === null ? 'not reported' : `${threshold} / 255`;
+}
+
+/** The connected backend, rather than the hosted page, decides enforcement. */
+export function gateRequirementsNote(gate) {
+  const threshold = reportedThreshold(gate?.threshold);
+  if (threshold === null)
+    return 'The local runtime has not reported its response threshold. Connect the updated local app to confirm PoI enforcement.';
+  const actionThreshold = reportedThreshold(gate?.actionThreshold);
+  const actionNote = actionThreshold === null ? '' : ` Tool and action reviews retain a ${actionThreshold}/255 minimum.`;
+  const upgrade = threshold === 180 && actionThreshold === null
+    ? ' Install ChainChat 1.0.8 to apply the 150/255 response-generation minimum; refreshing this page alone does not update the local runtime.' : '';
+  return `Every response must meet the server-enforced fruitage minimum (${threshold}/255), alongside native PoI acceptance.${actionNote} Pausing real-time memory keeps this gate required and stops new chain recording.${upgrade}`;
+}
+
 export function blockHeight(agent, paired = true) {
   if (!paired || !agent) return "\u2014";
   const index = agent.head?.index;
