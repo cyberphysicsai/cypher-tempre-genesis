@@ -1,0 +1,47 @@
+.native-config-form { display: grid; gap: 1rem; min-width: 0; }
+.native-config-form h3 { margin: 0; font: inherit; font-weight: 600; }
+.native-config-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.native-config-toolbar > input { flex: 1 1 15rem; }
+.native-config-toolbar > select { flex: 1 1 12rem; }
+.native-config-toolbar .native-check { display: flex; align-items: center; gap: .5rem; }
+.native-config-form input, .native-config-form select, .native-config-form textarea,
+.native-channel-setup input, .native-channel-setup select, .native-channel-setup textarea {
+  font: inherit; color: var(--text, inherit); background: var(--panel-2, transparent);
+  border: 1px solid var(--line, currentColor); border-radius: .35rem; padding: .65rem;
+  min-width: 0; box-sizing: border-box;
+}
+.native-config-form input:not([type=checkbox]), .native-config-form select,
+.native-config-form textarea { width: 100%; }
+.native-config-form input[type=checkbox] { width: 1.15rem; height: 1.15rem; accent-color: var(--accent, currentColor); }
+.native-config-form textarea { resize: vertical; min-height: 6rem; tab-size: 2; }
+.native-config-form-fields { display: grid; gap: .75rem; }
+.native-config-field { display: grid; gap: .65rem; padding: 1rem; border: 1px solid var(--line, currentColor); border-radius: .5rem; min-width: 0; }
+.native-config-field > label { display: grid; gap: .5rem; }
+.native-config-field strong { font-weight: 600; }
+.native-config-field code { font: inherit; font-size: .8em; overflow-wrap: anywhere; opacity: .75; }
+.native-config-field p, .native-config-form-status { margin: 0; overflow-wrap: anywhere; }
+.native-config-managed { padding: .65rem; border-left: 2px solid var(--accent, currentColor); font-size: .85em; }
+.native-config-field details { min-width: 0; }
+.native-config-field summary { cursor: pointer; font-size: .85em; padding-block: .3rem; }
+.native-config-list { display: grid; gap: .6rem; }
+.native-config-list-row { display: flex; align-items: center; gap: .6rem; }
+.native-config-list-row > :first-child { flex: 1 1 auto; }
+.native-config-list-row button { flex: 0 0 auto; }
+.native-config-field > button { justify-self: start; }
+.native-config-form button:disabled, .native-config-form input:disabled, .native-config-form select:disabled,
+.native-config-form textarea:disabled { opacity: .55; cursor: not-allowed; }
+.native-channel-setup { display: grid; gap: 1rem; min-width: 0; }
+.native-channel-toolbar, .native-channel-actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.native-channel-toolbar label { display: grid; gap: .4rem; flex: 1 1 13rem; }
+.native-channel-status { display: grid; gap: .4rem; padding: .8rem; border: 1px solid var(--line, currentColor); border-radius: .4rem; }
+.native-channel-status p { margin: 0; overflow-wrap: anywhere; }
+.native-channel-secrets { display: grid; gap: .75rem; }
+.native-channel-secrets label { display: grid; gap: .4rem; }
+.native-channel-pairing { display: grid; gap: .6rem; }
+.native-channel-pairing > article { border: 1px solid var(--line, currentColor); border-radius: .35rem; padding: .75rem; }
+.native-channel-login-qr { display: block; max-width: min(100%, 20rem); }
+@media (max-width: 640px) {
+  .native-config-toolbar > *, .native-channel-toolbar > * { flex-basis: 100%; }
+  .native-config-field { padding: .75rem; }
+  .native-config-list-row { flex-wrap: wrap; }
+}

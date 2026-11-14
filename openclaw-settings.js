@@ -1,4 +1,37 @@
 import { chatToolAccess, chatToolActivity, hostToolChoices } from './chat-tools.js';
+import { mountNativeConfigForm } from './native-config-form.js';
+import { mountNativeChannelSetup } from './native-channel-setup.js';
+
+export function nativeBlockedConfigGuards(next={}) {
+  const config=next.config || {},grant=next.toolAuthority?.grant || {},native=grant.nativeCapabilities || {};
+  const inside=(path,prefix)=>path===prefix||path.startsWith(prefix+'.');
+  const admitted=path=>native.enabled===true&&native.acknowledged===true&&(native.settings||[]).some(prefix=>prefix==='*'||inside(path,prefix));
+  const reason=path=>Object.entries(config.guards||{}).filter(([prefix])=>inside(path,prefix)).sort((a,b)=>b[0].length-a[0].length)[0]?.[1] || 'Managed by the local supervisor.';
+  const blocked=Object.fromEntries((config.immutablePaths||[]).map(path=>[path,reason(path)]));
+  for(const [path,note] of Object.entries(config.guards||{})) {
+    if(admitted(path)||(['tools','browser'].includes(path)&&grant.enabled===true&&grant.acknowledged===true))continue;
+    blocked[path]=note;
+  }
+  return blocked;
+}
+export function nativeConfigGuardFor(next={},parts=[],{includeChildren=false}={}) {
+  const path=parts.join('.'),config=next.config||{},grant=next.toolAuthority?.grant||{},native=grant.nativeCapabilities||{};
+  const inside=(field,prefix)=>field===prefix||field.startsWith(prefix+'.');
+  const admitted=field=>native.enabled===true&&native.acknowledged===true&&(native.settings||[]).some(prefix=>prefix==='*'||inside(field,prefix));
+  const media=['agents.defaults.imageModel','agents.defaults.voiceModel','agents.defaults.pdfModel','agents.defaults.mediaModels'];
+  const nativeMedia=config.nativeProvider===true&&media.some(prefix=>inside(path,prefix))&&admitted(path);
+  const immutable=config.immutablePaths||[];
+  const fixed=immutable.find(prefix=>!nativeMedia&&(inside(path,prefix)||(includeChildren&&inside(prefix,path))));
+  const guards=config.guards||{};
+  if(fixed)return guards[fixed]||Object.entries(guards).filter(([prefix])=>inside(fixed,prefix)).sort((a,b)=>b[0].length-a[0].length)[0]?.[1]||'Managed by the local supervisor.';
+  if(/^plugins\.entries\.[^.]+\.(?:enabled|env)(?:\.|$)/.test(path))return 'Use the reviewed native plugin controls.';
+  const blocked=Object.entries(guards).find(([prefix])=>(inside(path,prefix)||(includeChildren&&inside(prefix,path)))&&!admitted(inside(path,prefix)?path:prefix)&&
+    !(['tools','browser'].includes(prefix)&&grant.enabled===true&&grant.acknowledged===true));
+  if(blocked)return blocked[1];
+  if(!['messages','session','ui','logging','agents','memory'].includes(parts[0])&&!admitted(path)&&
+    !(grant.enabled===true&&grant.acknowledged===true&&['tools','browser'].includes(parts[0])))return 'Allow this native setting path under Tool access before applying it.';
+  return '';
+}
 
 const pretty = value => JSON.stringify(value ?? null, null, 2);
 const nativeUtilityModelNotice = 'Automatic native metadata utilities are off by default. Explicitly configuring agents.defaults.utilityModel requires a native-settings owner grant and uses that model’s own native provider credentials, billing and privacy terms. These metadata-only calls have no action tools. Agent answers and actions retain canonical PoI review.';
@@ -367,7 +400,8 @@ export function mountNativeSourceCard({ document: doc, mount, api, context = () 
 }
 
 const nativeSecretName = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
-const nativeSecretTarget = value => typeof value === 'string' && value.length <= 256 && /^tts\.(?:providers\.[A-Za-z0-9_-]+|personas\.[A-Za-z0-9_-]+\.providers\.[A-Za-z0-9_-]+)\.apiKey$/.test(value) && value.split('.').every(part => !['constructor', 'prototype', '__proto__'].includes(part));
+const legacyNativeSecretTarget = value => typeof value === 'string' && value.length <= 256 && /^tts\.(?:providers\.[A-Za-z0-9_-]+|personas\.[A-Za-z0-9_-]+\.providers\.[A-Za-z0-9_-]+)\.apiKey$/.test(value) && value.split('.').every(part => !['constructor', 'prototype', '__proto__'].includes(part));
+const nativeSecretTarget = value => legacyNativeSecretTarget(value) || (typeof value==='string' && value.startsWith('/') && value.length<=4096 && value.slice(1).split('/').every(part=>part && !/~(?![01])/.test(part) && !['__proto__','prototype','constructor'].includes(part.replaceAll('~1','/').replaceAll('~0','~'))) && !/[\u0000\r\n]/.test(value));
 export function nativeSecretView(value) {
   const targets = new Map(), bindings = new Map();
   for (const row of (Array.isArray(value?.targets) ? value.targets : []).slice(0, 256)) {
@@ -389,7 +423,7 @@ export function nativeSecretPayload({ name, target, value }, view) {
 export function mountNativeSecretCard({ document: doc, mount, api, context = () => '' }) {
   const make = (tag, text = '', className = '') => { const node = doc.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
   const card = make('section', '', 'native-card native-secret-card'); card.append(make('h2', 'Dedicated native service credentials'));
-  card.append(make('p', 'Add a dedicated credential for a configured native TTS provider. Credentials are stored in a local owner-protected plaintext file, not an encrypted vault. Only allowlisted secret references appear in native settings; the local app supplies values to its managed native process.', 'fine-print'));
+  const credentialNotice=make('p','','fine-print');card.append(credentialNotice);
   card.append(make('p', 'Choose targets discovered from the native configuration. Setting or removing a credential restarts the managed runtime and cancels dynamic runs, so finish the current primary turn first. Each target uses its own credential.', 'fine-print'));
   const status = make('p', '', 'native-capability-status'); status.id = 'nativeSecretsStatus'; status.setAttribute('role', 'status');
   const refresh = make('button', 'Refresh native credential targets', 'secondary-button'); refresh.type = 'button'; refresh.id = 'refreshNativeSecrets';
@@ -399,10 +433,27 @@ export function mountNativeSecretCard({ document: doc, mount, api, context = () 
   const name = field('nativeSecretName', 'Local binding name'); name.type = 'text'; name.maxLength = 64; name.autocomplete = 'off'; name.placeholder = 'speech-service'; name.required = true;
   const target = field('nativeSecretTarget', 'Configured native credential target', 'select'); target.required = true;
   const credential = field('nativeSecretValue', 'Dedicated credential'); credential.type = 'password'; credential.autocomplete = 'new-password'; credential.maxLength = 16384; credential.required = true; credential.spellcheck = false;
+  const credentialFile=field('nativeSecretFile','Or load a UTF-8 credential file (up to 16 KiB)');credentialFile.type='file';credentialFile.accept='.txt,.json,.pem,.key';
+  const fileStatus=make('p','','fine-print');fileStatus.id='nativeSecretFileStatus';fields.append(fileStatus);
+  const rememberLabel=make('label','','native-check'),remember=make('input');remember.type='checkbox';remember.id='nativeSecretRemember';rememberLabel.append(remember,make('span','Remember on this machine (encrypted local vault)'));fields.append(rememberLabel);
   const save = make('button', 'Save dedicated credential locally', 'primary-button'); save.id = 'saveNativeSecret'; save.type = 'submit';
   const list = make('div', '', 'native-service-list'); list.id = 'nativeSecretBindings'; list.setAttribute('aria-label', 'Configured dedicated native credentials');
   form.append(fields, save); card.append(status, refresh, form, make('h3', 'Local credential bindings'), list); mount.append(card);
-  let ready = false, busy = false, loaded = false, epoch = 0, owner = context(), view = nativeSecretView(null);
+  let ready = false, busy = false, loaded = false, epoch = 0, owner = context(), view = nativeSecretView(null), fileValue='',fileRevision=0,supportsEncrypted=false;
+  function clearFile(){fileRevision++;fileValue='';credentialFile.value='';fileStatus.textContent='';credential.required=true;}
+  credential.addEventListener('input',clearFile);
+  credentialFile.addEventListener('change',async()=>{
+    const file=credentialFile.files?.[0];clearFile();const revision=fileRevision,bound=context();
+    try {
+      if(!file)return;
+      if(!Number.isSafeInteger(file.size)||file.size<1||file.size>16384)throw new Error('Choose a UTF-8 credential file up to 16 KiB.');
+      const value=new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer());
+      if(revision!==fileRevision||bound!==context())return;
+      if(!value||value.includes('\0'))throw new Error('Choose a nonempty text credential without null bytes.');
+      fileValue=value;credential.value='';credential.required=false;fileStatus.textContent='Credential file loaded in local page memory. Its contents will be sent only to the connected local runtime.';
+    }catch(failure){if(revision===fileRevision&&bound===context())fileStatus.textContent=failure.message;}
+    finally {if(revision===fileRevision)credentialFile.value='';}
+  });
   const removals = [];
   function availability() { fields.disabled = !ready || busy || !view.targets.length; save.disabled = fields.disabled; refresh.disabled = !ready || busy; for (const button of removals) button.disabled = !ready || busy; }
   function accept(result) {
@@ -419,12 +470,12 @@ export function mountNativeSecretCard({ document: doc, mount, api, context = () 
     availability();
   }
   async function request(payload, success) {
-    if (!ready || busy) return; const bound = context(), version = epoch; busy = true; credential.value = ''; availability();
+    if (!ready || busy) return; const bound = context(), version = epoch; busy = true; credential.value = '';clearFile(); availability();
     status.textContent = payload.action === 'list' ? 'Inspecting configured native credential targets…' : 'Updating the dedicated local credential binding…';
     try {
       const result = await api('/api/openclaw/secrets', payload);
       if (version !== epoch || bound !== context()) return;
-      accept(result); status.textContent = success || (view.targets.length ? `${view.targets.length} configured native credential target${view.targets.length === 1 ? '' : 's'} available.` : 'No credential targets are configured. Configure a native TTS provider in Settings, then refresh.');
+      accept(result); status.textContent = success || (view.targets.length ? `${view.targets.length} configured native credential target${view.targets.length === 1 ? '' : 's'} available.` : 'No credential targets are configured. Configure a native channel, plugin or service in Settings, then refresh.');
     } catch (failure) {
       if (version === epoch && bound === context()) {
         const codes = new Set(['OPENCLAW_NATIVE_SECRET_INVALID', 'OPENCLAW_CONTROL_BUSY', 'OPENCLAW_CONTROL_CLOSED', 'PAIR_REQUIRED', 'SESSION_CHANGED']);
@@ -432,19 +483,21 @@ export function mountNativeSecretCard({ document: doc, mount, api, context = () 
       }
     } finally { if (version === epoch && bound === context()) { busy = false; credential.value = ''; availability(); } }
   }
-  function reset() { epoch++; owner = context(); ready = false; busy = false; loaded = false; name.value = ''; credential.value = ''; view = nativeSecretView(null); accept(null); loaded = false; status.textContent = 'Connect a selected Timechain to configure dedicated native credentials.'; availability(); }
+  function reset() { epoch++; owner = context(); ready = false; busy = false; loaded = false; name.value = ''; credential.value = '';clearFile();remember.checked=false; view = nativeSecretView(null); accept(null); loaded = false; status.textContent = 'Connect a selected Timechain to configure dedicated native credentials.'; availability(); }
   function render(next) {
     if (owner !== context()) reset(); const wasReady = ready; ready = !!(next?.sessionKey || next?.selectedAgentId);
+    supportsEncrypted=typeof next?.config?.baseHash==='string';rememberLabel.hidden=!supportsEncrypted;remember.disabled=!supportsEncrypted;
+    credentialNotice.textContent=supportsEncrypted ? 'Add credentials for native channels, plugins and services through write-only fields. Session credentials stay in memory. Remembered credentials use an encrypted, owner-private local vault whose key is protected by filesystem permissions, not an OS keychain. Chat API keys stay in memory.' : 'This older runtime uses its earlier owner-private credential store. Install ChainChat 1.1.0 to choose session-only or encrypted remembered credentials. Direct chat API keys remain in memory.';
     if (!ready) { reset(); return; } availability(); if (!wasReady && !loaded) void request({ action: 'list' });
   }
   refresh.addEventListener('click', () => request({ action: 'list' }));
   form.addEventListener('submit', event => {
     event.preventDefault(); if (!ready || busy) { credential.value = ''; return; }
-    let payload; try { payload = nativeSecretPayload({ name: name.value.trim(), target: target.value, value: credential.value }, view); }
+    let payload; try { payload = nativeSecretPayload({ name: name.value.trim(), target: target.value, value: fileValue || credential.value }, view); }
     catch { status.textContent = 'Choose a configured native target, a valid local binding name and a dedicated credential.'; credential.value = ''; return; }
-    credential.value = ''; return request(payload, 'Dedicated credential saved locally. The managed native runtime was restarted.');
+    if(supportsEncrypted)payload.remember=remember.checked===true; credential.value = ''; return request(payload, 'Dedicated credential saved locally. The managed native runtime was restarted.');
   });
-  doc.defaultView?.addEventListener('pagehide', () => { credential.value = ''; });
+  doc.defaultView?.addEventListener('pagehide', () => { credential.value = '';clearFile(); });
   reset(); return { render, reset };
 }
 
@@ -452,8 +505,18 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   const $ = id => doc.getElementById(id), panel = $('openclawPanel');
   let snapshot = null, loading = false, activeSection = 'configuration', selectedFamily = '';
   let connectionKey = '', connectionRevision = 0, pendingRefresh = false;
-  let configDirty = false, configEditRevision = null, nativeCapabilityControls = null, nativeSourceControls = null, nativeSecretControls = null;
+  let configDirty = false, configSaving = false, configEditRevision = null, nativeCapabilityControls = null, nativeSourceControls = null, nativeSecretControls = null;
   let toolContext = {}, toolSnapshot = null, toolSaving = false;
+  const configForm = $('nativeConfigFormMount') ? mountNativeConfigForm({document:doc,mount:$('nativeConfigFormMount'),
+    onError:failure=>error(failure?.message || String(failure)),
+    onChange:()=>{configDirty=true;},
+    onNavigate:()=>section('tools')}) : null;
+  const channelSetup=$('nativeChannelSetupMount') ? mountNativeChannelSetup({document:doc,mount:$('nativeChannelSetupMount'),
+    context:()=>connectionRevision,onError:failure=>error(failure?.message || String(failure)),
+    onInstall:details=>reviewChannelPlugin(details),
+    onRefresh:()=>api('/api/openclaw/channels'),
+    onSave:payload=>api('/api/openclaw/channels/setup',payload),
+    onAction:payload=>api('/api/openclaw/channels/action',payload),onSaved:()=>refresh()}) : null;
   function error(message = '') { $('nativeError').textContent = message; }
   function renderToolStatus() {
     const view = chatToolAccess(toolSnapshot, toolContext);
@@ -543,6 +606,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     list('nativeServicesRuns', [...occurrences].reverse().slice(0, 30), 'No service requests have been accepted yet.');
   }
   function reference() {
+    configForm?.update({family:selectedFamily,query:$('nativeSchemaSearch').value});
     const list = $('nativeSchemaFields'); list.replaceChildren();
     for (const field of schemaFields(snapshot?.schema, $('nativeSchemaSearch').value, selectedFamily)) {
       const row = doc.createElement('div'); row.className = 'native-schema-field';
@@ -571,9 +635,15 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   }
   function render(next) {
     snapshot = next;
+    const schemaController=typeof next.config?.baseHash==='string';
     $('nativeConnection').textContent = `OpenClaw ${next.runtime?.version || ''} · ${next.sessionKey ? 'Selected agent session' : 'Select a Timechain to use session controls'}`;
     if (!configDirty) { $('nativeConfigEditor').value = pretty(next.config?.editable || {}); configEditRevision = next.config?.revision; }
-    $('nativeConfigNotice').textContent = next.config?.notice || 'Changes are validated against the pinned native schema.';
+    configForm?.update({schema:next.schema?.schema || next.schema,uiHints:next.schema?.uiHints || {},
+      effective:next.config?.effective || next.nativeConfig?.config || {},editable:next.config?.editable || {},
+      guards:nativeBlockedConfigGuards(next),guardFor:(parts,options)=>nativeConfigGuardFor(next,parts,options),revision:next.config?.revision,baseHash:next.config?.baseHash || next.nativeConfig?.hash,
+      contextKey:connectionKey,disabled:configSaving||!schemaController,family:selectedFamily,query:$('nativeSchemaSearch').value});
+    $('saveNativeConfig').disabled=configSaving||!schemaController;
+    $('nativeConfigNotice').textContent = schemaController ? next.config?.notice || 'Changes are validated against the pinned native schema.' : 'Install ChainChat 1.1.0 for native settings forms and guided integration setup. This page shows the configuration reported by your older local runtime.';
     $('nativeProtectedPaths').textContent = (next.config?.protectedPaths || []).map(path => `${path}\n  ${next.config?.guards?.[path] || 'Managed by the local operator facade.'}`).join('\n\n');
     $('nativeSchemaJson').textContent = pretty(next.schema);
     $('nativeEffectiveConfig').textContent = pretty(next.nativeConfig);
@@ -625,6 +695,11 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
       const next = await api('/api/openclaw');
       if (revision !== connectionRevision || !isConnected()) return;
       render(next); $('nativeConnectedControls').disabled = false;
+      if(channelSetup&&typeof next.config?.baseHash==='string')try {
+        const channels=await api('/api/openclaw/channels');
+        if(revision===connectionRevision&&isConnected())channelSetup.render({...channels,contextKey:connectionKey,disabled:false});
+      }catch(failure){if(revision===connectionRevision)error(failure.message);}
+      else channelSetup?.render({items:[],disabled:true,contextKey:connectionKey});
     } catch (failure) {
       if (revision === connectionRevision) { toolSnapshot = null; renderToolStatus(); error(failure.message); }
     }
@@ -640,7 +715,8 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     toolContext = { connected, agentId, ...context };
     const next = connected ? `connected:${agentId}` : 'disconnected';
     if (next === connectionKey) { renderToolStatus(); return; }
-    connectionKey = next; connectionRevision++; configDirty = false; configEditRevision = null;
+    connectionKey = next; connectionRevision++; configDirty = false; configSaving=false; configEditRevision = null;
+    $('saveNativeConfig').disabled=$('refreshNativeControls').disabled=!connected;
     snapshot = null; selectedFamily = ''; $('nativeConnectedControls').disabled = true;
     toolSnapshot = null; toolSaving = false;
     $('nativeToolsForm').inert = false;
@@ -648,6 +724,8 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     nativeCapabilityControls?.reset();
     nativeSourceControls?.reset();
     nativeSecretControls?.reset();
+    configForm?.reset({schema:{},effective:{},editable:{},contextKey:connectionKey,disabled:true});
+    channelSetup?.reset();
     pluginPreview = null; pluginNotices = {}; trustCheckbox.checked = false; consentCheckbox.checked = false;
     applyPlugin.disabled = true; previewText.textContent = ''; noticeText.textContent = '';
     consentLabel.classList.add('hidden'); noticeText.classList.add('hidden');
@@ -690,13 +768,19 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     });
   }
   section('configuration');
-  $('refreshNativeControls').addEventListener('click', () => { configDirty = false; void refresh(); });
+  $('refreshNativeControls').addEventListener('click', () => { configDirty = false; configForm?.reset({contextKey:connectionKey}); void refresh(); });
   $('nativeConfigEditor').addEventListener('input', () => { if (!configDirty) configEditRevision = snapshot?.config?.revision; configDirty = true; });
   $('nativeSchemaSearch').addEventListener('input', reference);
   $('saveNativeConfig').addEventListener('click', async () => {
+    if(configSaving||!isConnected())return;
     error();
-    try { const patch = JSON.parse($('nativeConfigEditor').value); await api('/api/openclaw/config', { patch, revision: configDirty ? configEditRevision : snapshot?.config?.revision }); configDirty = false; await refresh(); }
-    catch (failure) { error(failure.message); }
+    const revision=connectionRevision,current=()=>revision===connectionRevision&&isConnected();
+    const button=$('saveNativeConfig');button.disabled=$('refreshNativeControls').disabled=true;configSaving=true;configForm?.update({disabled:true});
+    try { const payload=configForm ? configForm.getPayload() : {patch:JSON.parse($('nativeConfigEditor').value),revision:configDirty ? configEditRevision : snapshot?.config?.revision,baseHash:snapshot?.nativeConfig?.hash};
+      await api('/api/openclaw/config', payload); if(!current())return;
+      configDirty = false; configForm?.reset({contextKey:connectionKey}); await refresh(); }
+    catch (failure) { if(current())error(failure.message); }
+    finally {if(current()){configSaving=false;button.disabled=$('refreshNativeControls').disabled=false;configForm?.update({disabled:false});}}
   });
   $('nativeCommandForm').addEventListener('submit', event => { event.preventDefault(); void run($('nativeCommandInput').value.trim()); });
   $('startNativeGoal').addEventListener('click', () => { const objective = $('nativeGoalObjective').value.trim(); if (objective) void run(`/goal start ${objective}`); else error('Write a goal objective first.'); });
@@ -792,8 +876,8 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   const pluginCatalogue = element('pre'); pluginCatalogue.id = 'nativePluginCatalogue'; pluginCard.append(pluginCatalogue);
   const pluginForm = element('form'), operation = element('select'); operation.id = 'nativePluginOperation';
   for (const value of ['install', 'enable', 'update', 'disable', 'uninstall', 'reload', 'configure']) { const option = element('option', value); option.value = value; operation.append(option); }
-  const pluginId = element('input'); pluginId.type = 'text'; pluginId.placeholder = 'Plugin ID for installed operations'; pluginId.autocomplete = 'off';
-  const source = element('textarea'); source.rows = 5; source.spellcheck = false; source.value = '{"source":"npm","spec":"package-name@1.0.0","pin":true}';
+  const pluginId = element('input'); pluginId.id='nativePluginId';pluginId.type = 'text'; pluginId.placeholder = 'Plugin ID for installed operations'; pluginId.autocomplete = 'off';
+  const source = element('textarea'); source.id='nativePluginSource';source.rows = 5; source.spellcheck = false; source.value = '{"source":"npm","spec":"package-name@1.0.0","pin":true}';
   const configuration = element('textarea'); configuration.rows = 4; configuration.spellcheck = false; configuration.value = '{}';
   pluginForm.append(element('label', 'Operation'), operation, element('label', 'Installed plugin ID (leave empty for an install)'), pluginId,
     element('label', 'Native source JSON · npm, ClawHub or a local plugin folder'), source, element('label', 'Nonsecret plugin settings for configure'), configuration);
@@ -805,6 +889,15 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   consentLabel.append(consentCheckbox, element('span', 'I reviewed and acknowledge the displayed native policy or capability notice for this exact operation.'));
   consentLabel.classList.add('hidden'); noticeText.classList.add('hidden');
   let pluginPreview = null, pluginNotices = {};
+  function reviewChannelPlugin(details) {
+    const selection=details?.installSource;
+    if(!selection||typeof selection!=='object'||Array.isArray(selection)){error('Inspect this integration in the native plugin catalogue and choose its installation source.');section('plugins');return;}
+    operation.value='install';pluginId.value='';source.value=pretty(selection);configuration.value='{}';
+    pluginPreview=null;pluginNotices={};trustCheckbox.checked=consentCheckbox.checked=false;applyPlugin.disabled=true;
+    previewText.textContent='Review the exact artifact below. Selecting an integration does not install or trust it.';
+    noticeText.textContent='';noticeText.classList.add('hidden');consentLabel.classList.add('hidden');
+    section('plugins');previewButton.focus?.({preventScroll:true});pluginCard.scrollIntoView?.({behavior:'smooth',block:'start'});
+  }
   const showPreview = value => { pluginPreview = value; pluginNotices = {}; consentCheckbox.checked = false; consentLabel.classList.add('hidden'); noticeText.classList.add('hidden'); previewText.textContent = pretty(value); trustCheckbox.checked = false; applyPlugin.disabled = !['disable', 'uninstall'].includes(value?.operation); };
   trustCheckbox.addEventListener('change', () => { applyPlugin.disabled = !pluginPreview || (!trustCheckbox.checked && !['disable', 'uninstall'].includes(pluginPreview.operation)); });
   pluginForm.addEventListener('submit', async event => {
