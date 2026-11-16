@@ -329,12 +329,15 @@ export function mountNativeConfigForm({ document: doc, mount, onChange = () => {
         return list;
       }
     }
-    const simple = ['string', 'integer', 'number'].includes(kind), input = make(simple && !field.hint?.multiline ? 'input' : 'textarea');
-    input.type = kind === 'integer' || kind === 'number' ? 'number' : 'text'; input.autocomplete = 'off'; input.spellcheck = false;
-    if (kind === 'integer') input.step = '1'; else if (kind === 'number') input.step = 'any';
-    if (typeof schema.minimum === 'number') input.min = String(schema.minimum);
-    if (typeof schema.maximum === 'number') input.max = String(schema.maximum);
-    input.rows = simple ? 3 : 5; input.value = value === undefined || value === null && simple ? '' : simple ? String(value) : JSON.stringify(value, null, 2);
+    const simple = ['string', 'integer', 'number'].includes(kind), singleLine = simple && !field.hint?.multiline, input = make(singleLine ? 'input' : 'textarea');
+    if (singleLine) {
+      input.type = kind === 'integer' || kind === 'number' ? 'number' : 'text';
+      if (kind === 'integer') input.step = '1'; else if (kind === 'number') input.step = 'any';
+      if (typeof schema.minimum === 'number') input.min = String(schema.minimum);
+      if (typeof schema.maximum === 'number') input.max = String(schema.maximum);
+    } else input.rows = simple ? 3 : 5;
+    input.autocomplete = 'off'; input.spellcheck = false;
+    input.value = value === undefined || value === null && simple ? '' : simple ? String(value) : JSON.stringify(value, null, 2);
     input.placeholder = text(field.hint?.placeholder || (own(schema, 'default') ? `Native default: ${JSON.stringify(schema.default)}` : simple ? '' : 'Native JSON value'));
     input.addEventListener('change', () => act(() => changed(parseNativeConfigField(field, input.value))));
     return input;

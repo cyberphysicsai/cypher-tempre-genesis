@@ -505,7 +505,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   const $ = id => doc.getElementById(id), panel = $('openclawPanel');
   let snapshot = null, loading = false, activeSection = 'configuration', selectedFamily = '';
   let connectionKey = '', connectionRevision = 0, pendingRefresh = false;
-  let configDirty = false, configSaving = false, configEditRevision = null, nativeCapabilityControls = null, nativeSourceControls = null, nativeSecretControls = null;
+  let configDirty = false, configSaving = false, configFormFailed = false, configEditRevision = null, nativeCapabilityControls = null, nativeSourceControls = null, nativeSecretControls = null;
   let toolContext = {}, toolSnapshot = null, toolSaving = false;
   const configForm = $('nativeConfigFormMount') ? mountNativeConfigForm({document:doc,mount:$('nativeConfigFormMount'),
     onError:failure=>error(failure?.message || String(failure)),
@@ -518,6 +518,21 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     onSave:payload=>api('/api/openclaw/channels/setup',payload),
     onAction:payload=>api('/api/openclaw/channels/action',payload),onSaved:()=>refresh()}) : null;
   function error(message = '') { $('nativeError').textContent = message; }
+  function holdConfigForm() {
+    configFormFailed = true;
+    if ($('nativeConfigFormMount')) $('nativeConfigFormMount').inert = true;
+    $('saveNativeConfig').disabled = true;
+    const notice = 'The native settings form could not render. Reload native settings to retry. Other runtime controls remain available.';
+    $('nativeConfigNotice').textContent = notice; error(notice);
+  }
+  function updateConfigForm(next, { recover = false, reset = false } = {}) {
+    if (configFormFailed && !recover) return false;
+    try {
+      if (reset) configForm?.reset(next); else configForm?.update(next);
+      if (recover) { configFormFailed = false; if ($('nativeConfigFormMount')) $('nativeConfigFormMount').inert = false; }
+      return true;
+    } catch { holdConfigForm(); return false; }
+  }
   function renderToolStatus() {
     const view = chatToolAccess(toolSnapshot, toolContext);
     const status = toolSaving ? 'Saving tool permissions…' : view.status;
@@ -606,7 +621,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     list('nativeServicesRuns', [...occurrences].reverse().slice(0, 30), 'No service requests have been accepted yet.');
   }
   function reference() {
-    configForm?.update({family:selectedFamily,query:$('nativeSchemaSearch').value});
+    updateConfigForm({family:selectedFamily,query:$('nativeSchemaSearch').value});
     const list = $('nativeSchemaFields'); list.replaceChildren();
     for (const field of schemaFields(snapshot?.schema, $('nativeSchemaSearch').value, selectedFamily)) {
       const row = doc.createElement('div'); row.className = 'native-schema-field';
@@ -638,12 +653,12 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     const schemaController=typeof next.config?.baseHash==='string';
     $('nativeConnection').textContent = `OpenClaw ${next.runtime?.version || ''} · ${next.sessionKey ? 'Selected agent session' : 'Select a Timechain to use session controls'}`;
     if (!configDirty) { $('nativeConfigEditor').value = pretty(next.config?.editable || {}); configEditRevision = next.config?.revision; }
-    configForm?.update({schema:next.schema?.schema || next.schema,uiHints:next.schema?.uiHints || {},
+    const formReady=updateConfigForm({schema:next.schema?.schema || next.schema,uiHints:next.schema?.uiHints || {},
       effective:next.config?.effective || next.nativeConfig?.config || {},editable:next.config?.editable || {},
       guards:nativeBlockedConfigGuards(next),guardFor:(parts,options)=>nativeConfigGuardFor(next,parts,options),revision:next.config?.revision,baseHash:next.config?.baseHash || next.nativeConfig?.hash,
-      contextKey:connectionKey,disabled:configSaving||!schemaController,family:selectedFamily,query:$('nativeSchemaSearch').value});
-    $('saveNativeConfig').disabled=configSaving||!schemaController;
-    $('nativeConfigNotice').textContent = schemaController ? next.config?.notice || 'Changes are validated against the pinned native schema.' : 'Install ChainChat 1.1.0 for native settings forms and guided integration setup. This page shows the configuration reported by your older local runtime.';
+      contextKey:connectionKey,disabled:configSaving||!schemaController,family:selectedFamily,query:$('nativeSchemaSearch').value},{recover:true});
+    $('saveNativeConfig').disabled=configSaving||!schemaController||!formReady;
+    if(formReady)$('nativeConfigNotice').textContent = schemaController ? next.config?.notice || 'Changes are validated against the pinned native schema.' : 'Install ChainChat 1.1.0 for native settings forms and guided integration setup. This page shows the configuration reported by your older local runtime.';
     $('nativeProtectedPaths').textContent = (next.config?.protectedPaths || []).map(path => `${path}\n  ${next.config?.guards?.[path] || 'Managed by the local operator facade.'}`).join('\n\n');
     $('nativeSchemaJson').textContent = pretty(next.schema);
     $('nativeEffectiveConfig').textContent = pretty(next.nativeConfig);
@@ -724,7 +739,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     nativeCapabilityControls?.reset();
     nativeSourceControls?.reset();
     nativeSecretControls?.reset();
-    configForm?.reset({schema:{},effective:{},editable:{},contextKey:connectionKey,disabled:true});
+    updateConfigForm({schema:{},effective:{},editable:{},contextKey:connectionKey,disabled:true},{recover:true,reset:true});
     channelSetup?.reset();
     pluginPreview = null; pluginNotices = {}; trustCheckbox.checked = false; consentCheckbox.checked = false;
     applyPlugin.disabled = true; previewText.textContent = ''; noticeText.textContent = '';
@@ -768,19 +783,20 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     });
   }
   section('configuration');
-  $('refreshNativeControls').addEventListener('click', () => { configDirty = false; configForm?.reset({contextKey:connectionKey}); void refresh(); });
+  $('refreshNativeControls').addEventListener('click', () => { configDirty = false; updateConfigForm({contextKey:connectionKey},{recover:true,reset:true}); void refresh(); });
   $('nativeConfigEditor').addEventListener('input', () => { if (!configDirty) configEditRevision = snapshot?.config?.revision; configDirty = true; });
   $('nativeSchemaSearch').addEventListener('input', reference);
   $('saveNativeConfig').addEventListener('click', async () => {
-    if(configSaving||!isConnected())return;
+    if(configSaving||configFormFailed||!isConnected())return;
     error();
     const revision=connectionRevision,current=()=>revision===connectionRevision&&isConnected();
-    const button=$('saveNativeConfig');button.disabled=$('refreshNativeControls').disabled=true;configSaving=true;configForm?.update({disabled:true});
-    try { const payload=configForm ? configForm.getPayload() : {patch:JSON.parse($('nativeConfigEditor').value),revision:configDirty ? configEditRevision : snapshot?.config?.revision,baseHash:snapshot?.nativeConfig?.hash};
+    const button=$('saveNativeConfig');button.disabled=$('refreshNativeControls').disabled=true;configSaving=true;
+    try { if(!updateConfigForm({disabled:true}))return;
+      const payload=configForm ? configForm.getPayload() : {patch:JSON.parse($('nativeConfigEditor').value),revision:configDirty ? configEditRevision : snapshot?.config?.revision,baseHash:snapshot?.nativeConfig?.hash};
       await api('/api/openclaw/config', payload); if(!current())return;
-      configDirty = false; configForm?.reset({contextKey:connectionKey}); await refresh(); }
+      configDirty = false; updateConfigForm({contextKey:connectionKey},{recover:true,reset:true}); await refresh(); }
     catch (failure) { if(current())error(failure.message); }
-    finally {if(current()){configSaving=false;button.disabled=$('refreshNativeControls').disabled=false;configForm?.update({disabled:false});}}
+    finally {if(current()){configSaving=false;$('refreshNativeControls').disabled=false;updateConfigForm({disabled:typeof snapshot?.config?.baseHash!=='string'});button.disabled=configFormFailed||typeof snapshot?.config?.baseHash!=='string';}}
   });
   $('nativeCommandForm').addEventListener('submit', event => { event.preventDefault(); void run($('nativeCommandInput').value.trim()); });
   $('startNativeGoal').addEventListener('click', () => { const objective = $('nativeGoalObjective').value.trim(); if (objective) void run(`/goal start ${objective}`); else error('Write a goal objective first.'); });
