@@ -112,7 +112,7 @@
         <span class="status-dot" id="bridgeDot"></span
         ><span id="bridgeStatus">LOCAL-FIRST WORKSPACE</span
         ><span class="top-divider"></span
-        ><span class="mono" id="appVersion">v1.1.2</span>
+        ><span class="mono" id="appVersion">v1.1.3</span>
       </div>
       <div class="top-actions">
         <button class="quiet-button setup-guide-button" id="setupGuideButton" type="button">Setup guide</button>
@@ -453,17 +453,20 @@
       <section data-native-section="commands" class="hidden"><div class="native-card"><h2>OpenClaw chat controls</h2><p>Use native slash commands in the chat or here. Session preferences apply to the selected agent; resetting native chat context keeps its Timechain.</p><form id="nativeCommandForm"><label class="field">Command<input id="nativeCommandInput" autocomplete="off" spellcheck="false" placeholder="/help"></label><div class="native-actions"><button type="submit" class="primary-button">Run command</button><button id="compactNativeSession" type="button" class="secondary-button">Optional reviewed summary</button></div></form><div class="native-context-policy"><h3>Conversation memory policy</h3><p id="nativeContextPolicy" role="status">Connect the runtime to read its context policy. A model context window remains bounded.</p><p class="fine-print">The optional reviewed summary is an explicit advanced action. It passes through PoI and keeps the Timechain; it is separate from ordinary relevant-history retrieval.</p></div><pre id="nativeCommandResult"></pre><div id="nativeCommandCatalogue" class="native-command-list"></div></div></section>
       <section data-native-section="tools" class="hidden">
         <form id="nativeToolsForm" class="native-card">
-          <h2 id="nativeToolsTitle" tabindex="-1">Agent tool permissions</h2>
-          <p>Choose what this agent may use. Proof of Interaction reviews each proposed tool call against the grant and the Timechain covenant.</p>
+          <h2 id="nativeToolsTitle" tabindex="-1">Files, shell and network permissions</h2>
+          <p>Use this form to grant Read, Write, Edit, Run shell commands, or browser and web access to the selected agent. OpenClaw settings and additional native capability checkboxes below do not enable these tools.</p>
+          <p class="fine-print">Choose the tools and their scope, enable them, acknowledge the grant, then select Apply tool permissions. Checkbox changes alone do not save permissions. Applied grants are read for the next chat turn; a runtime restart is not normally needed. Each proposed action still requires Proof of Interaction.</p>
           <p id="nativeToolScopeStatus" class="fine-print" role="status"></p>
-          <label class="native-check"><input id="nativeToolsEnabled" type="checkbox">Enable selected tools for this agent</label>
+          <p id="nativeToolDraftStatus" class="fine-print" role="status"></p>
+          <label class="native-check"><input id="nativeToolsEnabled" type="checkbox">Enable the selected file, shell and network tools for this agent</label>
           <div id="nativeToolChoices" class="native-tool-choices"></div>
           <label class="field">Allowed workspace directories (one absolute path per line)<textarea id="nativeToolRoots" rows="3" placeholder="Directories this agent may read or edit"></textarea></label>
           <label class="field">Allowed network hosts (one per line)<textarea id="nativeToolHosts" rows="3" placeholder="docs.example.com"></textarea></label>
           <label class="native-check"><input id="nativeExecutionAllowed" type="checkbox">Allow local command execution under my user account</label>
           <p class="fine-print">With execution granted, ask your agent in chat to run a command. Shell commands run with your local OS permissions. Directory restrictions apply to scoped file tools.</p>
           <label class="native-check"><input id="nativeToolsAcknowledged" type="checkbox">I authorize the selected tools and understand their stated scope.</label>
-          <div class="native-actions"><button type="submit" class="primary-button">Apply tool permissions</button><button id="disableNativeTools" type="button" class="secondary-button">Revoke saved tool grants</button></div>
+          <div class="native-actions"><button type="submit" class="primary-button">Apply tool permissions</button><button id="disableNativeTools" type="button" class="secondary-button">Revoke all saved tool grants</button></div>
+          <p class="fine-print">Turn off the file, shell and network grant and apply it to leave additional native capabilities unchanged. Revoke all saved tool grants clears both grants for this agent. Existing Timechain history remains unchanged.</p>
         </form>
       </section>
       <section data-native-section="channels" class="hidden"><div id="nativeChannelSetupMount"></div><div class="native-service-grid"><form id="nativeChannelBindingForm" class="native-card"><h2>Bind a channel to this agent</h2><p>Connect the native account below, then choose its exact conversation and authorized senders. Incoming message text cannot select a different chain.</p><label class="field">Binding name<input id="nativeBindingName" required maxlength="256" placeholder="My team chat" autocomplete="off"></label><div class="native-service-grid"><label class="field">Native channel ID<input id="nativeBindingChannel" required maxlength="128" placeholder="telegram" autocomplete="off"></label><label class="field">Account ID<input id="nativeBindingAccount" required maxlength="128" value="default" autocomplete="off"></label></div><label class="field">Conversation ID<input id="nativeBindingConversation" required maxlength="512" placeholder="Exact native conversation ID" autocomplete="off"></label><label class="field">Allowed sender IDs (one per line)<textarea id="nativeBindingSenders" rows="3" required placeholder="Exact native sender IDs"></textarea></label><button type="submit" class="primary-button" id="nativeCreateBinding">Bind verified agent</button></form><details class="native-card"><summary>Advanced legacy account connector</summary><form id="nativeChannelConnectForm" class="native-card" autocomplete="off"><h2>Connect a native channel account</h2><p>Use a bundled or explicitly trusted native channel plugin. Credentials stay in local runtime memory and must be reconnected after restart. Put secret values only in the password fields.</p><div class="native-service-grid"><label class="field">Native channel ID<input id="nativeConnectChannel" required maxlength="128" placeholder="telegram" autocomplete="off"></label><label class="field">Account ID<input id="nativeConnectAccount" required maxlength="128" value="default" autocomplete="off"></label></div><label class="field">Non-secret native account settings (JSON)<textarea id="nativeChannelConfig" rows="4" spellcheck="false" autocomplete="off">{}</textarea></label><div id="nativeCredentialRows" class="native-credential-rows"></div><div class="native-actions"><button id="nativeAddCredential" class="quiet-button" type="button">+ Credential field</button><button type="submit" id="nativeConnectChannelButton" class="primary-button">Connect in local memory</button></div></form></details></div><div class="native-card"><h2>Channel bindings</h2><div id="nativeServicesChannels" class="native-service-list"></div></div></section>
@@ -578,13 +581,13 @@
       <div class="beta-actions">
         <a
           class="quiet-button"
-          href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.2/CypherTempre-ChainChat-Setup-1.1.2-windows-x64.exe"
+          href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.3/CypherTempre-ChainChat-Setup-1.1.3-windows-x64.exe"
           target="_blank"
           rel="noopener noreferrer"
           >Install ChainChat for Windows</a
         >
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.2/CypherTempre-ChainChat-Setup-1.1.2-macos.zip" rel="noopener noreferrer">Install for macOS</a>
-        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.2/CypherTempre-ChainChat-Setup-1.1.2-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.3/CypherTempre-ChainChat-Setup-1.1.3-macos.zip" rel="noopener noreferrer">Install for macOS</a>
+        <a class="quiet-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.3/CypherTempre-ChainChat-Setup-1.1.3-linux.tar.gz" rel="noopener noreferrer">Install for Linux</a>
         <a class="quiet-button" href="#chain-auditor">Open chain auditor</a>
       </div>
     </section>
@@ -709,9 +712,9 @@
         <li>Create a genesis or select an existing Timechain. Your equipped faculties and skill bar work there.</li>
       </ol>
       <div class="platform-downloads">
-        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.2/CypherTempre-ChainChat-Setup-1.1.2-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.2/CypherTempre-ChainChat-Setup-1.1.2-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
-        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.2/CypherTempre-ChainChat-Setup-1.1.2-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.3/CypherTempre-ChainChat-Setup-1.1.3-windows-x64.exe" rel="noopener noreferrer">Windows ↗<small>x64 · Setup.exe</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.3/CypherTempre-ChainChat-Setup-1.1.3-macos.zip" rel="noopener noreferrer">macOS ↗<small>Apple silicon + Intel · macOS 13.5+</small></a>
+        <a class="primary-button" href="https://github.com/cyberphysicsai/chainchat/releases/download/v1.1.3/CypherTempre-ChainChat-Setup-1.1.3-linux.tar.gz" rel="noopener noreferrer">Linux ↗<small>x64 + ARM64 · glibc 2.28+</small></a>
       </div>
       <p class="fine-print">Already installed? Open <strong>ChainChat</strong> from your application launcher. It opens the authenticated local chat. Your API key stays in the running app's memory.</p>
       <p class="fine-print">The website is also available as an optional remote-facing interface to your local app. That advanced mode uses a connection code; the installed chat does not.</p>

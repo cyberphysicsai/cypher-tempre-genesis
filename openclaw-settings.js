@@ -124,9 +124,15 @@ export function mountNativeCapabilityCard({ document: doc, mount, api, onSaved =
     const node = doc.createElement(tag); node.textContent = text; if (className) node.className = className; return node;
   };
   const form = make('form', '', 'native-card native-capability-card'); form.id = 'nativeCapabilityForm';
-  form.append(make('h2', 'Additional native OpenClaw capabilities'), make('p',
-    "Native tools run with OpenClaw's host privileges. This is not an OS or filesystem sandbox. Scoped file, browser, execution and goal tools keep their separate controls above. PoI, credentials and private transport stay protected."));
+  form.append(make('h2', 'Additional OpenClaw tools and settings'), make('p',
+    "This form grants additional native tools and settings. Changes are saved only when you select Apply native capability grant; checking a box alone does not save it. This form does not enable Read, Write, Edit, Run shell commands, process controls, web fetch or browser access. Configure those in Files, shell and network permissions above. Native tools run with OpenClaw's host privileges and are not an OS or filesystem sandbox. PoI, credentials and private transport stay protected."));
+  const scopedShortcut = make('button', 'Configure files, shell and network tools ↑', 'text-button'); scopedShortcut.type = 'button'; scopedShortcut.id = 'nativeScopedToolsShortcut';
+  scopedShortcut.addEventListener('click', () => {
+    const target = doc.getElementById?.('nativeToolsTitle'); target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); target?.focus?.({ preventScroll: true });
+  });
+  form.append(scopedShortcut);
   const status = make('p', '', 'native-capability-status'); status.id = 'nativeCapabilityStatus'; status.setAttribute('role', 'status');
+  const draftStatus = make('p', '', 'fine-print'); draftStatus.id = 'nativeCapabilityDraftStatus'; draftStatus.setAttribute('role', 'status');
   const controls = make('fieldset', '', 'native-capability-controls'); controls.append(make('legend', 'Native owner grant', 'sr-only'));
   function check(id, text) {
     const label = make('label', '', 'native-check'), input = make('input'); input.type = 'checkbox'; input.id = id;
@@ -144,32 +150,40 @@ export function mountNativeCapabilityCard({ document: doc, mount, api, onSaved =
   const acknowledged = check('nativeCapabilitiesAcknowledged', 'I authorize these additional native capabilities with OpenClaw host privileges and understand that they are not sandboxed.');
   const actions = make('div', '', 'native-actions'), save = make('button', 'Apply native capability grant', 'primary-button'); save.type = 'submit'; save.id = 'saveNativeCapabilities';
   const revoke = make('button', 'Revoke additional native capabilities', 'secondary-button'); revoke.type = 'button'; revoke.id = 'revokeNativeCapabilities';
-  actions.append(save, revoke); form.append(status, controls, actions); mount.append(form);
-  let catalogue = [], last = null, ready = false, busy = false, epoch = 0;
+  actions.append(save, revoke); form.append(status, draftStatus, controls, actions); mount.append(form);
+  let catalogue = [], last = null, ready = false, busy = false, dirty = false, epoch = 0;
   const choices = new Map();
-  const availability = () => { controls.disabled = !ready || busy; save.disabled = !ready || busy; revoke.disabled = !ready || busy; paths.disabled = allSettings.checked; };
+  const availability = () => {
+    controls.disabled = !ready || busy; save.disabled = !ready || busy; revoke.disabled = !ready || busy; paths.disabled = allSettings.checked;
+    draftStatus.textContent = busy ? 'Applying these native choices. The saved grant is shown above.'
+      : dirty ? 'Unapplied native choices. Acknowledge this scope and select Apply native capability grant; chat still uses the saved grant shown above.'
+        : ready ? 'Showing the saved native grant for this agent. Checking a box does not save it.' : 'Load the selected agent’s saved native grant before applying permissions.';
+  };
   function render(next) {
     last = next;
     ready = !!(next?.sessionKey || next?.selectedAgentId) && Array.isArray(next?.nativeToolCatalogue);
-    catalogue = nativeCapabilityCatalogue(next?.nativeToolCatalogue); choices.clear(); tools.replaceChildren();
+    catalogue = nativeCapabilityCatalogue(next?.nativeToolCatalogue);
     const grant = next?.toolAuthority?.grant?.nativeCapabilities || {};
-    enabled.checked = grant.enabled === true; acknowledged.checked = false;
-    allSettings.checked = Array.isArray(grant.settings) && grant.settings.includes('*');
-    paths.value = (Array.isArray(grant.settings) ? grant.settings : []).filter(path => typeof path === 'string' && path !== '*').join('\n');
-    delegated.checked = grant.delegatedRuns === true; background.checked = grant.backgroundRuns === true;
-    for (const row of catalogue) {
-      const label = make('label', '', 'native-check native-capability-choice'), input = make('input'); input.type = 'checkbox';
-      input.dataset.nativeExtraTool = row.name; input.checked = (grant.tools || []).includes(row.name);
-      input.disabled = !row.available || row.scopedHostTool; choices.set(row.name, input);
-      const copy = make('span'); copy.append(make('strong', row.name), make('small', row.scopedHostTool ? 'Separate scoped host-tool controls' : !row.available ? 'Not available in this runtime' : row.description || 'Discovered native tool'));
-      label.append(input, copy); tools.append(label);
+    if (!dirty) {
+      choices.clear(); tools.replaceChildren();
+      enabled.checked = grant.enabled === true; acknowledged.checked = false;
+      allSettings.checked = Array.isArray(grant.settings) && grant.settings.includes('*');
+      paths.value = (Array.isArray(grant.settings) ? grant.settings : []).filter(path => typeof path === 'string' && path !== '*').join('\n');
+      delegated.checked = grant.delegatedRuns === true; background.checked = grant.backgroundRuns === true;
+      for (const row of catalogue) {
+        const label = make('label', '', 'native-check native-capability-choice'), input = make('input'); input.type = 'checkbox';
+        input.dataset.nativeExtraTool = row.name; input.checked = (grant.tools || []).includes(row.name);
+        input.disabled = !row.available || row.scopedHostTool; choices.set(row.name, input);
+        const copy = make('span'); copy.append(make('strong', row.name), make('small', row.scopedHostTool ? 'Separate scoped host-tool controls' : !row.available ? 'Not available in this runtime' : row.description || 'Discovered native tool'));
+        label.append(input, copy); tools.append(label);
+      }
+      if (!catalogue.length) tools.append(make('p', ready ? 'No additional native tools are currently discovered. Native settings admission remains available.' : 'Select a local agent in a runtime that advertises native capabilities.', 'fine-print'));
     }
-    if (!catalogue.length) tools.append(make('p', ready ? 'No additional native tools are currently discovered. Native settings admission remains available.' : 'Select a local agent in a runtime that advertises native capabilities.', 'fine-print'));
     status.textContent = !ready ? 'Connect a selected agent to inspect its native capability catalogue.' : grant.enabled === true
-      ? 'Owner grant saved · every call still requires PoI and current runtime admission.' : 'Additional native capabilities are disabled. Scoped host-tool permissions remain separate.';
+      ? 'Additional native grant saved. File, shell and network permissions are separate; this card does not enable them.' : 'Additional native capabilities are disabled. File, shell and network permissions are separate.';
     availability();
   }
-  function reset() { epoch++; busy = false; render(null); }
+  function reset() { epoch++; busy = false; dirty = false; render(null); }
   async function apply(revoking = false) {
     if (!ready || busy) return;
     let payload;
@@ -182,12 +196,17 @@ export function mountNativeCapabilityCard({ document: doc, mount, api, onSaved =
     try {
       const result = await api('/api/openclaw/native-capabilities', payload);
       if (version !== epoch || owner !== context()) return;
+      dirty = false;
       render({ ...last, toolAuthority: result.toolAuthority, nativeToolCatalogue: result.catalogue });
-      status.textContent = revoking ? 'Additional native capabilities revoked. The local app requested cancellation of active calls.' : 'Native capability grant saved. Each action still requires fresh PoI and runtime admission.';
+      status.textContent = revoking ? 'Additional native capabilities revoked. The local app requested cancellation of active calls.' : 'Additional native grant saved. It does not enable file, shell or network tools; each admitted action still requires PoI.';
       await onSaved();
     } catch (failure) { if (version === epoch && owner === context()) onError(failure.message); }
     finally { if (version === epoch && owner === context()) { busy = false; availability(); } }
   }
+  form.addEventListener('input', event => {
+    if (event.target !== acknowledged) acknowledged.checked = false;
+    dirty = true; availability();
+  });
   form.addEventListener('submit', event => { event.preventDefault(); return apply(); });
   revoke.addEventListener('click', () => apply(true)); allSettings.addEventListener('change', availability);
   render(null);
@@ -506,7 +525,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   let snapshot = null, loading = false, activeSection = 'configuration', selectedFamily = '';
   let connectionKey = '', connectionRevision = 0, pendingRefresh = false;
   let configDirty = false, configSaving = false, configFormFailed = false, configEditRevision = null, nativeCapabilityControls = null, nativeSourceControls = null, nativeSecretControls = null;
-  let toolContext = {}, toolSnapshot = null, toolSaving = false;
+  let toolContext = {}, toolSnapshot = null, toolSaving = false, toolDirty = false;
   const configForm = $('nativeConfigFormMount') ? mountNativeConfigForm({document:doc,mount:$('nativeConfigFormMount'),
     onError:failure=>error(failure?.message || String(failure)),
     onChange:()=>{configDirty=true;},
@@ -536,11 +555,15 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   function renderToolStatus() {
     const view = chatToolAccess(toolSnapshot, toolContext);
     const status = toolSaving ? 'Saving tool permissions…' : view.status;
-    for (const [id, text] of [['chatToolsStatus', status], ['nativeToolScopeStatus', view.detail]]) {
+    for (const [id, text] of [['chatToolsStatus', status], ['nativeToolScopeStatus', `${view.status}. ${view.detail}`]]) {
       const node = $(id);
       if (node && node.textContent !== text) node.textContent = text;
     }
     if ($('chatToolsStatus')) $('chatToolsStatus').title = view.detail;
+    if ($('nativeToolDraftStatus')) $('nativeToolDraftStatus').textContent = toolSaving
+      ? 'Applying these choices. The saved grant is shown above.'
+      : toolDirty ? 'Unapplied choices. Acknowledge this scope and select Apply tool permissions; chat still uses the saved grant shown above.'
+        : toolSnapshot ? 'Showing the saved grant for this agent. Checking a box does not save a grant.' : 'Load the selected agent’s saved grant before applying permissions.';
     const canChange = toolContext.connected && toolContext.agentId && !toolSaving;
     $('nativeToolsForm').querySelector('button[type="submit"]').disabled = !canChange || !toolSnapshot;
     $('disableNativeTools').disabled = !canChange;
@@ -677,24 +700,26 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     }
     toolSnapshot = next;
     const grant = next.toolAuthority?.grant || {};
-    for (const name of ['evaluate', 'credentials', 'payments']) {
+    if (!toolDirty) for (const name of ['evaluate', 'credentials', 'payments']) {
       const checkbox = doc.querySelector(`[data-browser-capability="${name}"]`);
       if (checkbox) checkbox.checked = grant.browserCapabilities?.[name] === true;
     }
     if ($('nativePluginCatalogue')) $('nativePluginCatalogue').textContent = pretty(next.plugins || { notice: 'Install the current local release to use trusted plugins.' });
     if ($('nativeBrowserRuntime')) $('nativeBrowserRuntime').textContent = pretty(next.browserRuntime || { state: 'Install the current local release for managed browser setup.' });
-    $('nativeToolsEnabled').checked = grant.enabled === true;
-    $('nativeExecutionAllowed').checked = grant.allowExecution === true;
-    $('nativeToolsAcknowledged').checked = false;
-    $('nativeToolRoots').value = (grant.roots || []).join('\n');
-    $('nativeToolHosts').value = (grant.networkHosts || []).join('\n');
-    const tools = $('nativeToolChoices'); tools.replaceChildren();
-    for (const { name, label: title, details, available, selected } of hostToolChoices(next)) {
-      const label = doc.createElement('label'); label.className = 'native-check';
-      const checkbox = doc.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.hostTool = name; checkbox.checked = selected;
-      checkbox.disabled = !available;
-      const text = doc.createElement('span'); text.textContent = `${title} (${name}) · ${details}`;
-      label.append(checkbox, text); tools.append(label);
+    if (!toolDirty) {
+      $('nativeToolsEnabled').checked = grant.enabled === true;
+      $('nativeExecutionAllowed').checked = grant.allowExecution === true;
+      $('nativeToolsAcknowledged').checked = false;
+      $('nativeToolRoots').value = (grant.roots || []).join('\n');
+      $('nativeToolHosts').value = (grant.networkHosts || []).join('\n');
+      const tools = $('nativeToolChoices'); tools.replaceChildren();
+      for (const { name, label: title, details, available, selected } of hostToolChoices(next)) {
+        const label = doc.createElement('label'); label.className = 'native-check';
+        const checkbox = doc.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.hostTool = name; checkbox.checked = selected;
+        checkbox.disabled = !available;
+        const text = doc.createElement('span'); text.textContent = `${title} (${name}) · ${details}`;
+        label.append(checkbox, text); tools.append(label);
+      }
     }
     renderToolStatus();
     nativeCapabilityControls?.render(next);
@@ -733,7 +758,7 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
     connectionKey = next; connectionRevision++; configDirty = false; configSaving=false; configEditRevision = null;
     $('saveNativeConfig').disabled=$('refreshNativeControls').disabled=!connected;
     snapshot = null; selectedFamily = ''; $('nativeConnectedControls').disabled = true;
-    toolSnapshot = null; toolSaving = false;
+    toolSnapshot = null; toolSaving = false; toolDirty = false;
     $('nativeToolsForm').inert = false;
     renderToolStatus(); renderToolActivity(null, false);
     nativeCapabilityControls?.reset();
@@ -805,18 +830,28 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   const toolForm = $('nativeToolsForm');
   async function saveToolGrant(grant) {
     if (toolSaving || !toolContext.connected || !toolContext.agentId) return;
+    const operations = Array.isArray(toolSnapshot?.toolAuthority?.operations) ? toolSnapshot.toolAuthority.operations : [];
+    if (grant.operation === 'save' && !operations?.includes('save'))
+      return error('Update your local ChainChat to 1.1.3 to save separate permission scopes. Your saved grants have not changed.');
+    const request = grant.operation === 'revoke-all' && !operations?.includes('revoke-all') ? { enabled: false } : grant;
     if (grant.enabled) {
       if (!toolSnapshot) return error('Refresh Tool access before applying a grant.');
       if (!grant.acknowledged) return error('Acknowledge the selected permissions before applying this grant.');
+      if (!grant.tools.length) return error('Select the file, shell or network tools to grant before applying. Additional OpenClaw tools have their own form below.');
+      if (grant.tools.some(name => ['read', 'write', 'edit'].includes(name)) && !grant.roots.length)
+        return error('Add an allowed workspace directory for the selected Read, Write or Edit tools.');
+      if (grant.tools.some(name => ['web_fetch', 'browser'].includes(name)) && !grant.networkHosts.length)
+        return error('Add at least one allowed public hostname for the selected web or browser tools.');
       if (grant.tools.some(name => name === 'exec' || name === 'process') && !grant.allowExecution)
         return error('Shell commands and process controls require the separate local execution permission.');
     }
     const revision = connectionRevision;
     toolSaving = true; toolForm.inert = true; renderToolStatus(); error();
     try {
-      await api('/api/openclaw/tools', grant);
+      await api('/api/openclaw/tools', request);
       if (revision !== connectionRevision) return;
-      toolSnapshot = null; renderToolStatus();
+      if (grant.operation === 'revoke-all') nativeCapabilityControls?.reset();
+      toolDirty = false; toolSnapshot = null; renderToolStatus();
       await refresh();
     } catch (failure) {
       if (revision === connectionRevision) error(failure.message);
@@ -828,17 +863,22 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   }
   toolForm.addEventListener('input', event => {
     if (event.target !== $('nativeToolsAcknowledged')) $('nativeToolsAcknowledged').checked = false;
+    toolDirty = true; renderToolStatus();
+  });
+  panel.addEventListener('input', event => {
+    if (!event.target?.dataset?.browserCapability) return;
+    $('nativeToolsAcknowledged').checked = false; toolDirty = true; renderToolStatus();
   });
   toolForm.addEventListener('submit', event => {
     event.preventDefault();
-    const grant = { enabled: $('nativeToolsEnabled').checked, tools: [...toolForm.querySelectorAll('[data-host-tool]:checked')].map(node => node.dataset.hostTool),
+    const grant = { operation: 'save', enabled: $('nativeToolsEnabled').checked, tools: [...toolForm.querySelectorAll('[data-host-tool]:checked')].map(node => node.dataset.hostTool),
       roots: lines($('nativeToolRoots').value), networkHosts: lines($('nativeToolHosts').value),
       allowExecution: $('nativeExecutionAllowed').checked, acknowledged: $('nativeToolsAcknowledged').checked,
       browserCapabilities: Object.fromEntries([...panel.querySelectorAll('[data-browser-capability]')].map(node => [node.dataset.browserCapability, node.checked])) };
     void saveToolGrant(grant);
   });
   $('disableNativeTools').addEventListener('click', () => {
-    void saveToolGrant({ enabled: false, tools: [], roots: [], networkHosts: [], allowExecution: false, acknowledged: false });
+    void saveToolGrant({ operation: 'revoke-all' });
   });
   nativeCapabilityControls = mountNativeCapabilityCard({ document: doc, mount: $('nativeToolsForm').parentElement,
     api, onSaved: refresh, onError: error, context: () => connectionRevision });

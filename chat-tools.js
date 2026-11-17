@@ -63,14 +63,15 @@ export function chatToolAccess(snapshot, { connected, agentId, agentName, memory
     && (name !== 'browser' || browserReady)
     && (!['exec', 'process'].includes(name) || shell));
   const agent = typeof agentName === 'string' && agentName.trim() ? agentName.slice(0, 120) : 'this agent';
-  const detail = `Saved for ${agent}: ${savedCount} host tool grants, ${nativeCount} additional native tool grants, ${directoryCount} allowed directories, ${hostCount} allowed public hosts. Shell and process execution grant ${shell ? 'on' : 'off'}. Each proposed action still requires PoI and its native approvals.`;
+  const detail = `Saved for ${agent}: ${savedCount} file, shell and network tool grants, ${nativeCount} additional native tool grants, ${directoryCount} allowed directories, ${hostCount} allowed public hosts. Shell and process execution grant ${shell ? 'on' : 'off'}. Additional OpenClaw tools or settings do not enable the separate read, write, edit, exec, process, web_fetch or browser grants. Each proposed action still requires PoI and its native approvals.`;
 
-  if (memoryPaused) return { status: 'Tools paused with memory', detail };
-  if (chainHeld) return { status: 'Tools held for chain review', detail };
+  if (memoryPaused) return { status: 'Tools paused with memory', detail: `${detail} Saved tool grants are inactive while the Timechain is paused. Resume Timechain to use tools; applying permissions does not resume it.` };
+  if (chainHeld) return { status: 'Tools held for chain review', detail: `${detail} Saved grants cannot run tools while chain review is required. Resolve the chain hold before using them.` };
   if (!savedCount && !nativeCount) return { status: 'Tools off', detail };
-  if (runtimeReady !== true) return { status: 'Grants saved · runtime unavailable', detail };
-  if (modelConfigured === false) return { status: 'Grants saved · select a model', detail };
+  if (runtimeReady !== true) return { status: 'Grants saved · runtime unavailable', detail: `${detail} Saved grants are not ready to run: check local runtime health.` };
+  if (modelConfigured === false) return { status: 'Grants saved · select a model', detail: `${detail} Connect a model before requesting a tool action.` };
   if (usable.length < savedCount) return { status: 'Some tool grants need setup', detail };
+  if (!savedCount && nativeCount) return { status: 'Native grants only · exec off', detail };
   return { status: `${savedCount + nativeCount} tool grants saved`, detail };
 }
 
