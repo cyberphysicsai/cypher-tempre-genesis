@@ -54,11 +54,15 @@ export function chatToolAccess(snapshot, { connected, agentId, agentName, memory
   const scoped = hostOn ? rows.filter(row => row.selected) : [];
   const savedCount = hostOn && Array.isArray(grant.tools) ? new Set(grant.tools).size : 0;
   const directoryCount = Array.isArray(grant.roots) ? grant.roots.length : 0;
+  const directoryStatus = snapshot.toolDirectories;
+  const unavailableDirectories = Number.isSafeInteger(directoryStatus?.unavailable) &&
+    directoryStatus.unavailable >= 0 && directoryStatus.unavailable <= directoryCount ? directoryStatus.unavailable : 0;
+  const availableDirectories = directoryCount - unavailableDirectories;
   const hostCount = Array.isArray(grant.networkHosts) ? grant.networkHosts.length : 0;
   const shell = hostOn && grant.allowExecution === true && scoped.some(row => row.name === 'exec' || row.name === 'process');
   const browserReady = ['available', 'installed'].includes(snapshot?.browserRuntime?.state);
   const usable = scoped.filter(({name, available}) => available
-    && (!['read', 'write', 'edit'].includes(name) || directoryCount > 0)
+    && (!['read', 'write', 'edit'].includes(name) || availableDirectories > 0)
     && (!['web_fetch', 'browser'].includes(name) || hostCount > 0)
     && (name !== 'browser' || browserReady)
     && (!['exec', 'process'].includes(name) || shell));
@@ -70,6 +74,8 @@ export function chatToolAccess(snapshot, { connected, agentId, agentName, memory
   if (!savedCount && !nativeCount) return { status: 'Tools off', detail };
   if (runtimeReady !== true) return { status: 'Grants saved · runtime unavailable', detail: `${detail} Saved grants are not ready to run: check local runtime health.` };
   if (modelConfigured === false) return { status: 'Grants saved · select a model', detail: `${detail} Connect a model before requesting a tool action.` };
+  if (unavailableDirectories) return { status: 'Project directory needs attention',
+    detail: `${detail} ${unavailableDirectories} saved project ${unavailableDirectories === 1 ? 'directory is' : 'directories are'} unavailable or changed. Update the paths and apply permissions in Tool access.` };
   if (usable.length < savedCount) return { status: 'Some tool grants need setup', detail };
   if (!savedCount && nativeCount) return { status: 'Native grants only · exec off', detail };
   return { status: `${savedCount + nativeCount} tool grants saved`, detail };
@@ -81,6 +87,8 @@ export function chatToolActivity(activity, fresh) {
     if (event.ability === 'operation' && event.status === 'started') break;
     if (typeof event.label !== 'string') continue;
     if (event.ability === 'tool') {
+      if (event.status === 'held' && event.label === 'An approved project directory is unavailable or changed. Update the directory and apply permissions in Tool access.')
+        return 'Project directory needs attention · open Tool access';
       const result = /^Tool ([A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}) (started|completed|failed|held)$/.exec(event.label);
       if (result && result[2] === event.status) return `${result[1]} · ${TOOL_OUTCOME.get(event.status)}`;
     }

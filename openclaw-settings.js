@@ -227,8 +227,9 @@ function nativeSourceRow(value) {
 }
 export function nativeSourceView(value) {
   const agents = new Map(), sources = new Map(), channels = new Map(), sessions = new Map();
+  const heartbeatRetired = value?.available?.heartbeatRetired === true;
   for (const row of (Array.isArray(value?.available?.agents) ? value.available.agents : []).slice(0, 1024)) {
-    if (nativeSourceAgent(row?.id)) agents.set(row.id, { id: row.id, name: nativeSourceLabel(row.name) || row.id, heartbeat: row.heartbeat === true });
+    if (nativeSourceAgent(row?.id)) agents.set(row.id, { id: row.id, name: nativeSourceLabel(row.name) || row.id, heartbeat: !heartbeatRetired && row.heartbeat === true });
   }
   for (const row of (Array.isArray(value?.available?.channels) ? value.available.channels : []).slice(0, 1024)) {
     if (!nativeSourceOpaque(row?.channelId) || !nativeSourceOpaque(row.accountId)) continue;
@@ -243,10 +244,13 @@ export function nativeSourceView(value) {
     const source = nativeSourceRow(row);
     if (source && typeof row.id === 'string' && /^[a-f0-9]{64}$/.test(row.id)) sources.set(row.id, { id: row.id, ...source });
   }
-  return { agents: [...agents.values()], channels: [...channels.values()], sessions: [...sessions.values()], sources: [...sources.values()] };
+  return { agents: [...agents.values()], channels: [...channels.values()], sessions: [...sessions.values()], sources: [...sources.values()],
+    heartbeatRetired };
 }
 export function nativeSourceEnrollment(source, available) {
   const selected = nativeSourceRow(source), view = nativeSourceView({ available });
+  if (selected?.kind === 'heartbeat' && view.heartbeatRetired)
+    throw new Error('OpenClaw retired Heartbeat. Open Schedules to set up a reviewed recurring task.');
   if (!selected || !view.agents.some(row => row.id === selected.agentId)) throw new Error('Choose a configured native agent from the refreshed list.');
   if (selected.kind === 'channel' && !view.channels.some(row => row.channelId === selected.channelId && row.accountId === selected.accountId) ||
       selected.kind === 'heartbeat' && !view.agents.some(row => row.id === selected.agentId && row.heartbeat) ||
@@ -262,19 +266,25 @@ export function nativeHeartbeatScratch(value, source) {
     throw new Error('The native heartbeat notes do not match the selected enrolled source.');
   return {sourceId: source.id, agentId: source.agentId, content: value.content, currentRevision: value.currentRevision, maxBytes: value.maxBytes};
 }
-export function mountNativeSourceCard({ document: doc, mount, api, context = () => '' }) {
+export function mountNativeSourceCard({ document: doc, mount, api, context = () => '', openSchedules = () => {} }) {
   const make = (tag, content = '', className = '') => { const node = doc.createElement(tag); node.textContent = content; node.className = className; return node; };
   const card = make('section', '', 'native-card native-source-card'); card.id = 'nativeSourceCard';
   card.append(make('h2', 'Native run source enrollment'), make('p', 'Bind an existing native source to the selected Timechain. Enrollment does not start it or grant extra tools. Each independent run still needs current owner authority, a verified chain and fresh PoI review. Native tools retain OpenClaw host privileges.'));
   card.append(make('p', 'Native API credentials and explicit background grants can admit enrolled sources while this browser is disconnected. Direct API tasks require a live provider session. Pausing parent memory, disabling background permission or revoking enrollment stops new admission. Native API keys stay in local OpenClaw when the browser disconnects.', 'fine-print'));
   const status = make('p', '', 'native-capability-status'); status.id = 'nativeSourcesStatus'; status.setAttribute('role', 'status');
+  const retirement = make('div', '', 'fine-print'); retirement.id = 'retiredNativeHeartbeatNotice'; retirement.hidden = true;
+  retirement.append(make('p', 'OpenClaw retired Heartbeat. Open Schedules to set up a reviewed recurring task for this Timechain. Old Heartbeat enrollments are inactive and can be revoked.'));
+  const scheduleButton = make('button', 'Open Schedules', 'secondary-button'); scheduleButton.type = 'button';
+  scheduleButton.addEventListener('click', openSchedules); retirement.append(scheduleButton);
   const refresh = make('button', 'Refresh configured native sources', 'secondary-button'); refresh.type = 'button'; refresh.id = 'refreshNativeSources';
   const form = make('form'), fields = make('fieldset', '', 'native-capability-controls'); form.id = 'nativeSourceForm';
   fields.append(make('legend', 'Enroll a verified native source', 'sr-only'));
   function select(id, label) { const holder = make('label', label, 'field'), input = make('select'); input.id = id; holder.append(input); fields.append(holder); return { holder, input }; }
   const kind = select('nativeSourceKind', 'Source kind'), agent = select('nativeSourceAgent', 'Configured native agent'), target = select('nativeSourceTarget', 'Configured source');
+  let heartbeatOption;
   for (const [value, label] of [['channel', 'Channel account'], ['heartbeat', 'Heartbeat'], ['background', 'Existing background session']]) {
     const option = make('option', label); option.value = value; kind.input.append(option);
+    if (value === 'heartbeat') heartbeatOption = option;
   }
   kind.input.value = 'channel';
   const explanation = make('p', '', 'fine-print'); fields.append(explanation);
@@ -294,7 +304,7 @@ export function mountNativeSourceCard({ document: doc, mount, api, context = () 
   const scratchClose = make('button', 'Close notes', 'text-button'); scratchClose.type = 'button'; scratchClose.id = 'closeNativeHeartbeatScratch';
   scratchActions.append(scratchSave, scratchRefresh, scratchConfigured, scratchClose); scratchForm.append(scratchLabel, scratchActions);
   scratch.append(scratchTitle, make('p', 'A heartbeat needs monitor notes or a configured prompt to perform scheduled model work. Saving empty notes skips that work. Use configured prompt removes this note override. Notes grant no tools; each scheduled agent turn still needs current enrollment, an owner background grant and PoI review.', 'fine-print'), scratchStatus, scratchForm);
-  card.append(status, refresh, form, make('h3', 'Enrolled sources'), list, scratch); mount.append(card);
+  card.append(status, retirement, refresh, form, make('h3', 'Enrolled sources'), list, scratch); mount.append(card);
   let view = nativeSourceView(null), ready = false, permitted = false, busy = false, loaded = false, epoch = 0, owner = context();
   let scratchSource = null, scratchRevision = null, scratchMaxBytes = 262144;
   function options(input, entries, placeholder, selected = input.value) {
@@ -323,6 +333,10 @@ export function mountNativeSourceCard({ document: doc, mount, api, context = () 
     scratchConfigured.disabled = scratchSave.disabled; scratchRefresh.disabled = !ready || busy || !scratchSource; scratchClose.disabled = busy;
   }
   function targets() {
+    heartbeatOption.hidden = view.heartbeatRetired;
+    heartbeatOption.disabled = view.heartbeatRetired;
+    retirement.hidden = !view.heartbeatRetired;
+    if (view.heartbeatRetired && kind.input.value === 'heartbeat') kind.input.value = 'channel';
     options(target.input, candidates(), kind.input.value === 'channel' ? 'Choose a configured channel account' : 'Choose an existing native session');
     target.holder.hidden = kind.input.value === 'heartbeat';
     const eligible = view.agents.find(row => row.id === agent.input.value)?.heartbeat === true;
@@ -337,21 +351,22 @@ export function mountNativeSourceCard({ document: doc, mount, api, context = () 
     if (!view.sources.length) list.append(make('p', loaded ? 'No native run sources are enrolled for this Timechain.' : 'Refresh to inspect this Timechain’s enrolled sources.', 'fine-print'));
     for (const source of view.sources) {
       const row = make('article', '', 'native-service-row'); row.append(make('h4', `${source.kind} · ${source.agentId}`));
+      const inactive = source.kind === 'heartbeat' && view.heartbeatRetired;
       row.append(make('p', source.kind === 'channel' ? `${source.channelId} / ${source.accountId}` : source.kind === 'background' ? source.nativeSessionKey : 'Configured native heartbeat'));
-      row.append(make('p', 'Enrolled binding · execution and every action remain independently reviewed.', 'fine-print'));
+      row.append(make('p', inactive ? 'Inactive · this OpenClaw version retired Heartbeat.' : 'Enrolled binding · execution and every action remain independently reviewed.', 'fine-print'));
       const revoke = make('button', 'Revoke this source enrollment', 'text-button'); revoke.type = 'button'; revoke.dataset.nativeSourceId = source.id;
       revoke.addEventListener('click', () => request({ action: 'revoke', id: source.id }, 'Source enrollment revoked. This does not stop or erase its native session.'));
       row.append(revoke); list.append(row);
-      if (source.kind === 'heartbeat') {
+      if (source.kind === 'heartbeat' && !inactive) {
         const edit = make('button', 'Edit heartbeat monitor notes', 'text-button'); edit.type = 'button'; edit.dataset.nativeScratchSource = source.id;
         edit.addEventListener('click', () => openScratch(source)); row.append(edit);
       }
     }
   }
   function accept(result) {
-    const available = result?.available ? result.available : { agents: view.agents, channels: view.channels, sessions: view.sessions };
+    const available = result?.available || view;
     view = nativeSourceView({ sources: result?.sources, available }); loaded = true;
-    if (scratchSource && !view.sources.some(source => source.id === scratchSource.id && source.kind === 'heartbeat')) closeScratch();
+    if (scratchSource && (view.heartbeatRetired || !view.sources.some(source => source.id === scratchSource.id && source.kind === 'heartbeat'))) closeScratch();
     options(agent.input, view.agents.map(row => ({ value: row.id, label: `${row.name}${row.heartbeat ? ' · heartbeat configured' : ''}` })), 'Choose a configured native agent');
     consent.checked = false; renderList(); targets();
   }
@@ -371,12 +386,12 @@ export function mountNativeSourceCard({ document: doc, mount, api, context = () 
   }
   function closeScratch() { scratchSource = null; scratchRevision = null; scratchNotes.value = ''; scratchStatus.textContent = ''; scratch.hidden = true; }
   function openScratch(source) {
-    if (!ready || busy || source.kind !== 'heartbeat' || !view.sources.some(row => row.id === source.id && row.kind === 'heartbeat')) return;
+    if (!ready || busy || view.heartbeatRetired || source.kind !== 'heartbeat' || !view.sources.some(row => row.id === source.id && row.kind === 'heartbeat')) return;
     scratchSource = source; scratchRevision = null; scratchNotes.value = ''; scratch.hidden = false; scratchTitle.textContent = `Heartbeat monitor notes · ${source.agentId}`;
     return requestScratch('scratch-get');
   }
   async function requestScratch(action, content) {
-    if (!ready || busy || !scratchSource || action === 'scratch-set' && (!permitted || scratchRevision === null)) return;
+    if (!ready || busy || view.heartbeatRetired || !scratchSource || action === 'scratch-set' && (!permitted || scratchRevision === null)) return;
     if (action === 'scratch-set' && content !== null && (typeof content !== 'string' || new TextEncoder().encode(content).length > scratchMaxBytes || content.includes('\0'))) {
       scratchStatus.textContent = `Use at most ${scratchMaxBytes} UTF-8 bytes of monitor notes.`; return;
     }
@@ -883,7 +898,9 @@ export function initOpenClawSettings({ api, requireConnection, executeCommand, i
   nativeCapabilityControls = mountNativeCapabilityCard({ document: doc, mount: $('nativeToolsForm').parentElement,
     api, onSaved: refresh, onError: error, context: () => connectionRevision });
   nativeSourceControls = mountNativeSourceCard({ document: doc, mount: $('nativeToolsForm').parentElement,
-    api, context: () => connectionRevision });
+    api, context: () => connectionRevision, openSchedules: () => {
+      section('schedules'); doc.querySelector('[data-native-tab="schedules"]')?.focus?.();
+    } });
   nativeSecretControls = mountNativeSecretCard({ document: doc, mount: $('nativeToolsForm').parentElement,
     api, context: () => connectionRevision });
   $('nativeScheduleTimezone').value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
